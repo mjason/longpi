@@ -67,7 +67,15 @@ export default function ChatApp() {
           }}
         />
         {selected ? (
-          <ConversationPane key={selected.id} conversation={selected} />
+          <ConversationPane
+            key={selected.id}
+            conversation={selected}
+            onModelChanged={(id, model) =>
+              setConversations((prev) =>
+                prev.map((c) => (c.id === id ? { ...c, model } : c)),
+              )
+            }
+          />
         ) : (
           <main className="grid flex-1 place-items-center">
             <div className="max-w-sm text-center">
@@ -205,9 +213,28 @@ function Sidebar(props: {
   );
 }
 
-function ConversationPane({ conversation }: { conversation: ConversationSummary }) {
-  const { runtime, pendingApprovals, respondApproval, compactionCount, notices, usage } =
-    useChannelRuntime(conversation.id);
+function ConversationPane({
+  conversation,
+  onModelChanged,
+}: {
+  conversation: ConversationSummary;
+  onModelChanged: (id: string, model: string) => void;
+}) {
+  const {
+    runtime,
+    pendingApprovals,
+    respondApproval,
+    compactionCount,
+    notices,
+    usage,
+    currentModel,
+    setModel,
+  } = useChannelRuntime(conversation.id, conversation.model);
+
+  // Keep the sidebar label in sync when the model changes via /model.
+  useEffect(() => {
+    if (currentModel !== conversation.model) onModelChanged(conversation.id, currentModel);
+  }, [currentModel]);
 
   // Show the most recent notice briefly (command echoes, errors, interrupts).
   const [toast, setToast] = useState<{ tone: "error" | "info"; text: string } | null>(null);
@@ -226,7 +253,7 @@ function ConversationPane({ conversation }: { conversation: ConversationSummary 
           <div className="min-w-0">
             <h1 className="truncate text-sm font-semibold">{conversationLabel(conversation)}</h1>
             <p className="truncate font-mono text-xs text-muted-foreground">
-              {conversation.cwd} · {conversation.model}
+              {conversation.cwd} · {currentModel}
             </p>
           </div>
           <div className="flex-1" />

@@ -196,6 +196,7 @@ defmodule Longpi.Agent.Session do
   def handle_call({:set_model, spec}, _from, state) do
     persist_model(state.conversation_id, spec)
     state = %{state | model: spec}
+    state = notify(state, {:model_changed, spec})
     # Push the new window immediately so the usage meter reflects it.
     {:reply, {:ok, spec}, notify(state, {:context_usage, context_usage_payload(state)})}
   end

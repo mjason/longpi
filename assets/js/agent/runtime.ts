@@ -4,6 +4,7 @@ import {
   useExternalStoreRuntime,
 } from "@assistant-ui/react";
 import { useConversationChannel } from "./channel";
+import { slashCommandHelp } from "./slashCommands";
 import type { ThreadItem } from "./types";
 
 /**
@@ -15,7 +16,7 @@ import type { ThreadItem } from "./types";
  * to assistant-ui's message shape and forwards new user messages to the
  * channel.
  */
-export function useChannelRuntime(conversationId: string) {
+export function useChannelRuntime(conversationId: string, defaultModel: string) {
   const {
     items,
     status,
@@ -24,11 +25,16 @@ export function useChannelRuntime(conversationId: string) {
     regenerate,
     respondApproval,
     runCommand,
+    setModel,
+    showNotice,
     pendingApprovals,
     compactionCount,
     notices,
     usage,
+    model,
   } = useConversationChannel(conversationId);
+
+  const currentModel = model ?? defaultModel;
 
   const messages = itemsToMessages(items);
 
@@ -46,9 +52,21 @@ export function useChannelRuntime(conversationId: string) {
       // Slash commands go to the command channel instead of being sent as a
       // message. Extensible: add cases as commands are added.
       if (trimmed.startsWith("/")) {
-        const name = trimmed.slice(1).split(/\s+/)[0].toLowerCase();
-        // Known or not, route to the command channel; the server replies
-        // "unknown command" for anything it doesn't handle, shown as a notice.
+        const [rawName, ...rest] = trimmed.slice(1).split(/\s+/);
+        const name = rawName.toLowerCase();
+        const arg = rest.join(" ").trim();
+
+        if (name === "help") {
+          showNotice("info", slashCommandHelp());
+          return;
+        }
+        if (name === "model") {
+          if (arg) setModel(arg);
+          else showNotice("info", `Current model: ${currentModel}`);
+          return;
+        }
+        // compact and anything else route to the command channel; the server
+        // replies "unknown command" for what it doesn't handle.
         runCommand(name);
         return;
       }
@@ -62,7 +80,16 @@ export function useChannelRuntime(conversationId: string) {
     convertMessage: (message: ThreadMessageLike) => message,
   });
 
-  return { runtime, pendingApprovals, respondApproval, compactionCount, notices, usage };
+  return {
+    runtime,
+    pendingApprovals,
+    respondApproval,
+    compactionCount,
+    notices,
+    usage,
+    currentModel,
+    setModel,
+  };
 }
 
 type AssistantPart = Extract<ThreadMessageLike["content"], readonly unknown[]>[number];

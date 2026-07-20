@@ -71,6 +71,20 @@ defmodule LongpiWeb.ConversationChannelTest do
     assert is_integer(window) and window > 0
   end
 
+  test "set_model switches the model, broadcasts it, and updates the window", %{
+    socket: socket,
+    conversation: conversation
+  } do
+    ref = push(socket, "set_model", %{"spec" => "openai:gpt-5.4"})
+    assert_reply ref, :ok, %{model: "openai:gpt-5.4"}
+
+    assert_push "model_changed", %{model: "openai:gpt-5.4"}
+    assert_push "context_usage", %{window: 1_050_000}
+
+    {:ok, reloaded} = Longpi.Agent.get_conversation(conversation.id)
+    assert reloaded.model == "openai:gpt-5.4"
+  end
+
   test "join reply carries the current context usage", %{conversation: conversation} do
     {:ok, reply, _socket} =
       LongpiWeb.UserSocket

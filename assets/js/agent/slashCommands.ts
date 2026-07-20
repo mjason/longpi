@@ -16,6 +16,15 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     name: "compact",
     summary: "Summarize older messages to free up context",
   },
+  {
+    name: "model",
+    summary: "Switch the model, e.g. /model openai:gpt-5.4",
+    takesArgs: true,
+  },
+  {
+    name: "help",
+    summary: "List the available commands",
+  },
 ];
 
 export const SLASH_COMMAND_NAMES = SLASH_COMMANDS.map((c) => c.name);
@@ -25,6 +34,11 @@ export const SLASH_COMMAND_NAMES = SLASH_COMMANDS.map((c) => c.name);
  * the text is not a bare slash-command token (e.g. it has a space, so the
  * command is already chosen and the user is typing arguments).
  */
+/** One-line help listing every command, for the /help command. */
+export function slashCommandHelp(): string {
+  return SLASH_COMMANDS.map((c) => `/${c.name} — ${c.summary}`).join("   ·   ");
+}
+
 export function matchSlashCommands(text: string): SlashCommand[] | null {
   const match = /^\/(\w*)$/.exec(text);
   if (!match) return null;

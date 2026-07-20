@@ -74,6 +74,9 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   channel.on("context_usage", (p: { used: number | null; window: number; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "context_usage", used: p.used, window: p.window })),
   );
+  channel.on("model_changed", (p: { model: string; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "model_changed", model: p.model })),
+  );
   channel.on("turn_ended", (p: { reason: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "turn_ended", reason: p.reason })),
   );
@@ -106,10 +109,17 @@ type JoinReply = {
   context_usage?: ContextUsage;
 };
 
-type State = { items: ThreadItem[]; status: SessionStatus; usage: ContextUsage | null };
+type State = {
+  items: ThreadItem[];
+  status: SessionStatus;
+  usage: ContextUsage | null;
+  // Model override from a live /model switch; null = use the conversation's own.
+  model: string | null;
+};
 
 type Action =
   | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage }
+  | { type: "model_changed"; model: string }
   | { type: "text_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; id: string; content: string; error: boolean }
@@ -170,7 +180,10 @@ function settle(items: ThreadItem[]): ThreadItem[] {
 function reduce(state: State, action: Action): State {
   switch (action.type) {
     case "reset":
-      return { items: [], status: "connecting", usage: null };
+      return { items: [], status: "connecting", usage: null, model: null };
+
+    case "model_changed":
+      return { ...state, model: action.model };
 
     case "joined":
       return {
@@ -254,7 +267,12 @@ function reduce(state: State, action: Action): State {
 }
 
 export function useConversationChannel(conversationId: string | null) {
-  const [state, dispatch] = useReducer(reduce, { items: [], status: "connecting", usage: null });
+  const [state, dispatch] = useReducer(reduce, {
+    items: [],
+    status: "connecting",
+    usage: null,
+    model: null,
+  });
   const channelRef = useRef<Channel | null>(null);
 
   useEffect(() => {
@@ -312,6 +330,25 @@ export function useConversationChannel(conversationId: string | null) {
     channelRef.current?.push("permission_response", { id, approved });
   }
 
+  function showNotice(tone: "error" | "info", text: string) {
+    dispatch({ type: "notice", tone, text });
+  }
+
+  function setModel(spec: string) {
+    channelRef.current
+      ?.push("set_model", { spec })
+      .receive("error", (reply: { reason: string }) =>
+        dispatch({
+          type: "notice",
+          tone: "error",
+          text:
+            reply.reason === "busy"
+              ? "Can't switch model while the agent is working - interrupt it first."
+              : reply.reason,
+        }),
+      );
+  }
+
   function runCommand(name: string) {
     dispatch({ type: "notice", tone: "info", text: `/${name}` });
     channelRef.current
@@ -339,6 +376,8 @@ export function useConversationChannel(conversationId: string | null) {
     regenerate,
     respondApproval,
     runCommand,
+    setModel,
+    showNotice,
     pendingApprovals,
     compactionCount,
     notices,

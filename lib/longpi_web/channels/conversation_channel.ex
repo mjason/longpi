@@ -68,12 +68,8 @@ defmodule LongpiWeb.ConversationChannel do
 
   def handle_in("set_model", %{"spec" => spec}, socket) when is_binary(spec) do
     case Session.set_model(socket.assigns.session, String.trim(spec)) do
-      {:ok, model} ->
-        broadcast!(socket, "model_changed", %{model: model})
-        {:reply, {:ok, %{model: model}}, socket}
-
-      {:error, reason} ->
-        {:reply, {:error, %{reason: to_string(reason)}}, socket}
+      {:ok, model} -> {:reply, {:ok, %{model: model}}, socket}
+      {:error, reason} -> {:reply, {:error, %{reason: to_string(reason)}}, socket}
     end
   end
 
@@ -139,6 +135,8 @@ defmodule LongpiWeb.ConversationChannel do
 
   defp serialize_event({:context_usage, %{used: used, window: window}}),
     do: {"context_usage", %{used: used, window: window}}
+
+  defp serialize_event({:model_changed, model}), do: {"model_changed", %{model: model}}
 
   defp serialize_event({:history, messages}),
     do: {"history", %{messages: Enum.map(messages, &serialize_message/1)}}
