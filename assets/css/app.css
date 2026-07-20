@@ -245,3 +245,12 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 }
+
+/* Streamdown renders its code-block action buttons inside a bordered,
+   sidebar-tinted pill. Upstream that pill blends into the theme; our sidebar
+   color makes it a visible box. Match the upstream look: bare icons. */
+[data-streamdown="code-block-actions"] {
+  border-color: transparent;
+  background-color: transparent;
+  backdrop-filter: none;
+}
