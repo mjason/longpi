@@ -124,7 +124,12 @@ const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
       <ThreadPrimitive.Viewport
         turnAnchor="top"
         data-slot="aui_thread-viewport"
-        className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
+        className={cn(
+          "relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll",
+          // Smooth scroll is nice for messages, but on the centered empty view
+          // it animates every reflow (typing toggles suggestions) into a shake.
+          !isEmpty && "scroll-smooth",
+        )}
       >
         <div
           className={cn(
@@ -155,9 +160,6 @@ const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
             <ThreadScrollToBottom />
             <ThreadFollowupSuggestions />
             <Composer />
-            <AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}>
-              <ThreadSuggestions />
-            </AuiIf>
           </ThreadPrimitive.ViewportFooter>
         </div>
       </ThreadPrimitive.Viewport>
