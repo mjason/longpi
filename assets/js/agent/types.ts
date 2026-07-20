@@ -21,7 +21,8 @@ export type ThreadItem =
       // Set while the tool is waiting for the user to approve/reject it.
       awaitingApproval?: boolean;
     }
-  | { kind: "notice"; tone: "error" | "info"; text: string };
+  | { kind: "notice"; tone: "error" | "info"; text: string }
+  | { kind: "compaction"; coveredThrough: number };
 
 export type SessionStatus = "connecting" | "idle" | "running";
 

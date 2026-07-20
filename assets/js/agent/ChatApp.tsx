@@ -1,5 +1,5 @@
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import { Loader2, Plus, Settings, ShieldAlert } from "lucide-react";
+import { Layers, Loader2, Plus, Settings, ShieldAlert } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { buildCSRFHeaders, createConversation, listConversations } from "../ash_rpc";
 import { TooltipProvider } from "../components/ui/tooltip";
@@ -180,7 +180,9 @@ function Sidebar(props: {
 }
 
 function ConversationPane({ conversation }: { conversation: ConversationSummary }) {
-  const { runtime, pendingApprovals, respondApproval } = useChannelRuntime(conversation.id);
+  const { runtime, pendingApprovals, respondApproval, compactionCount } = useChannelRuntime(
+    conversation.id,
+  );
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -192,6 +194,16 @@ function ConversationPane({ conversation }: { conversation: ConversationSummary 
               {conversation.cwd} · {conversation.model}
             </p>
           </div>
+          <div className="flex-1" />
+          {compactionCount > 0 && (
+            <span
+              className="flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs text-muted-foreground"
+              title="Older messages have been summarized to fit the model's context window. The full history is still stored."
+            >
+              <Layers className="size-3.5" />
+              context compacted{compactionCount > 1 ? ` ×${compactionCount}` : ""}
+            </span>
+          )}
         </header>
 
         <div className="min-h-0 flex-1">

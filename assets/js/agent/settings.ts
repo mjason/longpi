@@ -18,6 +18,8 @@ export const SETTING_KEYS = {
   systemPrompt: "system_prompt",
   defaultModel: "default_model",
   approvalLevel: "approval_level",
+  compactionEnabled: "compaction_enabled",
+  compactionRatio: "compaction_ratio",
 } as const;
 
 export const APPROVAL_LEVELS = [

@@ -107,6 +107,12 @@ defmodule LongpiWeb.ConversationChannel do
   defp serialize_event({:approval_request, call}),
     do: {"approval_request", %{id: call.id, name: call.name, args: call.args}}
 
+  defp serialize_event({:compaction_started}), do: {"compaction_started", %{}}
+  defp serialize_event({:compaction_ended}), do: {"compaction_ended", %{}}
+
+  defp serialize_event({:compacted, %{covered_through: covered}}),
+    do: {"compacted", %{covered_through: covered}}
+
   defp serialize_event({:usage, usage}), do: {"usage", %{usage: usage}}
 
   defp serialize_event({:history, messages}),

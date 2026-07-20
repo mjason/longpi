@@ -20,7 +20,7 @@ defmodule Longpi.Agent.Session do
 
   use GenServer, restart: :temporary
 
-  alias Longpi.Agent.{ConversationMessage, Message, SystemPrompt, Toolbox, Turn}
+  alias Longpi.Agent.{Compactor, ConversationMessage, Message, SystemPrompt, Toolbox, Turn}
 
   # Client
 
@@ -83,7 +83,12 @@ defmodule Longpi.Agent.Session do
        conversation_id: opts[:conversation_id],
        persisted_count: length(history),
        seq: 0,
-       pending_approvals: %{}
+       pending_approvals: %{},
+       # Context compaction: the latest checkpoint (nil = none), the last
+       # turn's prompt-token usage, and the running compaction task.
+       compaction: load_compaction(opts[:conversation_id]),
+       last_input_tokens: nil,
+       compaction_task: nil
      }}
   end
 
@@ -100,8 +105,21 @@ defmodule Longpi.Agent.Session do
     {conversation, history}
   end
 
+  defp load_compaction(nil), do: nil
+
+  defp load_compaction(conversation_id) do
+    case Longpi.Agent.latest_compaction(conversation_id) do
+      {:ok, [%{summary: summary, covered_through: covered}]} ->
+        %{summary: summary, covered_through: covered}
+
+      _ ->
+        nil
+    end
+  end
+
   @impl true
-  def handle_call({:send_message, _text}, _from, %{status: :running} = state) do
+  def handle_call({:send_message, _text}, _from, %{status: status} = state)
+      when status in [:running, :compacting] do
     {:reply, {:error, :busy}, state}
   end
 
@@ -112,7 +130,8 @@ defmodule Longpi.Agent.Session do
     {:reply, :ok, run_turn(%{state | messages: messages}, messages)}
   end
 
-  def handle_call(:regenerate, _from, %{status: :running} = state) do
+  def handle_call(:regenerate, _from, %{status: status} = state)
+      when status in [:running, :compacting] do
     {:reply, {:error, :busy}, state}
   end
 
@@ -156,6 +175,7 @@ defmodule Longpi.Agent.Session do
 
     case event do
       {:text_delta, text} -> {:noreply, %{state | partial: [state.partial | text]}}
+      {:usage, usage} -> {:noreply, %{state | last_input_tokens: input_tokens(usage)}}
       _ -> {:noreply, state}
     end
   end
@@ -190,7 +210,7 @@ defmodule Longpi.Agent.Session do
         state = persist(state, new_messages)
         state = %{state | messages: state.messages ++ new_messages}
         state = notify(state, {:turn_ended, :complete})
-        {:noreply, state}
+        {:noreply, maybe_start_compaction(state)}
 
       {:error, reason, new_messages} ->
         state = persist(state, new_messages)
@@ -198,6 +218,12 @@ defmodule Longpi.Agent.Session do
         state = notify(state, {:turn_failed, reason})
         {:noreply, state}
     end
+  end
+
+  # Compaction task finished
+  def handle_info({ref, result}, %{compaction_task: %Task{ref: ref}} = state) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, apply_compaction(%{state | compaction_task: nil, status: :idle}, result)}
   end
 
   # Turn task crashed
@@ -208,7 +234,22 @@ defmodule Longpi.Agent.Session do
     {:noreply, state}
   end
 
+  # Compaction task crashed: fall back to a truncation checkpoint so context
+  # still shrinks and the session isn't wedged.
+  def handle_info(
+        {:DOWN, ref, :process, _pid, _reason},
+        %{compaction_task: %Task{ref: ref}} = state
+      ) do
+    {:noreply, apply_compaction(%{state | compaction_task: nil, status: :idle}, :fallback)}
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
+
+  defp input_tokens(usage) when is_map(usage) do
+    usage[:input_tokens] || usage["input_tokens"] || usage[:total_tokens] || usage["total_tokens"]
+  end
+
+  defp input_tokens(_), do: nil
 
   defp keep_partial_text(state) do
     case IO.iodata_to_binary(state.partial) do
@@ -224,7 +265,7 @@ defmodule Longpi.Agent.Session do
 
   @approval_timeout 5 * 60_000
 
-  defp run_turn(state, messages) do
+  defp run_turn(state, _messages) do
     session = self()
 
     config = %{
@@ -236,12 +277,113 @@ defmodule Longpi.Agent.Session do
       authorize: fn call -> authorize(session, call) end
     }
 
+    # The LLM sees the compacted context ([system, summary, recent]); the full
+    # history stays in state.messages for the UI and future compactions.
+    context = llm_context(state)
+
     task =
       Task.Supervisor.async_nolink(Longpi.Agent.TaskSupervisor, fn ->
-        Turn.run(config, messages)
+        Turn.run(config, context)
       end)
 
     %{state | status: :running, task: task, partial: []}
+  end
+
+  # ── Context compaction ────────────────────────────────────────────────
+
+  defp llm_context(%{messages: [system | history], compaction: nil}), do: [system | history]
+
+  defp llm_context(%{messages: [system | history], compaction: %{summary: s, covered_through: c}}) do
+    kept = Enum.drop(history, min(c, length(history)))
+    [system, Compactor.summary_message(s) | kept]
+  end
+
+  defp maybe_start_compaction(%{conversation_id: nil} = state), do: state
+
+  defp maybe_start_compaction(state) do
+    covered = covered_through(state)
+    [_system | history] = state.messages
+    coverable = Enum.drop(history, covered)
+
+    cond do
+      not Longpi.Agent.ContextWindow.enabled?() -> state
+      not over_threshold?(state) -> state
+      length(coverable) < 2 -> state
+      true -> start_compaction(state, coverable, covered)
+    end
+  end
+
+  defp over_threshold?(%{last_input_tokens: nil}), do: false
+
+  defp over_threshold?(state) do
+    state.last_input_tokens > Longpi.Agent.ContextWindow.compaction_threshold(state.model)
+  end
+
+  defp covered_through(%{compaction: %{covered_through: c}}), do: c
+  defp covered_through(_state), do: 0
+
+  defp start_compaction(state, coverable, covered) do
+    llm = state.llm
+    model = state.model
+    keep = Longpi.Agent.ContextWindow.keep_tokens(model)
+    prev = state.compaction && state.compaction.summary
+    input = state.last_input_tokens
+
+    task =
+      Task.Supervisor.async_nolink(Longpi.Agent.TaskSupervisor, fn ->
+        case Compactor.plan(coverable, keep) do
+          {[], _} ->
+            :skip
+
+          {to_summarize, _keep} ->
+            new_covered = covered + length(to_summarize)
+
+            case Compactor.summarize(llm, model, to_summarize, prev) do
+              {:ok, summary} -> {:ok, summary, new_covered, input}
+              {:error, _} -> {:fallback, new_covered, input}
+            end
+        end
+      end)
+
+    state = notify(state, {:compaction_started})
+    %{state | status: :compacting, compaction_task: task}
+  end
+
+  @fallback_summary "[Earlier messages were dropped to fit the model's context window.]"
+
+  defp apply_compaction(state, :skip), do: notify(state, {:compaction_ended})
+
+  defp apply_compaction(state, {:ok, summary, covered, input}),
+    do: do_compact(state, summary, covered, input)
+
+  defp apply_compaction(state, {:fallback, covered, input}),
+    do: do_compact(state, @fallback_summary, covered, input)
+
+  # Crash fallback: recompute a cut point and truncate without a summary.
+  defp apply_compaction(state, :fallback) do
+    covered = covered_through(state)
+    [_system | history] = state.messages
+    coverable = Enum.drop(history, covered)
+
+    case Compactor.plan(coverable, Longpi.Agent.ContextWindow.keep_tokens(state.model)) do
+      {[], _} ->
+        notify(state, {:compaction_ended})
+
+      {to_summarize, _} ->
+        do_compact(state, @fallback_summary, covered + length(to_summarize), nil)
+    end
+  end
+
+  defp do_compact(state, summary, covered, input) do
+    Longpi.Agent.create_compaction!(%{
+      conversation_id: state.conversation_id,
+      summary: summary,
+      covered_through: covered,
+      input_tokens: input
+    })
+
+    state = %{state | compaction: %{summary: summary, covered_through: covered}}
+    notify(state, {:compacted, %{covered_through: covered}})
   end
 
   # Runs in the Turn task. For `:ask` tools it asks the Session to broadcast an

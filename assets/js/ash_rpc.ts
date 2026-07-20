@@ -587,6 +587,7 @@ export type CreateModelInput = {
   label?: string | null;
   enabled?: boolean;
   position?: number;
+  contextWindow?: number | null;
 };
 
 export type CreateModelFields = UnifiedFieldSelection<ModelResourceSchema>[];
@@ -856,6 +857,7 @@ export type UpdateModelInput = {
   label?: string | null;
   enabled?: boolean;
   position?: number;
+  contextWindow?: number | null;
 };
 
 export type UpdateModelFields = UnifiedFieldSelection<ModelResourceSchema>[];

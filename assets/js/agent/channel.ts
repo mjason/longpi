@@ -68,6 +68,9 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   channel.on("approval_request", (p: { id: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "approval_request", id: p.id })),
   );
+  channel.on("compacted", (p: { covered_through: number; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "compacted", coveredThrough: p.covered_through })),
+  );
   channel.on("turn_ended", (p: { reason: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "turn_ended", reason: p.reason })),
   );
@@ -99,6 +102,7 @@ type Action =
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; id: string; content: string; error: boolean }
   | { type: "approval_request"; id: string }
+  | { type: "compacted"; coveredThrough: number }
   | { type: "user_sent"; text: string }
   | { type: "turn_ended"; reason: string }
   | { type: "turn_failed"; reason: string }
@@ -205,6 +209,12 @@ function reduce(state: State, action: Action): State {
         ),
       };
 
+    case "compacted":
+      return {
+        ...state,
+        items: [...state.items, { kind: "compaction", coveredThrough: action.coveredThrough }],
+      };
+
     case "turn_ended": {
       const items = settle(state.items);
       if (action.reason === "interrupted") {
@@ -289,5 +299,15 @@ export function useConversationChannel(conversationId: string | null) {
       : [],
   );
 
-  return { ...state, send, interrupt, regenerate, respondApproval, pendingApprovals };
+  const compactionCount = state.items.filter((item) => item.kind === "compaction").length;
+
+  return {
+    ...state,
+    send,
+    interrupt,
+    regenerate,
+    respondApproval,
+    pendingApprovals,
+    compactionCount,
+  };
 }

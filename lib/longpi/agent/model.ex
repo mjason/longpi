@@ -34,12 +34,12 @@ defmodule Longpi.Agent.Model do
 
     create :create do
       primary? true
-      accept [:spec, :label, :enabled, :position]
+      accept [:spec, :label, :enabled, :position, :context_window]
     end
 
     update :update do
       primary? true
-      accept [:spec, :label, :enabled, :position]
+      accept [:spec, :label, :enabled, :position, :context_window]
     end
   end
 
@@ -64,6 +64,12 @@ defmodule Longpi.Agent.Model do
     attribute :position, :integer do
       allow_nil? false
       default 0
+      public? true
+    end
+
+    # Optional context-window override; nil falls back to req_llm's model
+    # metadata, then a default. Used to size context compaction.
+    attribute :context_window, :integer do
       public? true
     end
 

@@ -113,6 +113,8 @@ function GeneralTab() {
   const [defaultModel, setDefaultModel] = useState("");
   const [defaultPrompt, setDefaultPrompt] = useState("");
   const [approvalLevel, setApprovalLevel] = useState("auto");
+  const [compactionEnabled, setCompactionEnabled] = useState(true);
+  const [compactionPct, setCompactionPct] = useState(80);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -123,6 +125,9 @@ function GeneralTab() {
       setDefaultPrompt(d.systemPrompt);
       setDefaultModel(s[SETTING_KEYS.defaultModel] ?? "");
       setApprovalLevel(s[SETTING_KEYS.approvalLevel] || "auto");
+      setCompactionEnabled(s[SETTING_KEYS.compactionEnabled] !== "false");
+      const ratio = parseFloat(s[SETTING_KEYS.compactionRatio] || "0.8");
+      setCompactionPct(Number.isFinite(ratio) ? Math.round(ratio * 100) : 80);
       setLoading(false);
     });
   }, []);
@@ -190,6 +195,37 @@ function GeneralTab() {
           onChange={(e) => setSystemPrompt(e.target.value)}
         />
       </Field>
+
+      <Field
+        label="Context compaction"
+        hint="When a conversation nears the model's context window, older messages are summarized to make room. The full history stays stored."
+      >
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={compactionEnabled}
+            onChange={(e) => setCompactionEnabled(e.target.checked)}
+            className="size-4 accent-[var(--primary)]"
+          />
+          Enabled
+        </label>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={50}
+            max={95}
+            step={5}
+            value={compactionPct}
+            disabled={!compactionEnabled}
+            onChange={(e) => setCompactionPct(Number(e.target.value))}
+            className="flex-1 accent-[var(--primary)] disabled:opacity-50"
+          />
+          <span className="w-28 text-xs text-muted-foreground">
+            compact at {compactionPct}% of window
+          </span>
+        </div>
+      </Field>
+
       <SaveButton
         onSave={async () => {
           // Storing the default is the same as clearing the override; keep the
@@ -198,6 +234,8 @@ function GeneralTab() {
           await Promise.all([
             saveSetting(SETTING_KEYS.systemPrompt, toStore),
             saveSetting(SETTING_KEYS.defaultModel, defaultModel),
+            saveSetting(SETTING_KEYS.compactionEnabled, compactionEnabled ? "true" : "false"),
+            saveSetting(SETTING_KEYS.compactionRatio, (compactionPct / 100).toFixed(2)),
           ]);
         }}
       />

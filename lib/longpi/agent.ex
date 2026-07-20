@@ -77,5 +77,10 @@ defmodule Longpi.Agent do
       define :list_providers, action: :list
       define :set_provider_key, action: :set_key
     end
+
+    resource Longpi.Agent.Compaction do
+      define :create_compaction, action: :create
+      define :latest_compaction, action: :latest_for, args: [:conversation_id]
+    end
   end
 end
