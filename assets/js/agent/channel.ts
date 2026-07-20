@@ -65,6 +65,9 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   channel.on("tool_result", (p: { id: string; content: string; error: boolean; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "tool_result", id: p.id, content: p.content, error: p.error })),
   );
+  channel.on("approval_request", (p: { id: string; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "approval_request", id: p.id })),
+  );
   channel.on("turn_ended", (p: { reason: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "turn_ended", reason: p.reason })),
   );
@@ -75,8 +78,8 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   entry.joined = new Promise((resolve) => {
     channel
       .join()
-      .receive("ok", (reply: { messages: HistoryMessage[]; status: string }) => {
-        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status });
+      .receive("ok", (reply: { messages: HistoryMessage[]; status: string; pending_approvals?: string[] }) => {
+        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals });
         resolve();
       })
       .receive("error", (reply: { reason: string }) => {
@@ -91,18 +94,20 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
 type State = { items: ThreadItem[]; status: SessionStatus };
 
 type Action =
-  | { type: "joined"; messages: HistoryMessage[]; status: string }
+  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[] }
   | { type: "text_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; id: string; content: string; error: boolean }
+  | { type: "approval_request"; id: string }
   | { type: "user_sent"; text: string }
   | { type: "turn_ended"; reason: string }
   | { type: "turn_failed"; reason: string }
   | { type: "notice"; tone: "error" | "info"; text: string }
   | { type: "reset" };
 
-function historyToItems(messages: HistoryMessage[]): ThreadItem[] {
+function historyToItems(messages: HistoryMessage[], pending: string[] = []): ThreadItem[] {
   const items: ThreadItem[] = [];
+  const pendingSet = new Set(pending);
 
   for (const message of messages) {
     if (message.role === "user") {
@@ -112,13 +117,15 @@ function historyToItems(messages: HistoryMessage[]): ThreadItem[] {
         items.push({ kind: "assistant", text: message.content, streaming: false });
       }
       for (const call of message.tool_calls ?? []) {
+        const awaiting = pendingSet.has(call.id);
         items.push({
           kind: "tool",
           id: call.id,
           name: call.name,
           args: call.args,
           error: false,
-          running: false,
+          running: awaiting,
+          awaitingApproval: awaiting,
         });
       }
     } else if (message.role === "tool" && message.tool_call_id) {
@@ -150,7 +157,7 @@ function reduce(state: State, action: Action): State {
 
     case "joined":
       return {
-        items: historyToItems(action.messages),
+        items: historyToItems(action.messages, action.pending),
         status: action.status === "running" ? "running" : "idle",
       };
 
@@ -178,12 +185,22 @@ function reduce(state: State, action: Action): State {
         ],
       };
 
+    case "approval_request":
+      return {
+        ...state,
+        items: state.items.map((item) =>
+          item.kind === "tool" && item.id === action.id
+            ? { ...item, awaitingApproval: true }
+            : item,
+        ),
+      };
+
     case "tool_result":
       return {
         ...state,
         items: state.items.map((item) =>
           item.kind === "tool" && item.id === action.id
-            ? { ...item, content: action.content, error: action.error, running: false }
+            ? { ...item, content: action.content, error: action.error, running: false, awaitingApproval: false }
             : item,
         ),
       };
@@ -225,8 +242,9 @@ export function useConversationChannel(conversationId: string | null) {
       if (cancelled || entry.channel.state !== "joined") return;
       entry.channel
         .push("get_state", {})
-        .receive("ok", (reply: { messages: HistoryMessage[]; status: string }) => {
-          if (!cancelled) dispatch({ type: "joined", messages: reply.messages, status: reply.status });
+        .receive("ok", (reply: { messages: HistoryMessage[]; status: string; pending_approvals?: string[] }) => {
+          if (!cancelled)
+            dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals });
         });
     });
 
@@ -261,5 +279,15 @@ export function useConversationChannel(conversationId: string | null) {
       );
   }
 
-  return { ...state, send, interrupt, regenerate };
+  function respondApproval(id: string, approved: boolean) {
+    channelRef.current?.push("permission_response", { id, approved });
+  }
+
+  const pendingApprovals = state.items.flatMap((item) =>
+    item.kind === "tool" && item.awaitingApproval
+      ? [{ id: item.id, name: item.name, args: item.args }]
+      : [],
+  );
+
+  return { ...state, send, interrupt, regenerate, respondApproval, pendingApprovals };
 }

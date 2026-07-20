@@ -16,11 +16,12 @@ import type { ThreadItem } from "./types";
  * channel.
  */
 export function useChannelRuntime(conversationId: string) {
-  const { items, status, send, interrupt, regenerate } = useConversationChannel(conversationId);
+  const { items, status, send, interrupt, regenerate, respondApproval, pendingApprovals } =
+    useConversationChannel(conversationId);
 
   const messages = itemsToMessages(items);
 
-  return useExternalStoreRuntime({
+  const runtime = useExternalStoreRuntime({
     messages,
     isRunning: status === "running",
     onNew: async (message: AppendMessage) => {
@@ -36,6 +37,8 @@ export function useChannelRuntime(conversationId: string) {
     onCancel: async () => interrupt(),
     convertMessage: (message: ThreadMessageLike) => message,
   });
+
+  return { runtime, pendingApprovals, respondApproval };
 }
 
 type AssistantPart = Extract<ThreadMessageLike["content"], readonly unknown[]>[number];

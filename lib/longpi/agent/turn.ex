@@ -52,16 +52,33 @@ defmodule Longpi.Agent.Turn do
     end
   end
 
-  defp execute_call(%{toolbox: toolbox, ctx: ctx, sink: sink}, call) do
+  defp execute_call(config, call) do
+    %{toolbox: toolbox, ctx: ctx, sink: sink} = config
     sink.({:tool_call, call})
 
     {content, error?} =
-      case Toolbox.execute(toolbox, call.name, call.args, ctx) do
-        {:ok, content} -> {content, false}
-        {:error, content} -> {content, true}
+      case authorize(config, call) do
+        :allow -> invoke(toolbox, call, ctx)
+        :deny -> {"Permission denied: the user did not approve running #{call.name}.", true}
       end
 
     sink.({:tool_result, %{call: call, content: content, error?: error?}})
     Message.tool_result(call, content, error?)
+  end
+
+  defp invoke(toolbox, call, ctx) do
+    case Toolbox.execute(toolbox, call.name, call.args, ctx) do
+      {:ok, content} -> {content, false}
+      {:error, content} -> {content, true}
+    end
+  end
+
+  # `authorize` is injected by the caller (the Session). Absent, everything is
+  # allowed - keeps Turn usable standalone and in tests.
+  defp authorize(config, call) do
+    case Map.get(config, :authorize) do
+      fun when is_function(fun, 1) -> fun.(call)
+      _ -> :allow
+    end
   end
 end

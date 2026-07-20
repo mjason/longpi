@@ -18,6 +18,8 @@ export type ThreadItem =
       content?: string;
       error: boolean;
       running: boolean;
+      // Set while the tool is waiting for the user to approve/reject it.
+      awaitingApproval?: boolean;
     }
   | { kind: "notice"; tone: "error" | "info"; text: string };
 

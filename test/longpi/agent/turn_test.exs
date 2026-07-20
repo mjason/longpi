@@ -96,4 +96,46 @@ defmodule Longpi.Agent.TurnTest do
     assert {:error, :max_iterations, _messages} =
              Turn.run(config, [Message.user("loop forever")], max_iterations: 3)
   end
+
+  test "a denied tool call is not executed and returns a denial", %{config: config, dir: dir} do
+    File.write!(Path.join(dir, "secret.txt"), "should-not-be-read")
+    call = %{id: "tc_d", name: "read", args: %{"path" => "secret.txt"}}
+    config = Map.put(config, :authorize, fn _call -> :deny end)
+
+    LLMMock
+    |> expect(:stream, fn _, _, _, _, _ -> {:ok, %{text: "", tool_calls: [call]}} end)
+    |> expect(:stream, fn _, messages, _, _, _ ->
+      tool_result = List.last(messages)
+      assert tool_result.role == :tool
+      assert tool_result.error? == true
+      assert tool_result.content =~ "Permission denied"
+      refute tool_result.content =~ "should-not-be-read"
+      {:ok, %{text: "understood", tool_calls: []}}
+    end)
+
+    assert {:ok, _} = Turn.run(config, [Message.user("read it")])
+    assert_received {:ev, {:tool_result, %{error?: true}}}
+  end
+
+  test "authorize receives the tool call and allow runs it", %{config: config, dir: dir} do
+    File.write!(Path.join(dir, "ok.txt"), "readable")
+    call = %{id: "tc_a", name: "read", args: %{"path" => "ok.txt"}}
+    test_pid = self()
+
+    config =
+      Map.put(config, :authorize, fn c ->
+        send(test_pid, {:asked, c.name})
+        :allow
+      end)
+
+    LLMMock
+    |> expect(:stream, fn _, _, _, _, _ -> {:ok, %{text: "", tool_calls: [call]}} end)
+    |> expect(:stream, fn _, messages, _, _, _ ->
+      assert List.last(messages).content =~ "readable"
+      {:ok, %{text: "done", tool_calls: []}}
+    end)
+
+    assert {:ok, _} = Turn.run(config, [Message.user("read")])
+    assert_received {:asked, "read"}
+  end
 end

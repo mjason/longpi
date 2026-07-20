@@ -47,6 +47,15 @@ defmodule Longpi.Agent.Session do
 
   def status(session), do: GenServer.call(session, :status)
 
+  @doc "Answers a pending tool-approval prompt (`call_id`, approved?)."
+  def respond_approval(session, call_id, approved?) do
+    send(session, {:approval_response, call_id, approved?})
+    :ok
+  end
+
+  @doc "Tool-call ids currently awaiting approval (so a joining client can show them)."
+  def pending_approvals(session), do: GenServer.call(session, :pending_approvals)
+
   # Server
 
   @impl true
@@ -73,7 +82,8 @@ defmodule Longpi.Agent.Session do
        stream_to: opts[:stream_to],
        conversation_id: opts[:conversation_id],
        persisted_count: length(history),
-       seq: 0
+       seq: 0,
+       pending_approvals: %{}
      }}
   end
 
@@ -137,6 +147,9 @@ defmodule Longpi.Agent.Session do
 
   def handle_call(:status, _from, state), do: {:reply, state.status, state}
 
+  def handle_call(:pending_approvals, _from, state),
+    do: {:reply, Map.keys(state.pending_approvals), state}
+
   @impl true
   def handle_info({:turn_event, event}, state) do
     state = notify(state, event)
@@ -144,6 +157,26 @@ defmodule Longpi.Agent.Session do
     case event do
       {:text_delta, text} -> {:noreply, %{state | partial: [state.partial | text]}}
       _ -> {:noreply, state}
+    end
+  end
+
+  # A tool needs approval: remember who's waiting and prompt the user.
+  def handle_info({:approval_request, task_pid, ref, call}, state) do
+    pending = Map.put(state.pending_approvals, call.id, {task_pid, ref})
+    state = notify(%{state | pending_approvals: pending}, {:approval_request, call})
+    {:noreply, state}
+  end
+
+  # The user's decision, forwarded from the channel; unblock the waiting task.
+  def handle_info({:approval_response, call_id, approved?}, state) do
+    case Map.pop(state.pending_approvals, call_id) do
+      {{task_pid, ref}, pending} ->
+        decision = if approved?, do: :allow, else: :deny
+        send(task_pid, {:approval_decision, ref, decision})
+        {:noreply, %{state | pending_approvals: pending}}
+
+      {nil, _} ->
+        {:noreply, state}
     end
   end
 
@@ -189,6 +222,8 @@ defmodule Longpi.Agent.Session do
     end
   end
 
+  @approval_timeout 5 * 60_000
+
   defp run_turn(state, messages) do
     session = self()
 
@@ -197,7 +232,8 @@ defmodule Longpi.Agent.Session do
       model: state.model,
       toolbox: state.toolbox,
       ctx: state.ctx,
-      sink: fn event -> send(session, {:turn_event, event}) end
+      sink: fn event -> send(session, {:turn_event, event}) end,
+      authorize: fn call -> authorize(session, call) end
     }
 
     task =
@@ -206,6 +242,25 @@ defmodule Longpi.Agent.Session do
       end)
 
     %{state | status: :running, task: task, partial: []}
+  end
+
+  # Runs in the Turn task. For `:ask` tools it asks the Session to broadcast an
+  # approval request, then blocks until the user (or a timeout) decides.
+  defp authorize(session, call) do
+    case Longpi.Agent.Permissions.mode(call.name) do
+      :allow ->
+        :allow
+
+      :ask ->
+        ref = make_ref()
+        send(session, {:approval_request, self(), ref, call})
+
+        receive do
+          {:approval_decision, ^ref, decision} -> decision
+        after
+          @approval_timeout -> :deny
+        end
+    end
   end
 
   # Drops everything after the last user message, in memory and in storage, so

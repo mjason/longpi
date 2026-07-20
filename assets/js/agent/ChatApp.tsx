@@ -1,5 +1,5 @@
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import { Loader2, Plus, Settings } from "lucide-react";
+import { Loader2, Plus, Settings, ShieldAlert } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { buildCSRFHeaders, createConversation, listConversations } from "../ash_rpc";
 import { TooltipProvider } from "../components/ui/tooltip";
@@ -180,7 +180,7 @@ function Sidebar(props: {
 }
 
 function ConversationPane({ conversation }: { conversation: ConversationSummary }) {
-  const runtime = useChannelRuntime(conversation.id);
+  const { runtime, pendingApprovals, respondApproval } = useChannelRuntime(conversation.id);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -197,7 +197,47 @@ function ConversationPane({ conversation }: { conversation: ConversationSummary 
         <div className="min-h-0 flex-1">
           <Thread />
         </div>
+
+        {pendingApprovals.map((req) => (
+          <ApprovalBanner key={req.id} request={req} onRespond={respondApproval} />
+        ))}
       </main>
     </AssistantRuntimeProvider>
+  );
+}
+
+function ApprovalBanner({
+  request,
+  onRespond,
+}: {
+  request: { id: string; name: string; args?: Record<string, unknown> };
+  onRespond: (id: string, approved: boolean) => void;
+}) {
+  const summary =
+    typeof request.args?.command === "string"
+      ? request.args.command
+      : typeof request.args?.path === "string"
+        ? request.args.path
+        : "";
+
+  return (
+    <div className="border-t border-primary/30 bg-primary/5 px-4 py-3">
+      <div className="mx-auto flex w-full max-w-[44rem] items-center gap-3">
+        <ShieldAlert className="size-5 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1 text-sm">
+          <span className="font-medium">The agent wants to run </span>
+          <code className="font-mono font-semibold">{request.name}</code>
+          {summary && (
+            <code className="ml-1 block truncate font-mono text-xs text-muted-foreground">{summary}</code>
+          )}
+        </div>
+        <Button size="sm" variant="outline" onClick={() => onRespond(request.id, false)}>
+          Deny
+        </Button>
+        <Button size="sm" onClick={() => onRespond(request.id, true)}>
+          Allow
+        </Button>
+      </div>
+    </div>
   );
 }

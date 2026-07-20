@@ -6,6 +6,7 @@ import { Input } from "../components/ui/input";
 import { cn } from "../lib/utils";
 import {
   addModel,
+  APPROVAL_LEVELS,
   discoverModels,
   loadDefaults,
   loadModels,
@@ -111,6 +112,7 @@ function GeneralTab() {
   const [systemPrompt, setSystemPrompt] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
   const [defaultPrompt, setDefaultPrompt] = useState("");
+  const [approvalLevel, setApprovalLevel] = useState("auto");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -120,6 +122,7 @@ function GeneralTab() {
       setSystemPrompt(s[SETTING_KEYS.systemPrompt] || d.systemPrompt);
       setDefaultPrompt(d.systemPrompt);
       setDefaultModel(s[SETTING_KEYS.defaultModel] ?? "");
+      setApprovalLevel(s[SETTING_KEYS.approvalLevel] || "auto");
       setLoading(false);
     });
   }, []);
@@ -130,6 +133,32 @@ function GeneralTab() {
 
   return (
     <div className="space-y-5 py-4">
+      <Field
+        label="Approval level"
+        hint="How much the agent may do without asking you first."
+      >
+        <div className="grid grid-cols-3 gap-2">
+          {APPROVAL_LEVELS.map((lvl) => (
+            <button
+              key={lvl.id}
+              onClick={async () => {
+                setApprovalLevel(lvl.id);
+                await saveSetting(SETTING_KEYS.approvalLevel, lvl.id);
+              }}
+              className={cn(
+                "rounded-md border px-3 py-2 text-left transition-colors",
+                approvalLevel === lvl.id
+                  ? "border-primary bg-accent"
+                  : "border-border hover:bg-accent/50",
+              )}
+            >
+              <div className="text-sm font-medium">{lvl.label}</div>
+              <div className="mt-0.5 text-[11px] leading-tight text-muted-foreground">{lvl.hint}</div>
+            </button>
+          ))}
+        </div>
+      </Field>
+
       <Field label="Default model" hint="Prefills new conversations.">
         <Input
           className="font-mono text-sm"

@@ -17,7 +17,14 @@ export type SettingsMap = Record<string, string>;
 export const SETTING_KEYS = {
   systemPrompt: "system_prompt",
   defaultModel: "default_model",
+  approvalLevel: "approval_level",
 } as const;
+
+export const APPROVAL_LEVELS = [
+  { id: "read_only", label: "Read-only", hint: "Only reads run automatically; writes and commands ask." },
+  { id: "auto", label: "Auto", hint: "Reads and file edits run; bash commands ask." },
+  { id: "full", label: "Full access", hint: "Everything runs automatically — no prompts." },
+] as const;
 
 export const toolDescKey = (name: string) => `tool_desc:${name}`;
 

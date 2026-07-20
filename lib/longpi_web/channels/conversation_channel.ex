@@ -26,7 +26,14 @@ defmodule LongpiWeb.ConversationChannel do
           |> Enum.map(&serialize_message/1)
 
         socket = assign(socket, conversation_id: conversation_id, session: session)
-        {:ok, %{messages: history, status: Session.status(session)}, socket}
+
+        reply = %{
+          messages: history,
+          status: Session.status(session),
+          pending_approvals: Session.pending_approvals(session)
+        }
+
+        {:ok, reply, socket}
 
       {:error, reason} ->
         {:error, %{reason: inspect(reason)}}
@@ -53,6 +60,11 @@ defmodule LongpiWeb.ConversationChannel do
     end
   end
 
+  def handle_in("permission_response", %{"id" => id, "approved" => approved}, socket) do
+    Session.respond_approval(socket.assigns.session, id, approved == true)
+    {:reply, :ok, socket}
+  end
+
   # Current history snapshot, for a client that re-attached to an
   # already-joined channel and needs to rebuild its view.
   def handle_in("get_state", _payload, socket) do
@@ -64,7 +76,13 @@ defmodule LongpiWeb.ConversationChannel do
       |> Enum.reject(&(&1.role == :system))
       |> Enum.map(&serialize_message/1)
 
-    {:reply, {:ok, %{messages: history, status: Session.status(session)}}, socket}
+    reply = %{
+      messages: history,
+      status: Session.status(session),
+      pending_approvals: Session.pending_approvals(session)
+    }
+
+    {:reply, {:ok, reply}, socket}
   end
 
   @impl true
@@ -85,6 +103,9 @@ defmodule LongpiWeb.ConversationChannel do
 
   defp serialize_event({:tool_result, %{call: call, content: content, error?: error?}}),
     do: {"tool_result", %{id: call.id, name: call.name, content: content, error: error?}}
+
+  defp serialize_event({:approval_request, call}),
+    do: {"approval_request", %{id: call.id, name: call.name, args: call.args}}
 
   defp serialize_event({:usage, usage}), do: {"usage", %{usage: usage}}
 
