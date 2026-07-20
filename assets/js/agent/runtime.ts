@@ -122,6 +122,11 @@ function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
         });
         break;
 
+      case "reasoning":
+        assistantParts ??= [];
+        if (item.text) assistantParts.push({ type: "reasoning", text: item.text });
+        break;
+
       case "assistant":
         assistantParts ??= [];
         if (item.text) assistantParts.push({ type: "text", text: item.text });

@@ -10,6 +10,7 @@ export type HistoryMessage = {
 export type ThreadItem =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string; streaming: boolean }
+  | { kind: "reasoning"; text: string; streaming: boolean }
   | {
       kind: "tool";
       id: string;

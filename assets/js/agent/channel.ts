@@ -59,6 +59,9 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   channel.on("text_delta", (p: { text: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "text_delta", text: p.text })),
   );
+  channel.on("thinking_delta", (p: { text: string; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "thinking_delta", text: p.text })),
+  );
   channel.on("tool_call", (p: { id: string; name: string; args: Record<string, unknown>; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "tool_call", id: p.id, name: p.name, args: p.args })),
   );
@@ -121,6 +124,7 @@ type Action =
   | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage }
   | { type: "model_changed"; model: string }
   | { type: "text_delta"; text: string }
+  | { type: "thinking_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; id: string; content: string; error: boolean }
   | { type: "approval_request"; id: string }
@@ -172,6 +176,7 @@ function historyToItems(messages: HistoryMessage[], pending: string[] = []): Thr
 function settle(items: ThreadItem[]): ThreadItem[] {
   return items.map((item) => {
     if (item.kind === "assistant" && item.streaming) return { ...item, streaming: false };
+    if (item.kind === "reasoning" && item.streaming) return { ...item, streaming: false };
     if (item.kind === "tool" && item.running) return { ...item, running: false };
     return item;
   });
@@ -206,6 +211,17 @@ function reduce(state: State, action: Action): State {
         items[items.length - 1] = { ...last, text: last.text + action.text };
       } else {
         items.push({ kind: "assistant", text: action.text, streaming: true });
+      }
+      return { ...state, status: "running", items };
+    }
+
+    case "thinking_delta": {
+      const items = [...state.items];
+      const last = items[items.length - 1];
+      if (last && last.kind === "reasoning" && last.streaming) {
+        items[items.length - 1] = { ...last, text: last.text + action.text };
+      } else {
+        items.push({ kind: "reasoning", text: action.text, streaming: true });
       }
       return { ...state, status: "running", items };
     }
