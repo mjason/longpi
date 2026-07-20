@@ -1,0 +1,25 @@
+[package]
+name = "longpi_shim"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+portable-pty = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+win32job = "2"
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_JobObjects",
+] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

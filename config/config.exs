@@ -106,7 +106,17 @@ config :esbuild,
     args:
       ~w(js/index.tsx js/app.js --bundle --target=es2022 --outdir=../priv/static/assets --external:/fonts/* --external:/images/* --alias:@=. --splitting --format=esm),
     cd: Path.expand("../assets", __DIR__),
-    env: %{"NODE_PATH" => Enum.join([Path.expand("../deps", __DIR__), Path.expand(Mix.Project.build_path()), Path.expand("../_build/dev", __DIR__)], ":")}
+    env: %{
+      "NODE_PATH" =>
+        Enum.join(
+          [
+            Path.expand("../deps", __DIR__),
+            Path.expand(Mix.Project.build_path()),
+            Path.expand("../_build/dev", __DIR__)
+          ],
+          ":"
+        )
+    }
   ]
 
 # Configure tailwind (the version is required)
@@ -118,7 +128,17 @@ config :tailwind,
       --output=priv/static/assets/css/app.css
     ),
     cd: Path.expand("..", __DIR__),
-    env: %{"NODE_PATH" => Enum.join([Path.expand("../deps", __DIR__), Path.expand(Mix.Project.build_path()), Path.expand("../_build/dev", __DIR__)], ":")}
+    env: %{
+      "NODE_PATH" =>
+        Enum.join(
+          [
+            Path.expand("../deps", __DIR__),
+            Path.expand(Mix.Project.build_path()),
+            Path.expand("../_build/dev", __DIR__)
+          ],
+          ":"
+        )
+    }
   ]
 
 # Configure Elixir's Logger
