@@ -109,4 +109,33 @@ defmodule Longpi.Agent.SessionCompactionTest do
   test "context_window resolution: metadata for known model", %{conversation: _c} do
     assert ContextWindow.for_model("openai:gpt-4o") == 128_000
   end
+
+  test "manual compact forces a checkpoint regardless of the threshold", %{
+    session: session,
+    conversation: conversation
+  } do
+    # A turn with LOW usage (no auto-compaction) but long messages.
+    expect(LLMMock, :stream, fn _, _, _, _, sink ->
+      sink.({:usage, %{input_tokens: 10}})
+      {:ok, %{text: "ok", tool_calls: []}}
+    end)
+
+    :ok = Session.send_message(session, @long_msg)
+    assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
+    refute_received {:agent_event, {:compaction_started}}
+
+    # Manual /compact triggers summarization even though usage was tiny.
+    expect(LLMMock, :stream, fn _, _, _, _, _ ->
+      {:ok, %{text: "## Goal\nmanual", tool_calls: []}}
+    end)
+
+    assert :ok = Session.compact(session)
+    assert_receive {:agent_event, {:compacted, %{covered_through: _}}}, 2_000
+    assert {:ok, [%{summary: s}]} = Longpi.Agent.latest_compaction(conversation.id)
+    assert s =~ "manual"
+  end
+
+  test "manual compact reports when there's nothing to compact", %{session: session} do
+    assert {:error, :nothing_to_compact} = Session.compact(session)
+  end
 end

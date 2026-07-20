@@ -65,6 +65,17 @@ defmodule LongpiWeb.ConversationChannel do
     {:reply, :ok, socket}
   end
 
+  def handle_in("command", %{"name" => "compact"}, socket) do
+    case Session.compact(socket.assigns.session) do
+      :ok -> {:reply, :ok, socket}
+      {:error, reason} -> {:reply, {:error, %{reason: to_string(reason)}}, socket}
+    end
+  end
+
+  def handle_in("command", %{"name" => name}, socket) do
+    {:reply, {:error, %{reason: "unknown command: #{name}"}}, socket}
+  end
+
   # Current history snapshot, for a client that re-attached to an
   # already-joined channel and needs to rebuild its view.
   def handle_in("get_state", _payload, socket) do

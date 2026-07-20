@@ -6,6 +6,9 @@ import {
 import { useConversationChannel } from "./channel";
 import type { ThreadItem } from "./types";
 
+/** Slash commands handled by the command channel (see conversation_channel.ex). */
+export const SLASH_COMMANDS = ["compact"];
+
 /**
  * Bridges our Phoenix Channel state into an assistant-ui ExternalStoreRuntime.
  *
@@ -23,8 +26,10 @@ export function useChannelRuntime(conversationId: string) {
     interrupt,
     regenerate,
     respondApproval,
+    runCommand,
     pendingApprovals,
     compactionCount,
+    notices,
   } = useConversationChannel(conversationId);
 
   const messages = itemsToMessages(items);
@@ -37,7 +42,19 @@ export function useChannelRuntime(conversationId: string) {
         .filter((part): part is { type: "text"; text: string } => part.type === "text")
         .map((part) => part.text)
         .join("");
-      if (text.trim()) send(text);
+      const trimmed = text.trim();
+      if (!trimmed) return;
+
+      // Slash commands go to the command channel instead of being sent as a
+      // message. Extensible: add cases as commands are added.
+      if (trimmed.startsWith("/")) {
+        const name = trimmed.slice(1).split(/\s+/)[0].toLowerCase();
+        if (SLASH_COMMANDS.includes(name)) runCommand(name);
+        else runCommand(name); // server replies "unknown command" -> shown as a notice
+        return;
+      }
+
+      send(trimmed);
     },
     // The Reload action on an assistant message: re-run the last turn. The
     // server truncates back to the last user message and streams a fresh reply.
@@ -46,7 +63,7 @@ export function useChannelRuntime(conversationId: string) {
     convertMessage: (message: ThreadMessageLike) => message,
   });
 
-  return { runtime, pendingApprovals, respondApproval, compactionCount };
+  return { runtime, pendingApprovals, respondApproval, compactionCount, notices };
 }
 
 type AssistantPart = Extract<ThreadMessageLike["content"], readonly unknown[]>[number];

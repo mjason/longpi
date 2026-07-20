@@ -56,6 +56,9 @@ defmodule Longpi.Agent.Session do
   @doc "Tool-call ids currently awaiting approval (so a joining client can show them)."
   def pending_approvals(session), do: GenServer.call(session, :pending_approvals)
 
+  @doc "Manually compacts the conversation now, ignoring the token threshold."
+  def compact(session), do: GenServer.call(session, :compact)
+
   # Server
 
   @impl true
@@ -168,6 +171,27 @@ defmodule Longpi.Agent.Session do
 
   def handle_call(:pending_approvals, _from, state),
     do: {:reply, Map.keys(state.pending_approvals), state}
+
+  def handle_call(:compact, _from, %{status: status} = state)
+      when status in [:running, :compacting] do
+    {:reply, {:error, :busy}, state}
+  end
+
+  def handle_call(:compact, _from, %{conversation_id: nil} = state) do
+    {:reply, {:error, :not_persisted}, state}
+  end
+
+  def handle_call(:compact, _from, state) do
+    covered = covered_through(state)
+    [_system | history] = state.messages
+    coverable = Enum.drop(history, covered)
+
+    if length(coverable) < 2 do
+      {:reply, {:error, :nothing_to_compact}, state}
+    else
+      {:reply, :ok, start_compaction(state, coverable, covered)}
+    end
+  end
 
   @impl true
   def handle_info({:turn_event, event}, state) do

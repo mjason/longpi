@@ -1,7 +1,12 @@
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import { Layers, Loader2, Plus, Settings, ShieldAlert } from "lucide-react";
+import { Layers, Loader2, Plus, Settings, ShieldAlert, Trash2 } from "lucide-react";
 import React, { useEffect, useState } from "react";
-import { buildCSRFHeaders, createConversation, listConversations } from "../ash_rpc";
+import {
+  buildCSRFHeaders,
+  createConversation,
+  destroyConversation,
+  listConversations,
+} from "../ash_rpc";
 import { TooltipProvider } from "../components/ui/tooltip";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -52,6 +57,13 @@ export default function ChatApp() {
             setConversations((prev) => [conversation, ...prev]);
             setSelectedId(conversation.id);
           }}
+          onDelete={async (conversation) => {
+            if (!confirm(`Delete "${conversationLabel(conversation)}"? This cannot be undone.`))
+              return;
+            await destroyConversation({ identity: conversation.id, headers: buildCSRFHeaders() });
+            setConversations((prev) => prev.filter((c) => c.id !== conversation.id));
+            setSelectedId((cur) => (cur === conversation.id ? null : cur));
+          }}
         />
         {selected ? (
           <ConversationPane key={selected.id} conversation={selected} />
@@ -76,6 +88,7 @@ function Sidebar(props: {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onCreated: (conversation: ConversationSummary) => void;
+  onDelete: (conversation: ConversationSummary) => void;
 }) {
   const [cwd, setCwd] = useState("");
   const [model, setModel] = useState(DEFAULT_MODEL);
@@ -158,20 +171,32 @@ function Sidebar(props: {
             <p className="px-4 py-2 text-sm text-muted-foreground">No conversations yet.</p>
           )}
           {props.conversations.map((conversation) => (
-            <button
+            <div
               key={conversation.id}
-              onClick={() => props.onSelect(conversation.id)}
               className={cn(
-                "w-full px-4 py-2.5 text-left transition-colors hover:bg-accent",
-                conversation.id === props.selectedId &&
-                  "border-l-2 border-primary bg-accent",
+                "group relative flex items-center transition-colors hover:bg-accent",
+                conversation.id === props.selectedId && "border-l-2 border-primary bg-accent",
               )}
             >
-              <div className="truncate text-sm font-medium">{conversationLabel(conversation)}</div>
-              <div className="truncate font-mono text-xs text-muted-foreground">
-                {conversation.model}
-              </div>
-            </button>
+              <button
+                onClick={() => props.onSelect(conversation.id)}
+                className="min-w-0 flex-1 px-4 py-2.5 text-left"
+              >
+                <div className="truncate text-sm font-medium">
+                  {conversationLabel(conversation)}
+                </div>
+                <div className="truncate font-mono text-xs text-muted-foreground">
+                  {conversation.model}
+                </div>
+              </button>
+              <button
+                onClick={() => props.onDelete(conversation)}
+                aria-label="Delete conversation"
+                className="mr-2 hidden rounded-md p-1.5 text-muted-foreground hover:bg-background hover:text-destructive group-hover:block"
+              >
+                <Trash2 className="size-4" />
+              </button>
+            </div>
           ))}
         </nav>
       </ScrollArea>
@@ -180,9 +205,18 @@ function Sidebar(props: {
 }
 
 function ConversationPane({ conversation }: { conversation: ConversationSummary }) {
-  const { runtime, pendingApprovals, respondApproval, compactionCount } = useChannelRuntime(
-    conversation.id,
-  );
+  const { runtime, pendingApprovals, respondApproval, compactionCount, notices } =
+    useChannelRuntime(conversation.id);
+
+  // Show the most recent notice briefly (command echoes, errors, interrupts).
+  const [toast, setToast] = useState<{ tone: "error" | "info"; text: string } | null>(null);
+  const lastNotice = notices[notices.length - 1];
+  useEffect(() => {
+    if (!lastNotice) return;
+    setToast(lastNotice);
+    const t = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [notices.length]);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -209,6 +243,19 @@ function ConversationPane({ conversation }: { conversation: ConversationSummary 
         <div className="min-h-0 flex-1">
           <Thread />
         </div>
+
+        {toast && (
+          <div
+            className={cn(
+              "border-t px-4 py-2 text-center text-xs",
+              toast.tone === "error"
+                ? "border-destructive/30 bg-destructive/5 text-destructive"
+                : "border-border bg-secondary/40 text-muted-foreground",
+            )}
+          >
+            {toast.text}
+          </div>
+        )}
 
         {pendingApprovals.map((req) => (
           <ApprovalBanner key={req.id} request={req} onRespond={respondApproval} />

@@ -293,6 +293,15 @@ export function useConversationChannel(conversationId: string | null) {
     channelRef.current?.push("permission_response", { id, approved });
   }
 
+  function runCommand(name: string) {
+    dispatch({ type: "notice", tone: "info", text: `/${name}` });
+    channelRef.current
+      ?.push("command", { name })
+      .receive("error", (reply: { reason: string }) =>
+        dispatch({ type: "notice", tone: "error", text: reply.reason }),
+      );
+  }
+
   const pendingApprovals = state.items.flatMap((item) =>
     item.kind === "tool" && item.awaitingApproval
       ? [{ id: item.id, name: item.name, args: item.args }]
@@ -300,6 +309,9 @@ export function useConversationChannel(conversationId: string | null) {
   );
 
   const compactionCount = state.items.filter((item) => item.kind === "compaction").length;
+  const notices = state.items.flatMap((item) =>
+    item.kind === "notice" ? [{ tone: item.tone, text: item.text }] : [],
+  );
 
   return {
     ...state,
@@ -307,7 +319,9 @@ export function useConversationChannel(conversationId: string | null) {
     interrupt,
     regenerate,
     respondApproval,
+    runCommand,
     pendingApprovals,
     compactionCount,
+    notices,
   };
 }
