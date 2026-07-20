@@ -6,7 +6,7 @@ import {
   UserMessageAttachments,
 } from "@/components/assistant-ui/attachment";
 import { ThreadFollowupSuggestions } from "@/components/assistant-ui/follow-up-suggestions";
-import { MarkdownText } from "@/components/assistant-ui/markdown-text";
+import { StreamdownText } from "@/components/assistant-ui/streamdown-text";
 import {
   Reasoning,
   ReasoningContent,
@@ -403,7 +403,7 @@ const AssistantMessage: FC = () => {
                 );
               }
               case "text":
-                return <MarkdownText />;
+                return <StreamdownText />;
               case "reasoning":
                 return <Reasoning {...part} />;
               case "tool-call":

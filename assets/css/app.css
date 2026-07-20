@@ -7,6 +7,11 @@
 @source "../css";
 @source "../js";
 @source "../../lib/longpi_web";
+/* Streamdown markdown renderer ships its own utility classes in dist */
+@source "../node_modules/streamdown/dist/*.js";
+@source "../node_modules/@streamdown/code/dist/*.js";
+@source "../node_modules/@streamdown/math/dist/*.js";
+@source "../node_modules/@streamdown/mermaid/dist/*.js";
 /* Required for Tailwind to automatically pick up changes in colocated CSS files in dev */
 @source "../../_build/dev/phoenix-colocated/longpi/*/";
 
