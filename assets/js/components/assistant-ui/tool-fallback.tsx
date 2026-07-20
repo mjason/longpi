@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { ToolDiff, isDiffTool } from "@/components/assistant-ui/tool-diff";
 
 const ANIMATION_DURATION = 200;
 
@@ -528,6 +529,7 @@ function ToolFallbackApproval({
 
 const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   toolName,
+  args,
   argsText,
   result,
   status,
@@ -540,8 +542,11 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   const isCancelled =
     status?.type === "incomplete" && status.reason === "cancelled";
   const isRequiresAction = status?.type === "requires-action";
+  // File-changing tools render their args as a diff, shown open by default so
+  // the change is visible without a click.
+  const showDiff = isDiffTool(toolName);
 
-  const [open, setOpen] = useState(isRequiresAction);
+  const [open, setOpen] = useState(isRequiresAction || showDiff);
   const [prevRequiresAction, setPrevRequiresAction] =
     useState(isRequiresAction);
   if (isRequiresAction !== prevRequiresAction) {
@@ -554,10 +559,16 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
       <ToolFallbackTrigger toolName={toolName} status={status} />
       <ToolFallbackContent>
         <ToolFallbackError status={status} />
-        <ToolFallbackArgs
-          argsText={argsText}
-          className={cn(isCancelled && "opacity-60")}
-        />
+        {showDiff ? (
+          <div className={cn(isCancelled && "opacity-60")}>
+            <ToolDiff toolName={toolName} args={args as Record<string, unknown> | undefined} />
+          </div>
+        ) : (
+          <ToolFallbackArgs
+            argsText={argsText}
+            className={cn(isCancelled && "opacity-60")}
+          />
+        )}
         {isRequiresAction && (
           <ToolFallbackApproval
             addResult={addResult}

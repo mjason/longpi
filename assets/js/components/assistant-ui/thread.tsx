@@ -374,7 +374,11 @@ const AssistantMessage: FC = () => {
                   return <ToolGroup group={part}>{children}</ToolGroup>;
                 }
                 return (
-                  <ToolGroupRoot variant="ghost">
+                  // Open by default: this is a coding agent, so tool activity is
+                  // primary content. The group reveals one trigger row per tool;
+                  // each tool's own content stays collapsed (except edit/write
+                  // diffs, which open themselves).
+                  <ToolGroupRoot variant="ghost" defaultOpen>
                     <ToolGroupTrigger
                       count={part.indices.length}
                       active={part.status.type === "running"}
