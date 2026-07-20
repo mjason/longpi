@@ -1,6 +1,10 @@
 import { createRoot } from "react-dom/client";
 import ChatApp from "./agent/ChatApp";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { installClipboardFallback } from "./lib/clipboard";
+
+// Enables the copy button over plain-HTTP LAN addresses (see the module doc).
+installClipboardFallback();
 
 // No React.StrictMode: its double-mount in dev makes the effect join, leave,
 // then re-join the same Phoenix topic, which Phoenix rejects as a duplicate
