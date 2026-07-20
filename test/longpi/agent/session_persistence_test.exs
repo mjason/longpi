@@ -127,4 +127,37 @@ defmodule Longpi.Agent.SessionPersistenceTest do
              |> Longpi.Agent.list_messages!()
              |> Enum.map(&Map.take(&1, [:role, :content]))
   end
+
+  test "regenerate drops the last reply and re-runs the turn", %{conversation: conversation} do
+    session = start_session(conversation)
+
+    LLMMock
+    |> expect(:stream, fn _, _, _, _, _ -> {:ok, %{text: "first answer", tool_calls: []}} end)
+    |> expect(:stream, fn _, messages, _, _, _ ->
+      # The regenerated turn must NOT include the dropped assistant reply.
+      texts = Enum.map(messages, & &1[:content])
+      assert "hello" in texts
+      refute "first answer" in texts
+      {:ok, %{text: "second answer", tool_calls: []}}
+    end)
+
+    :ok = Session.send_message(session, "hello")
+    assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
+
+    :ok = Session.regenerate(session)
+    assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
+
+    roles = session |> Session.messages() |> Enum.map(& &1.role)
+    assert roles == [:system, :user, :assistant]
+
+    stored = Longpi.Agent.list_messages!(conversation.id)
+
+    assert [%{role: :user, content: "hello"}, %{role: :assistant, content: "second answer"}] =
+             Enum.map(stored, &Map.take(&1, [:role, :content]))
+  end
+
+  test "regenerate with no messages is a no-op error", %{conversation: conversation} do
+    session = start_session(conversation)
+    assert {:error, :nothing_to_regenerate} = Session.regenerate(session)
+  end
 end

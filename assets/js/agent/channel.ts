@@ -14,6 +14,80 @@ function getSocket(): Socket {
   return socket;
 }
 
+type Dispatch = (action: Action) => void;
+
+type ChannelEntry = {
+  channel: Channel;
+  dispatch: Dispatch;
+  joined: Promise<void>;
+  lastSeq: number;
+};
+
+// Drops events already seen on this channel. A reconnecting socket can leave a
+// second channel process subscribed to the same topic, delivering every event
+// twice; sequence numbers make that harmless.
+function once(entry: ChannelEntry, seq: number | undefined, run: () => void) {
+  if (typeof seq === "number") {
+    if (seq <= entry.lastSeq) return;
+    entry.lastSeq = seq;
+  }
+  run();
+}
+
+// One channel per topic for the whole app. Event handlers are registered once,
+// at creation, and route to whichever hook currently owns `dispatch`. This is
+// the key correctness guarantee: creating a channel per effect-run (or leaving
+// a still-joining one) leaves multiple server channel processes subscribed to
+// the same topic, so every push arrives twice and streamed text duplicates.
+const entries = new Map<string, ChannelEntry>();
+
+function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
+  let entry = entries.get(topic);
+  if (entry) {
+    entry.dispatch = dispatch;
+    return entry;
+  }
+
+  const channel = getSocket().channel(topic);
+  entry = { channel, dispatch, joined: Promise.resolve(), lastSeq: 0 };
+  entries.set(topic, entry);
+
+  const e = entry;
+  channel.on("history", (p: { messages: HistoryMessage[]; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "joined", messages: p.messages, status: "running" })),
+  );
+  channel.on("text_delta", (p: { text: string; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "text_delta", text: p.text })),
+  );
+  channel.on("tool_call", (p: { id: string; name: string; args: Record<string, unknown>; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "tool_call", id: p.id, name: p.name, args: p.args })),
+  );
+  channel.on("tool_result", (p: { id: string; content: string; error: boolean; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "tool_result", id: p.id, content: p.content, error: p.error })),
+  );
+  channel.on("turn_ended", (p: { reason: string; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "turn_ended", reason: p.reason })),
+  );
+  channel.on("turn_failed", (p: { reason: string; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "turn_failed", reason: p.reason })),
+  );
+
+  entry.joined = new Promise((resolve) => {
+    channel
+      .join()
+      .receive("ok", (reply: { messages: HistoryMessage[]; status: string }) => {
+        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status });
+        resolve();
+      })
+      .receive("error", (reply: { reason: string }) => {
+        e.dispatch({ type: "notice", tone: "error", text: `Could not join: ${reply.reason}` });
+        resolve();
+      });
+  });
+
+  return entry;
+}
+
 type State = { items: ThreadItem[]; status: SessionStatus };
 
 type Action =
@@ -141,30 +215,23 @@ export function useConversationChannel(conversationId: string | null) {
     if (!conversationId) return;
     dispatch({ type: "reset" });
 
-    const channel = getSocket().channel(`conversation:${conversationId}`);
-    channelRef.current = channel;
+    const entry = acquireChannel(`conversation:${conversationId}`, dispatch);
+    channelRef.current = entry.channel;
 
-    channel.on("text_delta", (p: { text: string }) => dispatch({ type: "text_delta", text: p.text }));
-    channel.on("tool_call", (p: { id: string; name: string; args: Record<string, unknown> }) =>
-      dispatch({ type: "tool_call", id: p.id, name: p.name, args: p.args }),
-    );
-    channel.on("tool_result", (p: { id: string; content: string; error: boolean }) =>
-      dispatch({ type: "tool_result", id: p.id, content: p.content, error: p.error }),
-    );
-    channel.on("turn_ended", (p: { reason: string }) => dispatch({ type: "turn_ended", reason: p.reason }));
-    channel.on("turn_failed", (p: { reason: string }) => dispatch({ type: "turn_failed", reason: p.reason }));
-
-    channel
-      .join()
-      .receive("ok", (reply: { messages: HistoryMessage[]; status: string }) =>
-        dispatch({ type: "joined", messages: reply.messages, status: reply.status }),
-      )
-      .receive("error", (reply: { reason: string }) =>
-        dispatch({ type: "notice", tone: "error", text: `Could not join: ${reply.reason}` }),
-      );
+    // If we re-acquired an already-joined channel (e.g. remount), the join
+    // handler won't fire again - pull the current history explicitly.
+    let cancelled = false;
+    entry.joined.then(() => {
+      if (cancelled || entry.channel.state !== "joined") return;
+      entry.channel
+        .push("get_state", {})
+        .receive("ok", (reply: { messages: HistoryMessage[]; status: string }) => {
+          if (!cancelled) dispatch({ type: "joined", messages: reply.messages, status: reply.status });
+        });
+    });
 
     return () => {
-      channel.leave();
+      cancelled = true;
       channelRef.current = null;
     };
   }, [conversationId]);
@@ -186,5 +253,13 @@ export function useConversationChannel(conversationId: string | null) {
     channelRef.current?.push("interrupt", {});
   }
 
-  return { ...state, send, interrupt };
+  function regenerate() {
+    channelRef.current
+      ?.push("regenerate", {})
+      .receive("error", (reply: { reason: string }) =>
+        dispatch({ type: "notice", tone: "error", text: reply.reason }),
+      );
+  }
+
+  return { ...state, send, interrupt, regenerate };
 }

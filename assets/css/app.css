@@ -15,6 +15,7 @@
 @plugin "../vendor/heroicons";
 
 /* daisyUI Tailwind Plugin. */
+
 @plugin "daisyui/packages/bundle/daisyui" {
   themes: false;
 }
@@ -150,18 +151,18 @@
 }
 
 .agent-block-live {
-  border-left-color: var(--color-primary);
+  border-left-color: var(--primary);
   animation: rail-pulse 1.6s ease-in-out infinite;
 }
 
 @keyframes rail-pulse {
-  0%, 100% { border-left-color: color-mix(in oklch, var(--color-primary) 100%, transparent); }
-  50% { border-left-color: color-mix(in oklch, var(--color-primary) 35%, transparent); }
+  0%, 100% { border-left-color: color-mix(in oklch, var(--primary) 100%, transparent); }
+  50% { border-left-color: color-mix(in oklch, var(--primary) 35%, transparent); }
 }
 
 .cursor-blink::after {
   content: "▍";
-  color: var(--color-primary);
+  color: var(--primary);
   animation: cursor-blink 1.1s steps(2) infinite;
 }
 
@@ -173,7 +174,7 @@
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 9999px;
-  background: var(--color-primary);
+  background: var(--primary);
   animation: rail-pulse-dot 1.6s ease-in-out infinite;
 }
 
@@ -186,4 +187,56 @@
   .agent-block-live, .pulse-dot, .cursor-blink::after {
     animation: none;
   }
+}
+
+/* ── shadcn/ui tokens: the longpi palette (light theme) ─────────────── */
+:root {
+  --background: oklch(100% 0 0);
+  --foreground: oklch(22% 0.02 265);
+  --card: oklch(99% 0.002 265);
+  --card-foreground: oklch(22% 0.02 265);
+  --popover: oklch(100% 0 0);
+  --popover-foreground: oklch(22% 0.02 265);
+  --primary: oklch(52% 0.18 265);
+  --primary-foreground: oklch(99% 0.005 265);
+  --secondary: oklch(96% 0.008 265);
+  --secondary-foreground: oklch(30% 0.03 265);
+  --muted: oklch(97% 0.005 265);
+  --muted-foreground: oklch(52% 0.02 265);
+  --accent: oklch(96% 0.012 265);
+  --accent-foreground: oklch(30% 0.03 265);
+  --destructive: oklch(58% 0.2 25);
+  --destructive-foreground: oklch(99% 0.01 25);
+  --border: oklch(92% 0.006 265);
+  --input: oklch(90% 0.008 265);
+  --ring: oklch(52% 0.18 265);
+  --tool: oklch(55% 0.13 165);
+  --radius: 0.625rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-tool: var(--tool);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }

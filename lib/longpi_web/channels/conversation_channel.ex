@@ -46,10 +46,31 @@ defmodule LongpiWeb.ConversationChannel do
     {:reply, :ok, socket}
   end
 
+  def handle_in("regenerate", _payload, socket) do
+    case Session.regenerate(socket.assigns.session) do
+      :ok -> {:reply, :ok, socket}
+      {:error, reason} -> {:reply, {:error, %{reason: to_string(reason)}}, socket}
+    end
+  end
+
+  # Current history snapshot, for a client that re-attached to an
+  # already-joined channel and needs to rebuild its view.
+  def handle_in("get_state", _payload, socket) do
+    session = socket.assigns.session
+
+    history =
+      session
+      |> Session.messages()
+      |> Enum.reject(&(&1.role == :system))
+      |> Enum.map(&serialize_message/1)
+
+    {:reply, {:ok, %{messages: history, status: Session.status(session)}}, socket}
+  end
+
   @impl true
-  def handle_info({:agent_event, event}, socket) do
+  def handle_info({:agent_event, seq, event}, socket) do
     case serialize_event(event) do
-      {name, payload} -> push(socket, name, payload)
+      {name, payload} -> push(socket, name, Map.put(payload, :seq, seq))
       nil -> :ok
     end
 
@@ -66,6 +87,10 @@ defmodule LongpiWeb.ConversationChannel do
     do: {"tool_result", %{id: call.id, name: call.name, content: content, error: error?}}
 
   defp serialize_event({:usage, usage}), do: {"usage", %{usage: usage}}
+
+  defp serialize_event({:history, messages}),
+    do: {"history", %{messages: Enum.map(messages, &serialize_message/1)}}
+
   defp serialize_event({:turn_ended, reason}), do: {"turn_ended", %{reason: to_string(reason)}}
 
   defp serialize_event({:turn_failed, reason}),

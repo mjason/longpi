@@ -37,6 +37,12 @@ defmodule Longpi.Agent.Session do
   @doc "Aborts the running turn, keeping any partial assistant text."
   def interrupt(session), do: GenServer.call(session, :interrupt)
 
+  @doc """
+  Re-runs the last turn: drops the previous assistant response (and its tool
+  calls) back to the last user message and generates a fresh reply.
+  """
+  def regenerate(session), do: GenServer.call(session, :regenerate)
+
   def messages(session), do: GenServer.call(session, :messages)
 
   def status(session), do: GenServer.call(session, :status)
@@ -63,7 +69,8 @@ defmodule Longpi.Agent.Session do
        toolbox: Toolbox.new(opts[:tools] || Toolbox.default_modules()),
        stream_to: opts[:stream_to],
        conversation_id: opts[:conversation_id],
-       persisted_count: length(history)
+       persisted_count: length(history),
+       seq: 0
      }}
   end
 
@@ -89,22 +96,24 @@ defmodule Longpi.Agent.Session do
     user_message = Message.user(text)
     state = persist(state, [user_message])
     messages = state.messages ++ [user_message]
-    session = self()
+    {:reply, :ok, run_turn(%{state | messages: messages}, messages)}
+  end
 
-    config = %{
-      llm: state.llm,
-      model: state.model,
-      toolbox: state.toolbox,
-      ctx: state.ctx,
-      sink: fn event -> send(session, {:turn_event, event}) end
-    }
+  def handle_call(:regenerate, _from, %{status: :running} = state) do
+    {:reply, {:error, :busy}, state}
+  end
 
-    task =
-      Task.Supervisor.async_nolink(Longpi.Agent.TaskSupervisor, fn ->
-        Turn.run(config, messages)
-      end)
+  def handle_call(:regenerate, _from, state) do
+    case truncate_to_last_user(state) do
+      {:ok, state} ->
+        # Tell clients to rebuild their view from the truncated history before
+        # the new turn streams in.
+        state = notify(state, {:history, broadcast_history(state)})
+        {:reply, :ok, run_turn(state, state.messages)}
 
-    {:reply, :ok, %{state | messages: messages, status: :running, task: task, partial: []}}
+      :error ->
+        {:reply, {:error, :nothing_to_regenerate}, state}
+    end
   end
 
   def handle_call(:interrupt, _from, %{status: :running} = state) do
@@ -115,7 +124,7 @@ defmodule Longpi.Agent.Session do
       |> keep_partial_text()
       |> Map.merge(%{status: :idle, task: nil, partial: []})
 
-    notify(state, {:turn_ended, :interrupted})
+    state = notify(state, {:turn_ended, :interrupted})
     {:reply, :ok, state}
   end
 
@@ -127,7 +136,7 @@ defmodule Longpi.Agent.Session do
 
   @impl true
   def handle_info({:turn_event, event}, state) do
-    notify(state, event)
+    state = notify(state, event)
 
     case event do
       {:text_delta, text} -> {:noreply, %{state | partial: [state.partial | text]}}
@@ -144,13 +153,13 @@ defmodule Longpi.Agent.Session do
       {:ok, new_messages} ->
         state = persist(state, new_messages)
         state = %{state | messages: state.messages ++ new_messages}
-        notify(state, {:turn_ended, :complete})
+        state = notify(state, {:turn_ended, :complete})
         {:noreply, state}
 
       {:error, reason, new_messages} ->
         state = persist(state, new_messages)
         state = %{state | messages: state.messages ++ new_messages}
-        notify(state, {:turn_failed, reason})
+        state = notify(state, {:turn_failed, reason})
         {:noreply, state}
     end
   end
@@ -159,7 +168,7 @@ defmodule Longpi.Agent.Session do
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
     state = keep_partial_text(state)
     state = %{state | status: :idle, task: nil, partial: []}
-    notify(state, {:turn_failed, {:crashed, reason}})
+    state = notify(state, {:turn_failed, {:crashed, reason}})
     {:noreply, state}
   end
 
@@ -177,6 +186,61 @@ defmodule Longpi.Agent.Session do
     end
   end
 
+  defp run_turn(state, messages) do
+    session = self()
+
+    config = %{
+      llm: state.llm,
+      model: state.model,
+      toolbox: state.toolbox,
+      ctx: state.ctx,
+      sink: fn event -> send(session, {:turn_event, event}) end
+    }
+
+    task =
+      Task.Supervisor.async_nolink(Longpi.Agent.TaskSupervisor, fn ->
+        Turn.run(config, messages)
+      end)
+
+    %{state | status: :running, task: task, partial: []}
+  end
+
+  # Drops everything after the last user message, in memory and in storage, so
+  # the next turn regenerates from that point.
+  defp truncate_to_last_user(state) do
+    [system | rest] = state.messages
+
+    case last_index(rest, &(&1.role == :user)) do
+      nil ->
+        :error
+
+      idx ->
+        kept = Enum.take(rest, idx + 1)
+        delete_persisted_after(state, idx)
+        {:ok, %{state | messages: [system | kept], persisted_count: idx + 1}}
+    end
+  end
+
+  defp last_index(list, fun) do
+    list
+    |> Enum.with_index()
+    |> Enum.reduce(nil, fn {item, idx}, acc -> if fun.(item), do: idx, else: acc end)
+  end
+
+  defp delete_persisted_after(%{conversation_id: nil}, _keep_index), do: :ok
+
+  defp delete_persisted_after(state, keep_index) do
+    state.conversation_id
+    |> Longpi.Agent.list_messages!()
+    |> Enum.filter(&(&1.position > keep_index))
+    |> Enum.each(&Ash.destroy!/1)
+  end
+
+  defp broadcast_history(state) do
+    state.messages
+    |> Enum.reject(&(&1.role == :system))
+  end
+
   defp persist(%{conversation_id: nil} = state, _new_messages), do: state
 
   defp persist(state, new_messages) do
@@ -191,18 +255,23 @@ defmodule Longpi.Agent.Session do
     %{state | persisted_count: state.persisted_count + length(new_messages)}
   end
 
+  # Every broadcast event carries a monotonically increasing sequence number
+  # so clients can drop duplicates. A browser can briefly end up with two
+  # channel processes subscribed to the same topic (socket reconnects), and
+  # without dedup each streamed delta would be applied twice.
   defp notify(state, event) do
+    seq = state.seq + 1
     if is_pid(state.stream_to), do: send(state.stream_to, {:agent_event, event})
 
     if state.conversation_id do
       Phoenix.PubSub.broadcast(
         Longpi.PubSub,
         topic(state.conversation_id),
-        {:agent_event, event}
+        {:agent_event, seq, event}
       )
     end
 
-    :ok
+    %{state | seq: seq}
   end
 
   @doc "PubSub topic carrying `{:agent_event, event}` messages for a conversation."

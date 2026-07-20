@@ -109,7 +109,7 @@ config :esbuild,
   version: "0.25.4",
   longpi: [
     args:
-      ~w(js/index.tsx js/app.js --bundle --target=es2022 --outdir=../priv/static/assets --external:/fonts/* --external:/images/* --alias:@=. --splitting --format=esm),
+      ~w(js/index.tsx js/app.js --bundle --target=es2022 --outdir=../priv/static/assets --external:/fonts/* --external:/images/* --alias:@=./js --splitting --format=esm),
     cd: Path.expand("../assets", __DIR__),
     env: %{
       "NODE_PATH" =>

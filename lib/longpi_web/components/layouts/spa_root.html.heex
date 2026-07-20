@@ -3,13 +3,14 @@ SPDX-FileCopyrightText: 2025 ash_typescript contributors <https://github.com/ash
 SPDX-License-Identifier: MIT
 -->
 <!DOCTYPE html>
-<html lang="en" data-theme="longpi">
+<html lang="en" data-theme="light" style="color-scheme: light">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
     <.live_title default="Longpi">Longpi</.live_title>
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
+    <link phx-track-static rel="stylesheet" href={~p"/assets/index.css"} />
   </head>
   <body>
     {@inner_content}

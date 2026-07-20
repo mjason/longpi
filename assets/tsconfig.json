@@ -24,6 +24,7 @@
     "esModuleInterop": true,
     "jsx": "react-jsx",
     "paths": {
+      "@/*": ["./js/*"],
       "phoenix": ["../deps/phoenix/assets/js/phoenix/index.js"],
       "*": ["./*", "../deps/*"]
     },
