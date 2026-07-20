@@ -2,6 +2,8 @@
    https://tailwindcss.com/docs/configuration */
 
 @import "tailwindcss" source(none);
+/* Shimmer utilities for the running-tool label in tool-fallback. */
+@import "tw-shimmer";
 @source "../../deps/ash_authentication_phoenix";
 @import "phoenix-colocated/longpi/colocated.css";
 @source "../css";
