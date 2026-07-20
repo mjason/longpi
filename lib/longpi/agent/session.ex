@@ -104,7 +104,11 @@ defmodule Longpi.Agent.Session do
        # turn's prompt-token usage, and the running compaction task.
        compaction: load_compaction(opts[:conversation_id]),
        last_input_tokens: nil,
-       compaction_task: nil
+       compaction_task: nil,
+       # Auto-title the conversation after its first turn if it has no title yet.
+       needs_title:
+         not is_nil(opts[:conversation_id]) and is_nil(conversation && conversation.title),
+       title_task: nil
      }}
   end
 
@@ -267,6 +271,7 @@ defmodule Longpi.Agent.Session do
         state = persist(state, new_messages)
         state = %{state | messages: state.messages ++ new_messages}
         state = notify(state, {:turn_ended, :complete})
+        state = maybe_start_titling(state)
         {:noreply, maybe_start_compaction(state)}
 
       {:error, reason, new_messages} ->
@@ -281,6 +286,26 @@ defmodule Longpi.Agent.Session do
   def handle_info({ref, result}, %{compaction_task: %Task{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
     {:noreply, apply_compaction(%{state | compaction_task: nil, status: :idle}, result)}
+  end
+
+  # Title task finished: persist and broadcast the generated title.
+  def handle_info({ref, result}, %{title_task: %Task{ref: ref}} = state) do
+    Process.demonitor(ref, [:flush])
+    state = %{state | title_task: nil}
+
+    case result do
+      {:ok, title} when is_binary(title) and title != "" ->
+        persist_title(state.conversation_id, title)
+        {:noreply, notify(state, {:titled, title})}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  # Title task crashed: harmless, the conversation just keeps its default label.
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{title_task: %Task{ref: ref}} = state) do
+    {:noreply, %{state | title_task: nil}}
   end
 
   # Turn task crashed
@@ -307,6 +332,50 @@ defmodule Longpi.Agent.Session do
   end
 
   defp input_tokens(_), do: nil
+
+  # Kicks off async title generation from the first user message, once.
+  defp maybe_start_titling(%{needs_title: false} = state), do: state
+  defp maybe_start_titling(%{title_task: %Task{}} = state), do: state
+
+  defp maybe_start_titling(state) do
+    if Application.get_env(:longpi, :auto_title, true) do
+      start_titling(state)
+    else
+      state
+    end
+  end
+
+  defp start_titling(state) do
+    [_system | history] = state.messages
+
+    case Enum.find(history, &(&1.role == :user)) do
+      %{content: content} when is_binary(content) and content != "" ->
+        llm = state.llm
+        model = state.model
+
+        task =
+          Task.Supervisor.async_nolink(Longpi.Agent.TaskSupervisor, fn ->
+            Longpi.Agent.Titler.title(llm, model, content)
+          end)
+
+        %{state | needs_title: false, title_task: task}
+
+      _ ->
+        state
+    end
+  end
+
+  defp persist_title(nil, _title), do: :ok
+
+  defp persist_title(conversation_id, title) do
+    with {:ok, conversation} <- Longpi.Agent.get_conversation(conversation_id) do
+      Longpi.Agent.update_conversation(conversation, %{title: title})
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  end
 
   defp persist_model(nil, _spec), do: :ok
 

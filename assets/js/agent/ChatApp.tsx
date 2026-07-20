@@ -76,6 +76,11 @@ export default function ChatApp() {
                 prev.map((c) => (c.id === id ? { ...c, model } : c)),
               )
             }
+            onTitled={(id, title) =>
+              setConversations((prev) =>
+                prev.map((c) => (c.id === id ? { ...c, title } : c)),
+              )
+            }
           />
         ) : (
           <main className="grid flex-1 place-items-center">
@@ -217,9 +222,11 @@ function Sidebar(props: {
 function ConversationPane({
   conversation,
   onModelChanged,
+  onTitled,
 }: {
   conversation: ConversationSummary;
   onModelChanged: (id: string, model: string) => void;
+  onTitled: (id: string, title: string) => void;
 }) {
   const {
     runtime,
@@ -230,12 +237,18 @@ function ConversationPane({
     usage,
     currentModel,
     setModel,
+    title,
   } = useChannelRuntime(conversation.id, conversation.model);
 
   // Keep the sidebar label in sync when the model changes via /model.
   useEffect(() => {
     if (currentModel !== conversation.model) onModelChanged(conversation.id, currentModel);
   }, [currentModel]);
+
+  // Adopt the auto-generated title into the sidebar once it arrives.
+  useEffect(() => {
+    if (title) onTitled(conversation.id, title);
+  }, [title]);
 
   // Show the most recent notice briefly (command echoes, errors, interrupts).
   const [toast, setToast] = useState<{ tone: "error" | "info"; text: string } | null>(null);

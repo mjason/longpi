@@ -80,6 +80,9 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   channel.on("model_changed", (p: { model: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "model_changed", model: p.model })),
   );
+  channel.on("titled", (p: { title: string; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "titled", title: p.title })),
+  );
   channel.on("turn_ended", (p: { reason: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "turn_ended", reason: p.reason })),
   );
@@ -118,11 +121,14 @@ type State = {
   usage: ContextUsage | null;
   // Model override from a live /model switch; null = use the conversation's own.
   model: string | null;
+  // Auto-generated title from the first turn; null = use the conversation's own.
+  title: string | null;
 };
 
 type Action =
   | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage }
   | { type: "model_changed"; model: string }
+  | { type: "titled"; title: string }
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
@@ -185,10 +191,13 @@ function settle(items: ThreadItem[]): ThreadItem[] {
 function reduce(state: State, action: Action): State {
   switch (action.type) {
     case "reset":
-      return { items: [], status: "connecting", usage: null, model: null };
+      return { items: [], status: "connecting", usage: null, model: null, title: null };
 
     case "model_changed":
       return { ...state, model: action.model };
+
+    case "titled":
+      return { ...state, title: action.title };
 
     case "joined":
       return {
@@ -288,6 +297,7 @@ export function useConversationChannel(conversationId: string | null) {
     status: "connecting",
     usage: null,
     model: null,
+    title: null,
   });
   const channelRef = useRef<Channel | null>(null);
 

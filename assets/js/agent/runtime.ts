@@ -32,6 +32,7 @@ export function useChannelRuntime(conversationId: string, defaultModel: string) 
     notices,
     usage,
     model,
+    title,
   } = useConversationChannel(conversationId);
 
   const currentModel = model ?? defaultModel;
@@ -89,6 +90,7 @@ export function useChannelRuntime(conversationId: string, defaultModel: string) 
     usage,
     currentModel,
     setModel,
+    title,
   };
 }
 

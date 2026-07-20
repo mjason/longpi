@@ -138,6 +138,8 @@ defmodule LongpiWeb.ConversationChannel do
 
   defp serialize_event({:model_changed, model}), do: {"model_changed", %{model: model}}
 
+  defp serialize_event({:titled, title}), do: {"titled", %{title: title}}
+
   defp serialize_event({:history, messages}),
     do: {"history", %{messages: Enum.map(messages, &serialize_message/1)}}
 

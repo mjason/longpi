@@ -138,4 +138,30 @@ defmodule Longpi.Agent.SessionCompactionTest do
   test "manual compact reports when there's nothing to compact", %{session: session} do
     assert {:error, :nothing_to_compact} = Session.compact(session)
   end
+
+  test "auto-titles the conversation after the first turn", %{
+    session: session,
+    conversation: conversation
+  } do
+    Application.put_env(:longpi, :auto_title, true)
+    on_exit(fn -> Application.put_env(:longpi, :auto_title, false) end)
+
+    LLMMock
+    |> expect(:stream, fn _, _, _, _, sink ->
+      sink.({:usage, %{input_tokens: 10}})
+      {:ok, %{text: "sure", tool_calls: []}}
+    end)
+    |> expect(:stream, fn _, messages, [], [], _ ->
+      # The title call sees the first user message and no tools.
+      assert Enum.any?(messages, &String.contains?(&1[:content] || "", "login"))
+      {:ok, %{text: "Fix the login bug", tool_calls: []}}
+    end)
+
+    :ok = Session.send_message(session, "help me fix the login bug")
+    assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
+    assert_receive {:agent_event, {:titled, "Fix the login bug"}}, 2_000
+
+    {:ok, reloaded} = Longpi.Agent.get_conversation(conversation.id)
+    assert reloaded.title == "Fix the login bug"
+  end
 end
