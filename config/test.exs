@@ -20,6 +20,11 @@ config :longpi, LongpiWeb.Endpoint,
   secret_key_base: "hQ0Ax7xjyonDP6V3d57wPorAs25GgEzSxT5eLLu3CMsUxjQR6PnKaUdE1sYhbXf8",
   server: false
 
+# Agent LLM boundary is mocked in tests (Mox mock defined in test_helper.exs)
+config :longpi,
+  llm_client: Longpi.Agent.LLM.Mock,
+  llm_model: "test:model"
+
 # In test we don't send emails
 config :longpi, Longpi.Mailer, adapter: Swoosh.Adapters.Test
 

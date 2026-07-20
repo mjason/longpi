@@ -3,14 +3,96 @@
 
 
 
+export type UUID = string;
+export type UtcDateTimeUsec = string;
+
+// Conversation Schema
+export type ConversationResourceSchema = {
+  __type: "Resource";
+  __primitiveFields: "id" | "title" | "cwd" | "model" | "insertedAt" | "updatedAt";
+  id: UUID;
+  title: string | null;
+  cwd: string;
+  model: string;
+  insertedAt: UtcDateTimeUsec;
+  updatedAt: UtcDateTimeUsec;
+};
 
 
 
+export type ConversationAttributesOnlySchema = {
+  __type: "Resource";
+  __primitiveFields: "id" | "title" | "cwd" | "model" | "insertedAt" | "updatedAt";
+  id: UUID;
+  title: string | null;
+  cwd: string;
+  model: string;
+  insertedAt: UtcDateTimeUsec;
+  updatedAt: UtcDateTimeUsec;
+};
+
+
+export type ConversationFilterInput = {
+  and?: Array<ConversationFilterInput>;
+  or?: Array<ConversationFilterInput>;
+  not?: Array<ConversationFilterInput>;
+
+  id?: {
+    eq?: UUID;
+    notEq?: UUID;
+    in?: Array<UUID>;
+  };
+
+  title?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
+    isNil?: boolean;
+  };
+
+  cwd?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
+  };
+
+  model?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
+  };
+
+  insertedAt?: {
+    eq?: UtcDateTimeUsec;
+    notEq?: UtcDateTimeUsec;
+    greaterThan?: UtcDateTimeUsec;
+    greaterThanOrEqual?: UtcDateTimeUsec;
+    lessThan?: UtcDateTimeUsec;
+    lessThanOrEqual?: UtcDateTimeUsec;
+    in?: Array<UtcDateTimeUsec>;
+  };
+
+  updatedAt?: {
+    eq?: UtcDateTimeUsec;
+    notEq?: UtcDateTimeUsec;
+    greaterThan?: UtcDateTimeUsec;
+    greaterThanOrEqual?: UtcDateTimeUsec;
+    lessThan?: UtcDateTimeUsec;
+    lessThanOrEqual?: UtcDateTimeUsec;
+    in?: Array<UtcDateTimeUsec>;
+  };
 
 
 
+};
 
 
+export const conversationFilterFields = ["id", "title", "cwd", "model", "insertedAt", "updatedAt"] as const;
+export type ConversationFilterField = (typeof conversationFilterFields)[number];
+
+
+export const conversationSortFields = ["id", "title", "cwd", "model", "insertedAt", "updatedAt"] as const;
+export type ConversationSortField = (typeof conversationSortFields)[number];
 
 
 // Utility Types

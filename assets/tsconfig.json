@@ -23,10 +23,11 @@
   "compilerOptions": {
     "esModuleInterop": true,
     "jsx": "react-jsx",
-    "baseUrl": ".",
     "paths": {
-      "*": ["../deps/*"]
+      "phoenix": ["../deps/phoenix/assets/js/phoenix/index.js"],
+      "*": ["./*", "../deps/*"]
     },
+    "skipLibCheck": true,
     "allowJs": true,
     "noEmit": true
   },

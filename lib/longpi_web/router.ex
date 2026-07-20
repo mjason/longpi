@@ -51,7 +51,7 @@ defmodule LongpiWeb.Router do
   scope "/", LongpiWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    get "/", PageController, :index
     auth_routes AuthController, Longpi.Accounts.User, path: "/auth"
     sign_out_route AuthController
 

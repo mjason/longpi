@@ -43,3 +43,5 @@ npm-debug.log
 # Rust shim build artifacts
 native/longpi_shim/target/
 priv/shim/
+
+config/dev.secret.exs

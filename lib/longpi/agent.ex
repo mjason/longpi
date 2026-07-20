@@ -1,0 +1,38 @@
+defmodule Longpi.Agent do
+  @moduledoc """
+  Agent domain: conversations and their persisted messages.
+
+  Process-side APIs (running sessions) live in `Longpi.Agent.Sessions`;
+  this domain owns the durable state.
+  """
+
+  use Ash.Domain, otp_app: :longpi, extensions: [AshAdmin.Domain, AshTypescript.Rpc]
+
+  admin do
+    show? true
+  end
+
+  typescript_rpc do
+    resource Longpi.Agent.Conversation do
+      rpc_action :list_conversations, :read
+      rpc_action :get_conversation, :read, get_by: [:id]
+      rpc_action :create_conversation, :create
+      rpc_action :update_conversation, :update
+      rpc_action :destroy_conversation, :destroy
+    end
+  end
+
+  resources do
+    resource Longpi.Agent.Conversation do
+      define :create_conversation, action: :create
+      define :get_conversation, action: :read, get_by: [:id]
+      define :list_conversations, action: :read
+      define :destroy_conversation, action: :destroy
+    end
+
+    resource Longpi.Agent.ConversationMessage do
+      define :append_message, action: :create
+      define :list_messages, action: :for_conversation, args: [:conversation_id]
+    end
+  end
+end

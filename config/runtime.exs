@@ -1,5 +1,15 @@
 import Config
 
+# Point the OpenAI provider at an OpenAI-compatible gateway
+# (e.g. https://openrouter.listenai.com/v1). Key comes from OPENAI_API_KEY.
+if openai_base_url = System.get_env("LONGPI_OPENAI_BASE_URL") do
+  config :req_llm, :openai, base_url: openai_base_url
+end
+
+if model = System.get_env("LONGPI_LLM_MODEL") do
+  config :longpi, llm_model: model
+end
+
 # config/runtime.exs is executed for all environments, including
 # during releases. It is executed after compilation and before the
 # system starts, so it is typically used to load production configuration

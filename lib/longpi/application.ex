@@ -15,6 +15,9 @@ defmodule Longpi.Application do
       {DNSCluster, query: Application.get_env(:longpi, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Longpi.PubSub},
       {DynamicSupervisor, name: Longpi.Shell.CommandSupervisor, strategy: :one_for_one},
+      {Task.Supervisor, name: Longpi.Agent.TaskSupervisor},
+      {Registry, keys: :unique, name: Longpi.Agent.SessionRegistry},
+      {DynamicSupervisor, name: Longpi.Agent.SessionSupervisor, strategy: :one_for_one},
       # Start a worker by calling: Longpi.Worker.start_link(arg)
       # {Longpi.Worker, arg},
       # Start to serve requests, typically the last entry

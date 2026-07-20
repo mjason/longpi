@@ -72,7 +72,12 @@ config :spark,
 config :longpi,
   ecto_repos: [Longpi.Repo],
   generators: [timestamp_type: :utc_datetime],
-  ash_domains: [Longpi.Accounts]
+  ash_domains: [Longpi.Accounts, Longpi.Agent]
+
+# Agent LLM boundary: swapped for a Mox mock in test
+config :longpi,
+  llm_client: Longpi.Agent.LLM.ReqLLMClient,
+  llm_model: "anthropic:claude-sonnet-4-5"
 
 # Configure the endpoint
 config :longpi, LongpiWeb.Endpoint,
