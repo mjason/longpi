@@ -1,4 +1,4 @@
-import { Check, KeyRound, Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Check, KeyRound, Loader2, Plus, RotateCcw, Search, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
@@ -6,13 +6,14 @@ import { Input } from "../components/ui/input";
 import { cn } from "../lib/utils";
 import {
   addModel,
-  clearKey,
+  discoverModels,
   loadDefaults,
   loadModels,
   loadProviders,
   loadSettings,
   loadToolCatalog,
   type ModelRow,
+  PROVIDER_PRESETS,
   type ProviderRow,
   removeModel,
   saveProvider,
@@ -178,18 +179,16 @@ function GeneralTab() {
 function ProvidersTab() {
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [name, setName] = useState("");
+  const [presetId, setPresetId] = useState<string>(PROVIDER_PRESETS[0].id);
   const refresh = () => loadProviders().then(setProviders);
 
   useEffect(() => {
     refresh().then(() => setLoading(false));
   }, []);
 
-  async function add() {
-    const n = name.trim().toLowerCase();
-    if (!n) return;
-    await saveProvider(n, "");
-    setName("");
+  async function addPreset() {
+    const preset = PROVIDER_PRESETS.find((p) => p.id === presetId)!;
+    await saveProvider(preset.name, preset.baseUrl, preset.label);
     refresh();
   }
 
@@ -198,14 +197,13 @@ function ProvidersTab() {
   return (
     <div className="space-y-4 py-4">
       <p className="text-xs text-muted-foreground">
-        API credentials per provider (the model spec prefix, e.g. <code>openai</code>). Keys are
-        write-only: once saved they never leave the server. Leave a key field blank to keep the
-        existing one.
+        API credentials per provider. Keys are write-only — once saved they never leave the server.
+        For an OpenAI-compatible gateway, set the base URL and discover its models with one click.
       </p>
 
       {providers.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          No providers configured. Add one below (falls back to environment variables until set).
+          No providers yet. Falls back to environment variables until you add one.
         </p>
       )}
 
@@ -214,14 +212,19 @@ function ProvidersTab() {
       ))}
 
       <div className="flex items-end gap-2 border-t border-border pt-4">
-        <Input
-          className="flex-1 font-mono text-sm"
-          placeholder="provider name (openai, anthropic, …)"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <Button onClick={add} disabled={!name.trim()}>
-          <Plus className="size-4" /> Add
+        <select
+          className="h-9 flex-1 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring"
+          value={presetId}
+          onChange={(e) => setPresetId(e.target.value)}
+        >
+          {PROVIDER_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+        <Button onClick={addPreset}>
+          <Plus className="size-4" /> Add provider
         </Button>
       </div>
     </div>
@@ -231,11 +234,45 @@ function ProvidersTab() {
 function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onChange: () => void }) {
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl ?? "");
   const [apiKey, setApiKey] = useState("");
+  const [discovered, setDiscovered] = useState<string[] | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [discovering, setDiscovering] = useState(false);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
+
+  async function discover() {
+    setDiscovering(true);
+    setDiscoverError(null);
+    // Save base_url/key first so the server can reach the endpoint.
+    await saveProvider(provider.name, baseUrl, provider.label ?? "");
+    if (apiKey.trim()) {
+      await saveProviderKey(provider.id, apiKey);
+      setApiKey("");
+      onChange();
+    }
+    const result = await discoverModels(provider.name);
+    setDiscovering(false);
+    if (result.error) setDiscoverError(result.error);
+    else {
+      setDiscovered(result.models ?? []);
+      setSelected(new Set(result.models ?? []));
+    }
+  }
+
+  async function addSelected() {
+    let i = 0;
+    for (const id of selected) {
+      await addModel(`${provider.name}:${id}`, id, i++);
+    }
+    setDiscovered(null);
+    setSelected(new Set());
+  }
 
   return (
     <div className="space-y-2 rounded-md border border-border p-3">
       <div className="flex items-center gap-2">
-        <span className="font-mono text-sm font-semibold">{provider.name}</span>
+        <span className="text-sm font-semibold">{provider.label || provider.name}</span>
+        <span className="font-mono text-xs text-muted-foreground">{provider.name}</span>
+        <div className="flex-1" />
         <span
           className={cn(
             "flex items-center gap-1 text-xs",
@@ -248,7 +285,7 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
       </div>
       <Input
         className="font-mono text-xs"
-        placeholder="base URL (optional, e.g. https://gateway/v1)"
+        placeholder="base URL (e.g. https://openrouter.listenai.com/v1)"
         value={baseUrl}
         onChange={(e) => setBaseUrl(e.target.value)}
       />
@@ -259,17 +296,55 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
         value={apiKey}
         onChange={(e) => setApiKey(e.target.value)}
       />
-      <SaveButton
-        label="Save provider"
-        onSave={async () => {
-          await saveProvider(provider.name, baseUrl);
-          if (apiKey.trim()) {
-            await saveProviderKey(provider.id, apiKey);
-            setApiKey("");
-          }
-          onChange();
-        }}
-      />
+      <div className="flex items-center gap-2">
+        <SaveButton
+          label="Save"
+          onSave={async () => {
+            await saveProvider(provider.name, baseUrl, provider.label ?? "");
+            if (apiKey.trim()) {
+              await saveProviderKey(provider.id, apiKey);
+              setApiKey("");
+            }
+            onChange();
+          }}
+        />
+        <Button variant="outline" onClick={discover} disabled={discovering || !baseUrl.trim()}>
+          {discovering ? <Loader2 className="animate-spin" /> : <Search className="size-4" />}
+          Discover models
+        </Button>
+      </div>
+
+      {discoverError && <p className="text-xs text-destructive">{discoverError}</p>}
+
+      {discovered && (
+        <div className="space-y-2 rounded-md border border-border bg-card/40 p-2">
+          <p className="text-xs text-muted-foreground">
+            {discovered.length} models found. Select the ones to add.
+          </p>
+          <div className="max-h-40 space-y-1 overflow-y-auto">
+            {discovered.map((id) => (
+              <label key={id} className="flex items-center gap-2 font-mono text-xs">
+                <input
+                  type="checkbox"
+                  checked={selected.has(id)}
+                  onChange={() =>
+                    setSelected((s) => {
+                      const next = new Set(s);
+                      next.has(id) ? next.delete(id) : next.add(id);
+                      return next;
+                    })
+                  }
+                  className="size-3.5 accent-[var(--primary)]"
+                />
+                {id}
+              </label>
+            ))}
+          </div>
+          <Button size="sm" onClick={addSelected} disabled={selected.size === 0}>
+            Add {selected.size} to Models
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

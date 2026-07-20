@@ -93,24 +93,49 @@ export async function loadDefaults(): Promise<{ systemPrompt: string }> {
 export type ProviderRow = {
   id: string;
   name: string;
+  label: string | null;
   baseUrl: string | null;
   configured: boolean | null;
 };
 
+/** Preset provider types shown in the picker. `name` is the routing key. */
+export const PROVIDER_PRESETS = [
+  { id: "openai", label: "OpenAI", name: "openai", baseUrl: "", compatible: false },
+  { id: "anthropic", label: "Anthropic", name: "anthropic", baseUrl: "", compatible: false },
+  { id: "google", label: "Google Gemini", name: "google", baseUrl: "", compatible: false },
+  {
+    id: "compatible",
+    label: "OpenAI-compatible gateway (OpenRouter, self-hosted, …)",
+    name: "openai",
+    baseUrl: "https://",
+    compatible: true,
+  },
+] as const;
+
 export async function loadProviders(): Promise<ProviderRow[]> {
   const result = await listProviders({
-    fields: ["id", "name", "baseUrl", "configured"],
+    fields: ["id", "name", "label", "baseUrl", "configured"],
     headers: buildCSRFHeaders(),
   });
   return result.success ? (result.data as ProviderRow[]) : [];
 }
 
-export async function saveProvider(name: string, baseUrl: string) {
+export async function saveProvider(name: string, baseUrl: string, label: string) {
   return putProvider({
-    input: { name, baseUrl: baseUrl || null },
+    input: { name, baseUrl: baseUrl || null, label: label || null },
     fields: ["id"],
     headers: buildCSRFHeaders(),
   });
+}
+
+export async function discoverModels(providerName: string): Promise<{ models?: string[]; error?: string }> {
+  const res = await fetch("/rpc/discover-models", {
+    method: "POST",
+    headers: { ...buildCSRFHeaders(), "content-type": "application/json" },
+    body: JSON.stringify({ provider: providerName }),
+  });
+  const body = await res.json();
+  return res.ok ? { models: body.models } : { error: body.error ?? "discovery failed" };
 }
 
 export async function saveProviderKey(id: string, apiKey: string) {

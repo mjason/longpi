@@ -34,13 +34,13 @@ defmodule Longpi.Agent.Provider do
       get_by [:name]
     end
 
-    # Sets name + base_url without touching the stored key.
+    # Sets name + base_url + label without touching the stored key.
     create :put do
       primary? true
       upsert? true
       upsert_identity :unique_name
-      upsert_fields [:base_url]
-      accept [:name, :base_url]
+      upsert_fields [:base_url, :label]
+      accept [:name, :base_url, :label]
     end
 
     # Updates only the api_key; blank values are ignored so the UI can leave it
@@ -69,6 +69,12 @@ defmodule Longpi.Agent.Provider do
 
     attribute :name, :string do
       allow_nil? false
+      public? true
+    end
+
+    # Human-facing label, e.g. "ListenAI Gateway". `name` is the routing key
+    # (the model-spec prefix / req_llm adapter, e.g. "openai").
+    attribute :label, :string do
       public? true
     end
 

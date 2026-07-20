@@ -65,9 +65,10 @@ export type ModelAttributesOnlySchema = {
 // Provider Schema
 export type ProviderResourceSchema = {
   __type: "Resource";
-  __primitiveFields: "id" | "name" | "baseUrl" | "insertedAt" | "updatedAt" | "configured";
+  __primitiveFields: "id" | "name" | "label" | "baseUrl" | "insertedAt" | "updatedAt" | "configured";
   id: UUID;
   name: string;
+  label: string | null;
   baseUrl: string | null;
   insertedAt: UtcDateTimeUsec;
   updatedAt: UtcDateTimeUsec;
@@ -78,9 +79,10 @@ export type ProviderResourceSchema = {
 
 export type ProviderAttributesOnlySchema = {
   __type: "Resource";
-  __primitiveFields: "id" | "name" | "baseUrl" | "insertedAt" | "updatedAt";
+  __primitiveFields: "id" | "name" | "label" | "baseUrl" | "insertedAt" | "updatedAt";
   id: UUID;
   name: string;
+  label: string | null;
   baseUrl: string | null;
   insertedAt: UtcDateTimeUsec;
   updatedAt: UtcDateTimeUsec;
@@ -250,6 +252,13 @@ export type ProviderFilterInput = {
     in?: Array<string>;
   };
 
+  label?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
+    isNil?: boolean;
+  };
+
   baseUrl?: {
     eq?: string;
     notEq?: string;
@@ -341,7 +350,7 @@ export type ConversationFilterField = (typeof conversationFilterFields)[number];
 export const modelFilterFields = ["id", "spec", "label", "enabled", "position", "insertedAt", "updatedAt"] as const;
 export type ModelFilterField = (typeof modelFilterFields)[number];
 
-export const providerFilterFields = ["id", "name", "baseUrl", "insertedAt", "updatedAt", "configured"] as const;
+export const providerFilterFields = ["id", "name", "label", "baseUrl", "insertedAt", "updatedAt", "configured"] as const;
 export type ProviderFilterField = (typeof providerFilterFields)[number];
 
 export const settingFilterFields = ["id", "key", "value", "insertedAt", "updatedAt"] as const;
@@ -354,7 +363,7 @@ export type ConversationSortField = (typeof conversationSortFields)[number];
 export const modelSortFields = ["id", "spec", "label", "enabled", "position", "insertedAt", "updatedAt"] as const;
 export type ModelSortField = (typeof modelSortFields)[number];
 
-export const providerSortFields = ["id", "name", "baseUrl", "insertedAt", "updatedAt", "configured"] as const;
+export const providerSortFields = ["id", "name", "label", "baseUrl", "insertedAt", "updatedAt", "configured"] as const;
 export type ProviderSortField = (typeof providerSortFields)[number];
 
 export const settingSortFields = ["id", "key", "value", "insertedAt", "updatedAt"] as const;

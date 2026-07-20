@@ -1128,6 +1128,7 @@ export async function validateListProviders(
 export type PutProviderInput = {
   name: string;
   baseUrl?: string | null;
+  label?: string | null;
 };
 
 export type PutProviderFields = UnifiedFieldSelection<ProviderResourceSchema>[];

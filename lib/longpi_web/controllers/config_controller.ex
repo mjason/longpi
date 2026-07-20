@@ -17,4 +17,11 @@ defmodule LongpiWeb.ConfigController do
       tools: Longpi.Agent.Prompts.tool_catalog()
     })
   end
+
+  def discover_models(conn, %{"provider" => provider}) do
+    case Longpi.Agent.ModelDiscovery.list(provider) do
+      {:ok, models} -> json(conn, %{models: models})
+      {:error, message} -> conn |> put_status(422) |> json(%{error: message})
+    end
+  end
 end
