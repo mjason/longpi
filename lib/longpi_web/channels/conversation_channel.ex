@@ -66,6 +66,17 @@ defmodule LongpiWeb.ConversationChannel do
     {:reply, :ok, socket}
   end
 
+  def handle_in("set_model", %{"spec" => spec}, socket) when is_binary(spec) do
+    case Session.set_model(socket.assigns.session, String.trim(spec)) do
+      {:ok, model} ->
+        broadcast!(socket, "model_changed", %{model: model})
+        {:reply, {:ok, %{model: model}}, socket}
+
+      {:error, reason} ->
+        {:reply, {:error, %{reason: to_string(reason)}}, socket}
+    end
+  end
+
   def handle_in("command", %{"name" => "compact"}, socket) do
     case Session.compact(socket.assigns.session) do
       :ok -> {:reply, :ok, socket}

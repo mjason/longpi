@@ -49,6 +49,7 @@ defmodule Longpi.Agent do
       define :create_conversation, action: :create
       define :get_conversation, action: :read, get_by: [:id]
       define :list_conversations, action: :read
+      define :update_conversation, action: :update
       define :destroy_conversation, action: :destroy
     end
 

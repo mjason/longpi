@@ -66,6 +66,12 @@ defmodule Longpi.Agent.Session do
   """
   def context_usage(session), do: GenServer.call(session, :context_usage)
 
+  @doc """
+  Switches the model used for subsequent turns (and persists it on the
+  conversation). Refuses while a turn or compaction is running.
+  """
+  def set_model(session, spec), do: GenServer.call(session, {:set_model, spec})
+
   # Server
 
   @impl true
@@ -182,6 +188,18 @@ defmodule Longpi.Agent.Session do
   def handle_call(:context_usage, _from, state),
     do: {:reply, context_usage_payload(state), state}
 
+  def handle_call({:set_model, _spec}, _from, %{status: status} = state)
+      when status in [:running, :compacting] do
+    {:reply, {:error, :busy}, state}
+  end
+
+  def handle_call({:set_model, spec}, _from, state) do
+    persist_model(state.conversation_id, spec)
+    state = %{state | model: spec}
+    # Push the new window immediately so the usage meter reflects it.
+    {:reply, {:ok, spec}, notify(state, {:context_usage, context_usage_payload(state)})}
+  end
+
   def handle_call(:compact, _from, %{status: status} = state)
       when status in [:running, :compacting] do
     {:reply, {:error, :busy}, state}
@@ -288,6 +306,18 @@ defmodule Longpi.Agent.Session do
   end
 
   defp input_tokens(_), do: nil
+
+  defp persist_model(nil, _spec), do: :ok
+
+  defp persist_model(conversation_id, spec) do
+    with {:ok, conversation} <- Longpi.Agent.get_conversation(conversation_id) do
+      Longpi.Agent.update_conversation(conversation, %{model: spec})
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  end
 
   # How full the model's context window is, as of the last turn's usage report.
   defp context_usage_payload(state) do
