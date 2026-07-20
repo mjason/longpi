@@ -26,6 +26,14 @@ defmodule Longpi.Agent do
       rpc_action :put_setting, :put
       rpc_action :update_setting, :update
     end
+
+    resource Longpi.Agent.Model do
+      rpc_action :list_models, :list
+      rpc_action :list_enabled_models, :enabled
+      rpc_action :create_model, :create
+      rpc_action :update_model, :update
+      rpc_action :destroy_model, :destroy
+    end
   end
 
   resources do
@@ -45,6 +53,14 @@ defmodule Longpi.Agent do
       define :put_setting, action: :put
       define :get_setting_by_key, action: :get_by_key, args: [:key]
       define :list_settings, action: :read
+    end
+
+    resource Longpi.Agent.Model do
+      define :create_model, action: :create
+      define :list_models, action: :list
+      define :list_enabled_models, action: :enabled
+      define :update_model, action: :update
+      define :destroy_model, action: :destroy
     end
   end
 end

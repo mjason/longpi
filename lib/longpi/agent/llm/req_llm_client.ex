@@ -139,9 +139,12 @@ defmodule Longpi.Agent.LLM.ReqLLMClient do
   end
 
   defp to_req_llm_tool(module) do
+    name = module.name()
+
     ReqLLM.Tool.new!(
-      name: module.name(),
-      description: module.description(),
+      name: name,
+      # Admin-overridable via the "tool_desc:<name>" setting.
+      description: Longpi.Agent.Prompts.tool_description(name, module.description()),
       parameter_schema: module.parameter_schema(),
       # Execution happens in Longpi.Agent.Turn; req_llm never calls this.
       callback: fn _args -> {:ok, ""} end

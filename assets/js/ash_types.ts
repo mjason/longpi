@@ -34,6 +34,34 @@ export type ConversationAttributesOnlySchema = {
 };
 
 
+// Model Schema
+export type ModelResourceSchema = {
+  __type: "Resource";
+  __primitiveFields: "id" | "spec" | "label" | "enabled" | "position" | "insertedAt" | "updatedAt";
+  id: UUID;
+  spec: string;
+  label: string | null;
+  enabled: boolean;
+  position: number;
+  insertedAt: UtcDateTimeUsec;
+  updatedAt: UtcDateTimeUsec;
+};
+
+
+
+export type ModelAttributesOnlySchema = {
+  __type: "Resource";
+  __primitiveFields: "id" | "spec" | "label" | "enabled" | "position" | "insertedAt" | "updatedAt";
+  id: UUID;
+  spec: string;
+  label: string | null;
+  enabled: boolean;
+  position: number;
+  insertedAt: UtcDateTimeUsec;
+  updatedAt: UtcDateTimeUsec;
+};
+
+
 // Setting Schema
 export type SettingResourceSchema = {
   __type: "Resource";
@@ -118,6 +146,68 @@ export type ConversationFilterInput = {
 
 
 };
+export type ModelFilterInput = {
+  and?: Array<ModelFilterInput>;
+  or?: Array<ModelFilterInput>;
+  not?: Array<ModelFilterInput>;
+
+  id?: {
+    eq?: UUID;
+    notEq?: UUID;
+    in?: Array<UUID>;
+  };
+
+  spec?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
+  };
+
+  label?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
+    isNil?: boolean;
+  };
+
+  enabled?: {
+    eq?: boolean;
+    notEq?: boolean;
+  };
+
+  position?: {
+    eq?: number;
+    notEq?: number;
+    greaterThan?: number;
+    greaterThanOrEqual?: number;
+    lessThan?: number;
+    lessThanOrEqual?: number;
+    in?: Array<number>;
+  };
+
+  insertedAt?: {
+    eq?: UtcDateTimeUsec;
+    notEq?: UtcDateTimeUsec;
+    greaterThan?: UtcDateTimeUsec;
+    greaterThanOrEqual?: UtcDateTimeUsec;
+    lessThan?: UtcDateTimeUsec;
+    lessThanOrEqual?: UtcDateTimeUsec;
+    in?: Array<UtcDateTimeUsec>;
+  };
+
+  updatedAt?: {
+    eq?: UtcDateTimeUsec;
+    notEq?: UtcDateTimeUsec;
+    greaterThan?: UtcDateTimeUsec;
+    greaterThanOrEqual?: UtcDateTimeUsec;
+    lessThan?: UtcDateTimeUsec;
+    lessThanOrEqual?: UtcDateTimeUsec;
+    in?: Array<UtcDateTimeUsec>;
+  };
+
+
+
+};
 export type SettingFilterInput = {
   and?: Array<SettingFilterInput>;
   or?: Array<SettingFilterInput>;
@@ -170,12 +260,18 @@ export type SettingFilterInput = {
 export const conversationFilterFields = ["id", "title", "cwd", "model", "systemPrompt", "insertedAt", "updatedAt"] as const;
 export type ConversationFilterField = (typeof conversationFilterFields)[number];
 
+export const modelFilterFields = ["id", "spec", "label", "enabled", "position", "insertedAt", "updatedAt"] as const;
+export type ModelFilterField = (typeof modelFilterFields)[number];
+
 export const settingFilterFields = ["id", "key", "value", "insertedAt", "updatedAt"] as const;
 export type SettingFilterField = (typeof settingFilterFields)[number];
 
 
 export const conversationSortFields = ["id", "title", "cwd", "model", "systemPrompt", "insertedAt", "updatedAt"] as const;
 export type ConversationSortField = (typeof conversationSortFields)[number];
+
+export const modelSortFields = ["id", "spec", "label", "enabled", "position", "insertedAt", "updatedAt"] as const;
+export type ModelSortField = (typeof modelSortFields)[number];
 
 export const settingSortFields = ["id", "key", "value", "insertedAt", "updatedAt"] as const;
 export type SettingSortField = (typeof settingSortFields)[number];

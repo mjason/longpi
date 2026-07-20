@@ -43,6 +43,7 @@ defmodule LongpiWeb.Router do
       # on_mount {LongpiWeb.LiveUserAuth, :live_no_user}
     end
 
+    get "/rpc/tool-catalog", ConfigController, :tool_catalog
     post "/rpc/run", AshTypescriptRpcController, :run
     post "/rpc/validate", AshTypescriptRpcController, :validate
     get "/ash-typescript", PageController, :index
