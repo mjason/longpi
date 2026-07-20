@@ -1,5 +1,5 @@
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import { Layers, Loader2, Plus, Settings, ShieldAlert, Trash2 } from "lucide-react";
+import { Layers, Loader2, Plus, Settings, Trash2 } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import {
   buildCSRFHeaders,
@@ -228,17 +228,8 @@ function ConversationPane({
   onModelChanged: (id: string, model: string) => void;
   onTitled: (id: string, title: string) => void;
 }) {
-  const {
-    runtime,
-    pendingApprovals,
-    respondApproval,
-    compactionCount,
-    notices,
-    usage,
-    currentModel,
-    setModel,
-    title,
-  } = useChannelRuntime(conversation.id, conversation.model);
+  const { runtime, compactionCount, notices, usage, currentModel, setModel, title } =
+    useChannelRuntime(conversation.id, conversation.model);
 
   // Keep the sidebar label in sync when the model changes via /model.
   useEffect(() => {
@@ -305,47 +296,7 @@ function ConversationPane({
             {toast.text}
           </div>
         )}
-
-        {pendingApprovals.map((req) => (
-          <ApprovalBanner key={req.id} request={req} onRespond={respondApproval} />
-        ))}
       </main>
     </AssistantRuntimeProvider>
-  );
-}
-
-function ApprovalBanner({
-  request,
-  onRespond,
-}: {
-  request: { id: string; name: string; args?: Record<string, unknown> };
-  onRespond: (id: string, approved: boolean) => void;
-}) {
-  const summary =
-    typeof request.args?.command === "string"
-      ? request.args.command
-      : typeof request.args?.path === "string"
-        ? request.args.path
-        : "";
-
-  return (
-    <div className="border-t border-primary/30 bg-primary/5 px-4 py-3">
-      <div className="mx-auto flex w-full max-w-[44rem] items-center gap-3">
-        <ShieldAlert className="size-5 shrink-0 text-primary" />
-        <div className="min-w-0 flex-1 text-sm">
-          <span className="font-medium">The agent wants to run </span>
-          <code className="font-mono font-semibold">{request.name}</code>
-          {summary && (
-            <code className="ml-1 block truncate font-mono text-xs text-muted-foreground">{summary}</code>
-          )}
-        </div>
-        <Button size="sm" variant="outline" onClick={() => onRespond(request.id, false)}>
-          Deny
-        </Button>
-        <Button size="sm" onClick={() => onRespond(request.id, true)}>
-          Allow
-        </Button>
-      </div>
-    </div>
   );
 }

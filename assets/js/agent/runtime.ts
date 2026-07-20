@@ -78,20 +78,13 @@ export function useChannelRuntime(conversationId: string, defaultModel: string) 
     // server truncates back to the last user message and streams a fresh reply.
     onReload: async () => regenerate(),
     onCancel: async () => interrupt(),
+    // Native in-message tool approval: ToolFallback's Allow/Deny routes here.
+    onRespondToToolApproval: ({ approvalId, approved }) =>
+      respondApproval(approvalId, approved ?? false),
     convertMessage: (message: ThreadMessageLike) => message,
   });
 
-  return {
-    runtime,
-    pendingApprovals,
-    respondApproval,
-    compactionCount,
-    notices,
-    usage,
-    currentModel,
-    setModel,
-    title,
-  };
+  return { runtime, compactionCount, notices, usage, currentModel, setModel, title };
 }
 
 type AssistantPart = Extract<ThreadMessageLike["content"], readonly unknown[]>[number];
@@ -108,7 +101,20 @@ function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
   // (which duplicates text and can crash reconciliation).
   const flushAssistant = () => {
     if (assistantParts && assistantParts.length > 0) {
-      messages.push({ id: `m-${messages.length}`, role: "assistant", content: assistantParts });
+      // A result-less tool-call part inherits the message status, so a pending
+      // approval only surfaces as "requires-action" (which ToolFallback renders
+      // as Allow/Deny) when the message itself carries that status.
+      const awaitingApproval = assistantParts.some(
+        (part) => part.type === "tool-call" && part.approval != null,
+      );
+      messages.push({
+        id: `m-${messages.length}`,
+        role: "assistant",
+        content: assistantParts,
+        ...(awaitingApproval
+          ? { status: { type: "requires-action" as const, reason: "tool-calls" as const } }
+          : {}),
+      });
     }
     assistantParts = null;
   };
@@ -145,6 +151,10 @@ function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
           argsText: JSON.stringify(item.args ?? {}),
           result: item.content !== undefined ? item.content : undefined,
           isError: item.error,
+          // While awaiting approval, expose it as a native tool-approval gate so
+          // ToolFallback renders inline Allow/Deny (id = the tool-call id, which
+          // the backend keys permission responses by).
+          ...(item.awaitingApproval ? { approval: { id: item.id } } : {}),
         });
         break;
 
