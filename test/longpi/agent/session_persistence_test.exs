@@ -70,6 +70,27 @@ defmodule Longpi.Agent.SessionPersistenceTest do
     assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
   end
 
+  test "session uses the conversation's system_prompt override", %{dir: dir} do
+    conversation =
+      Longpi.Agent.create_conversation!(%{
+        cwd: dir,
+        model: "test:model",
+        system_prompt: "Be terse. Workspace: {{cwd}}"
+      })
+
+    session = start_session(conversation)
+
+    expect(LLMMock, :stream, fn _model, messages, _, _, _ ->
+      system = hd(messages)
+      assert system.role == :system
+      assert system.content == "Be terse. Workspace: #{dir}"
+      {:ok, %{text: "ok", tool_calls: []}}
+    end)
+
+    :ok = Session.send_message(session, "hi")
+    assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
+  end
+
   test "tool calls and results survive a restart", %{conversation: conversation, dir: dir} do
     File.write!(Path.join(dir, "x.txt"), "tool-payload")
     session = start_session(conversation)

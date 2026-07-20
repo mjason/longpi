@@ -20,6 +20,12 @@ defmodule Longpi.Agent do
       rpc_action :update_conversation, :update
       rpc_action :destroy_conversation, :destroy
     end
+
+    resource Longpi.Agent.Setting do
+      rpc_action :list_settings, :read
+      rpc_action :put_setting, :put
+      rpc_action :update_setting, :update
+    end
   end
 
   resources do
@@ -33,6 +39,12 @@ defmodule Longpi.Agent do
     resource Longpi.Agent.ConversationMessage do
       define :append_message, action: :create
       define :list_messages, action: :for_conversation, args: [:conversation_id]
+    end
+
+    resource Longpi.Agent.Setting do
+      define :put_setting, action: :put
+      define :get_setting_by_key, action: :get_by_key, args: [:key]
+      define :list_settings, action: :read
     end
   end
 end

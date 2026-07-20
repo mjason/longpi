@@ -9,11 +9,12 @@ export type UtcDateTimeUsec = string;
 // Conversation Schema
 export type ConversationResourceSchema = {
   __type: "Resource";
-  __primitiveFields: "id" | "title" | "cwd" | "model" | "insertedAt" | "updatedAt";
+  __primitiveFields: "id" | "title" | "cwd" | "model" | "systemPrompt" | "insertedAt" | "updatedAt";
   id: UUID;
   title: string | null;
   cwd: string;
   model: string;
+  systemPrompt: string | null;
   insertedAt: UtcDateTimeUsec;
   updatedAt: UtcDateTimeUsec;
 };
@@ -22,11 +23,36 @@ export type ConversationResourceSchema = {
 
 export type ConversationAttributesOnlySchema = {
   __type: "Resource";
-  __primitiveFields: "id" | "title" | "cwd" | "model" | "insertedAt" | "updatedAt";
+  __primitiveFields: "id" | "title" | "cwd" | "model" | "systemPrompt" | "insertedAt" | "updatedAt";
   id: UUID;
   title: string | null;
   cwd: string;
   model: string;
+  systemPrompt: string | null;
+  insertedAt: UtcDateTimeUsec;
+  updatedAt: UtcDateTimeUsec;
+};
+
+
+// Setting Schema
+export type SettingResourceSchema = {
+  __type: "Resource";
+  __primitiveFields: "id" | "key" | "value" | "insertedAt" | "updatedAt";
+  id: UUID;
+  key: string;
+  value: string | null;
+  insertedAt: UtcDateTimeUsec;
+  updatedAt: UtcDateTimeUsec;
+};
+
+
+
+export type SettingAttributesOnlySchema = {
+  __type: "Resource";
+  __primitiveFields: "id" | "key" | "value" | "insertedAt" | "updatedAt";
+  id: UUID;
+  key: string;
+  value: string | null;
   insertedAt: UtcDateTimeUsec;
   updatedAt: UtcDateTimeUsec;
 };
@@ -62,6 +88,60 @@ export type ConversationFilterInput = {
     in?: Array<string>;
   };
 
+  systemPrompt?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
+    isNil?: boolean;
+  };
+
+  insertedAt?: {
+    eq?: UtcDateTimeUsec;
+    notEq?: UtcDateTimeUsec;
+    greaterThan?: UtcDateTimeUsec;
+    greaterThanOrEqual?: UtcDateTimeUsec;
+    lessThan?: UtcDateTimeUsec;
+    lessThanOrEqual?: UtcDateTimeUsec;
+    in?: Array<UtcDateTimeUsec>;
+  };
+
+  updatedAt?: {
+    eq?: UtcDateTimeUsec;
+    notEq?: UtcDateTimeUsec;
+    greaterThan?: UtcDateTimeUsec;
+    greaterThanOrEqual?: UtcDateTimeUsec;
+    lessThan?: UtcDateTimeUsec;
+    lessThanOrEqual?: UtcDateTimeUsec;
+    in?: Array<UtcDateTimeUsec>;
+  };
+
+
+
+};
+export type SettingFilterInput = {
+  and?: Array<SettingFilterInput>;
+  or?: Array<SettingFilterInput>;
+  not?: Array<SettingFilterInput>;
+
+  id?: {
+    eq?: UUID;
+    notEq?: UUID;
+    in?: Array<UUID>;
+  };
+
+  key?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
+  };
+
+  value?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
+    isNil?: boolean;
+  };
+
   insertedAt?: {
     eq?: UtcDateTimeUsec;
     notEq?: UtcDateTimeUsec;
@@ -87,12 +167,18 @@ export type ConversationFilterInput = {
 };
 
 
-export const conversationFilterFields = ["id", "title", "cwd", "model", "insertedAt", "updatedAt"] as const;
+export const conversationFilterFields = ["id", "title", "cwd", "model", "systemPrompt", "insertedAt", "updatedAt"] as const;
 export type ConversationFilterField = (typeof conversationFilterFields)[number];
 
+export const settingFilterFields = ["id", "key", "value", "insertedAt", "updatedAt"] as const;
+export type SettingFilterField = (typeof settingFilterFields)[number];
 
-export const conversationSortFields = ["id", "title", "cwd", "model", "insertedAt", "updatedAt"] as const;
+
+export const conversationSortFields = ["id", "title", "cwd", "model", "systemPrompt", "insertedAt", "updatedAt"] as const;
 export type ConversationSortField = (typeof conversationSortFields)[number];
+
+export const settingSortFields = ["id", "key", "value", "insertedAt", "updatedAt"] as const;
+export type SettingSortField = (typeof settingSortFields)[number];
 
 
 // Utility Types

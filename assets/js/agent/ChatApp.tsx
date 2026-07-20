@@ -1,5 +1,5 @@
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, Plus, Settings } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { buildCSRFHeaders, createConversation, listConversations } from "../ash_rpc";
 import { TooltipProvider } from "../components/ui/tooltip";
@@ -9,6 +9,8 @@ import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { Thread } from "../components/assistant-ui/thread";
 import { useChannelRuntime } from "./runtime";
+import { SettingsDialog } from "./SettingsDialog";
+import { loadSettings, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
 
 const DEFAULT_MODEL = "openai:gpt-5.4";
@@ -79,6 +81,15 @@ function Sidebar(props: {
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Prefill the model from the saved default_model setting.
+  useEffect(() => {
+    loadSettings().then((s) => {
+      const preset = s[SETTING_KEYS.defaultModel];
+      if (preset) setModel(preset);
+    });
+  }, []);
 
   async function create(event: React.FormEvent) {
     event.preventDefault();
@@ -103,11 +114,23 @@ function Sidebar(props: {
 
   return (
     <aside className="flex w-72 shrink-0 flex-col border-r border-border bg-card/30">
-      <div className="border-b border-border px-4 py-4">
+      <div className="flex items-center border-b border-border px-4 py-4">
         <span className="font-semibold tracking-wide">
           <span className="mr-2 text-primary">π</span>Longpi
         </span>
+        <div className="flex-1" />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          aria-label="Settings"
+          onClick={() => setSettingsOpen(true)}
+        >
+          <Settings className="size-4" />
+        </Button>
       </div>
+
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
 
       <form onSubmit={create} className="space-y-2 border-b border-border p-3">
         <Input

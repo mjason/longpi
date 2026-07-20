@@ -53,7 +53,10 @@ defmodule Longpi.Agent.Session do
   def init(opts) do
     {conversation, history} = load_conversation(opts[:conversation_id])
     ctx = %{cwd: (conversation && conversation.cwd) || opts[:cwd] || File.cwd!()}
-    system_prompt = opts[:system_prompt] || SystemPrompt.default(ctx)
+
+    system_prompt =
+      opts[:system_prompt] ||
+        SystemPrompt.resolve(ctx, conversation && conversation.system_prompt)
 
     {:ok,
      %{

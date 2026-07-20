@@ -21,12 +21,12 @@ defmodule Longpi.Agent.Conversation do
 
     create :create do
       primary? true
-      accept [:title, :cwd, :model]
+      accept [:title, :cwd, :model, :system_prompt]
     end
 
     update :update do
       primary? true
-      accept [:title]
+      accept [:title, :model, :system_prompt]
     end
   end
 
@@ -45,6 +45,13 @@ defmodule Longpi.Agent.Conversation do
     attribute :model, :string do
       allow_nil? false
       public? true
+    end
+
+    # Per-conversation system prompt override; nil falls back to the global
+    # setting, then the code default. Supports `{{cwd}}` interpolation.
+    attribute :system_prompt, :string do
+      public? true
+      constraints allow_empty?: true, trim?: false
     end
 
     create_timestamp :inserted_at, public?: true
