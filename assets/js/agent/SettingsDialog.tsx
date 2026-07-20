@@ -1,4 +1,4 @@
-import { Check, Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Check, KeyRound, Loader2, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
@@ -6,11 +6,17 @@ import { Input } from "../components/ui/input";
 import { cn } from "../lib/utils";
 import {
   addModel,
+  clearKey,
+  loadDefaults,
   loadModels,
+  loadProviders,
   loadSettings,
   loadToolCatalog,
   type ModelRow,
+  type ProviderRow,
   removeModel,
+  saveProvider,
+  saveProviderKey,
   saveSetting,
   setModel,
   SETTING_KEYS,
@@ -18,10 +24,11 @@ import {
   toolDescKey,
 } from "./settings";
 
-type Tab = "general" | "models" | "tools";
+type Tab = "general" | "providers" | "models" | "tools";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "general", label: "General" },
+  { id: "providers", label: "Providers" },
   { id: "models", label: "Models" },
   { id: "tools", label: "Tools" },
 ];
@@ -55,6 +62,7 @@ export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenCh
 
         <div className="max-h-[60vh] overflow-y-auto pr-1">
           {open && tab === "general" && <GeneralTab />}
+          {open && tab === "providers" && <ProvidersTab />}
           {open && tab === "models" && <ModelsTab />}
           {open && tab === "tools" && <ToolsTab />}
         </div>
@@ -101,17 +109,23 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 function GeneralTab() {
   const [systemPrompt, setSystemPrompt] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
+  const [defaultPrompt, setDefaultPrompt] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadSettings().then((s) => {
-      setSystemPrompt(s[SETTING_KEYS.systemPrompt] ?? "");
+    Promise.all([loadSettings(), loadDefaults()]).then(([s, d]) => {
+      // Show the effective prompt: the saved override, or the built-in default
+      // so the editor is never an empty box.
+      setSystemPrompt(s[SETTING_KEYS.systemPrompt] || d.systemPrompt);
+      setDefaultPrompt(d.systemPrompt);
       setDefaultModel(s[SETTING_KEYS.defaultModel] ?? "");
       setLoading(false);
     });
   }, []);
 
   if (loading) return <Spinner />;
+
+  const isDefault = systemPrompt.trim() === defaultPrompt.trim();
 
   return (
     <div className="space-y-5 py-4">
@@ -125,21 +139,135 @@ function GeneralTab() {
       </Field>
       <Field
         label="System prompt"
-        hint="Overrides the built-in prompt for every conversation. Blank = default. Use {{cwd}} for the workspace path."
+        hint="Sent at the start of every conversation. Edit freely; use {{cwd}} for the workspace path."
       >
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {isDefault ? "Using the built-in default." : "Customized."}
+          </span>
+          {!isDefault && (
+            <button
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setSystemPrompt(defaultPrompt)}
+            >
+              <RotateCcw className="size-3" /> reset to default
+            </button>
+          )}
+        </div>
         <textarea
-          className="min-h-[200px] w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs leading-relaxed outline-none focus-visible:border-ring"
-          placeholder="Leave blank to use the built-in default prompt…"
+          className="min-h-[220px] w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs leading-relaxed outline-none focus-visible:border-ring"
           value={systemPrompt}
           onChange={(e) => setSystemPrompt(e.target.value)}
         />
       </Field>
       <SaveButton
         onSave={async () => {
+          // Storing the default is the same as clearing the override; keep the
+          // db clean by saving blank when unchanged.
+          const toStore = systemPrompt.trim() === defaultPrompt.trim() ? "" : systemPrompt;
           await Promise.all([
-            saveSetting(SETTING_KEYS.systemPrompt, systemPrompt),
+            saveSetting(SETTING_KEYS.systemPrompt, toStore),
             saveSetting(SETTING_KEYS.defaultModel, defaultModel),
           ]);
+        }}
+      />
+    </div>
+  );
+}
+
+function ProvidersTab() {
+  const [providers, setProviders] = useState<ProviderRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [name, setName] = useState("");
+  const refresh = () => loadProviders().then(setProviders);
+
+  useEffect(() => {
+    refresh().then(() => setLoading(false));
+  }, []);
+
+  async function add() {
+    const n = name.trim().toLowerCase();
+    if (!n) return;
+    await saveProvider(n, "");
+    setName("");
+    refresh();
+  }
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div className="space-y-4 py-4">
+      <p className="text-xs text-muted-foreground">
+        API credentials per provider (the model spec prefix, e.g. <code>openai</code>). Keys are
+        write-only: once saved they never leave the server. Leave a key field blank to keep the
+        existing one.
+      </p>
+
+      {providers.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          No providers configured. Add one below (falls back to environment variables until set).
+        </p>
+      )}
+
+      {providers.map((p) => (
+        <ProviderRowEditor key={p.id} provider={p} onChange={refresh} />
+      ))}
+
+      <div className="flex items-end gap-2 border-t border-border pt-4">
+        <Input
+          className="flex-1 font-mono text-sm"
+          placeholder="provider name (openai, anthropic, …)"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <Button onClick={add} disabled={!name.trim()}>
+          <Plus className="size-4" /> Add
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onChange: () => void }) {
+  const [baseUrl, setBaseUrl] = useState(provider.baseUrl ?? "");
+  const [apiKey, setApiKey] = useState("");
+
+  return (
+    <div className="space-y-2 rounded-md border border-border p-3">
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-sm font-semibold">{provider.name}</span>
+        <span
+          className={cn(
+            "flex items-center gap-1 text-xs",
+            provider.configured ? "text-tool" : "text-muted-foreground",
+          )}
+        >
+          <KeyRound className="size-3" />
+          {provider.configured ? "key set" : "no key"}
+        </span>
+      </div>
+      <Input
+        className="font-mono text-xs"
+        placeholder="base URL (optional, e.g. https://gateway/v1)"
+        value={baseUrl}
+        onChange={(e) => setBaseUrl(e.target.value)}
+      />
+      <Input
+        type="password"
+        className="font-mono text-xs"
+        placeholder={provider.configured ? "•••••••• (leave blank to keep)" : "api key"}
+        value={apiKey}
+        onChange={(e) => setApiKey(e.target.value)}
+      />
+      <SaveButton
+        label="Save provider"
+        onSave={async () => {
+          await saveProvider(provider.name, baseUrl);
+          if (apiKey.trim()) {
+            await saveProviderKey(provider.id, apiKey);
+            setApiKey("");
+          }
+          onChange();
         }}
       />
     </div>

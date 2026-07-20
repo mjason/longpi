@@ -34,6 +34,14 @@ defmodule Longpi.Agent do
       rpc_action :update_model, :update
       rpc_action :destroy_model, :destroy
     end
+
+    resource Longpi.Agent.Provider do
+      rpc_action :list_providers, :list
+      rpc_action :put_provider, :put
+      rpc_action :set_provider_key, :set_key
+      rpc_action :clear_provider_key, :clear_key
+      rpc_action :destroy_provider, :destroy
+    end
   end
 
   resources do
@@ -61,6 +69,13 @@ defmodule Longpi.Agent do
       define :list_enabled_models, action: :enabled
       define :update_model, action: :update
       define :destroy_model, action: :destroy
+    end
+
+    resource Longpi.Agent.Provider do
+      define :put_provider, action: :put
+      define :get_provider_by_name, action: :by_name, args: [:name]
+      define :list_providers, action: :list
+      define :set_provider_key, action: :set_key
     end
   end
 end

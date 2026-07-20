@@ -62,6 +62,31 @@ export type ModelAttributesOnlySchema = {
 };
 
 
+// Provider Schema
+export type ProviderResourceSchema = {
+  __type: "Resource";
+  __primitiveFields: "id" | "name" | "baseUrl" | "insertedAt" | "updatedAt" | "configured";
+  id: UUID;
+  name: string;
+  baseUrl: string | null;
+  insertedAt: UtcDateTimeUsec;
+  updatedAt: UtcDateTimeUsec;
+  configured: boolean | null;
+};
+
+
+
+export type ProviderAttributesOnlySchema = {
+  __type: "Resource";
+  __primitiveFields: "id" | "name" | "baseUrl" | "insertedAt" | "updatedAt";
+  id: UUID;
+  name: string;
+  baseUrl: string | null;
+  insertedAt: UtcDateTimeUsec;
+  updatedAt: UtcDateTimeUsec;
+};
+
+
 // Setting Schema
 export type SettingResourceSchema = {
   __type: "Resource";
@@ -208,6 +233,59 @@ export type ModelFilterInput = {
 
 
 };
+export type ProviderFilterInput = {
+  and?: Array<ProviderFilterInput>;
+  or?: Array<ProviderFilterInput>;
+  not?: Array<ProviderFilterInput>;
+
+  id?: {
+    eq?: UUID;
+    notEq?: UUID;
+    in?: Array<UUID>;
+  };
+
+  name?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
+  };
+
+  baseUrl?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
+    isNil?: boolean;
+  };
+
+  insertedAt?: {
+    eq?: UtcDateTimeUsec;
+    notEq?: UtcDateTimeUsec;
+    greaterThan?: UtcDateTimeUsec;
+    greaterThanOrEqual?: UtcDateTimeUsec;
+    lessThan?: UtcDateTimeUsec;
+    lessThanOrEqual?: UtcDateTimeUsec;
+    in?: Array<UtcDateTimeUsec>;
+  };
+
+  updatedAt?: {
+    eq?: UtcDateTimeUsec;
+    notEq?: UtcDateTimeUsec;
+    greaterThan?: UtcDateTimeUsec;
+    greaterThanOrEqual?: UtcDateTimeUsec;
+    lessThan?: UtcDateTimeUsec;
+    lessThanOrEqual?: UtcDateTimeUsec;
+    in?: Array<UtcDateTimeUsec>;
+  };
+
+  configured?: {
+    eq?: boolean;
+    notEq?: boolean;
+    isNil?: boolean;
+  };
+
+
+
+};
 export type SettingFilterInput = {
   and?: Array<SettingFilterInput>;
   or?: Array<SettingFilterInput>;
@@ -263,6 +341,9 @@ export type ConversationFilterField = (typeof conversationFilterFields)[number];
 export const modelFilterFields = ["id", "spec", "label", "enabled", "position", "insertedAt", "updatedAt"] as const;
 export type ModelFilterField = (typeof modelFilterFields)[number];
 
+export const providerFilterFields = ["id", "name", "baseUrl", "insertedAt", "updatedAt", "configured"] as const;
+export type ProviderFilterField = (typeof providerFilterFields)[number];
+
 export const settingFilterFields = ["id", "key", "value", "insertedAt", "updatedAt"] as const;
 export type SettingFilterField = (typeof settingFilterFields)[number];
 
@@ -272,6 +353,9 @@ export type ConversationSortField = (typeof conversationSortFields)[number];
 
 export const modelSortFields = ["id", "spec", "label", "enabled", "position", "insertedAt", "updatedAt"] as const;
 export type ModelSortField = (typeof modelSortFields)[number];
+
+export const providerSortFields = ["id", "name", "baseUrl", "insertedAt", "updatedAt", "configured"] as const;
+export type ProviderSortField = (typeof providerSortFields)[number];
 
 export const settingSortFields = ["id", "key", "value", "insertedAt", "updatedAt"] as const;
 export type SettingSortField = (typeof settingSortFields)[number];

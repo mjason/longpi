@@ -20,8 +20,11 @@ defmodule Longpi.Agent.LLM.ReqLLMClient do
   def stream(model, messages, tools, opts, sink) do
     context = Context.new(Enum.map(messages, &to_req_llm_message/1))
 
+    # Admin-configured provider credentials take priority; falling back to
+    # req_llm's own env/config lookup when a provider isn't set in the db.
     stream_opts =
-      [tools: Enum.map(tools, &to_req_llm_tool/1)] ++ caching_opts(model) ++ opts
+      [tools: Enum.map(tools, &to_req_llm_tool/1)] ++
+        caching_opts(model) ++ Longpi.Agent.Providers.request_opts(model) ++ opts
 
     with {:ok, response} <- ReqLLM.stream_text(model, context, stream_opts) do
       {:ok, consume(response, sink)}
