@@ -26,9 +26,32 @@ defmodule Longpi.Agent.LLM.ReqLLMClient do
       [tools: Enum.map(tools, &to_req_llm_tool/1)] ++
         caching_opts(model) ++ Longpi.Agent.Providers.request_opts(model) ++ opts
 
+    # Retry transient failures (rate limits, 5xx, network) with backoff — but
+    # only while no tokens have reached the sink yet, since the stream is lazy
+    # and re-running after partial output would duplicate it.
+    emitted = :counters.new(1, [])
+
+    guarded_sink = fn event ->
+      :counters.add(emitted, 1, 1)
+      sink.(event)
+    end
+
+    Longpi.Agent.Retry.with_backoff(
+      fn -> run_stream(model, context, stream_opts, guarded_sink) end,
+      retryable?: fn reason ->
+        :counters.get(emitted, 1) == 0 and Longpi.Agent.Retry.transient?(reason)
+      end
+    )
+  end
+
+  defp run_stream(model, context, stream_opts, sink) do
     with {:ok, response} <- ReqLLM.stream_text(model, context, stream_opts) do
       {:ok, consume(response, sink)}
     end
+  rescue
+    # The lazy stream raises on a non-200 (e.g. 429) once consumed; surface it
+    # as an error so Retry can classify and back off.
+    exception -> {:error, exception}
   end
 
   defp consume(response, sink) do
