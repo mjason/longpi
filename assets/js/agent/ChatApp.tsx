@@ -14,6 +14,7 @@ import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { Thread } from "../components/assistant-ui/thread";
 import { ContextDisplay } from "../components/assistant-ui/context-display";
+import { ModelPicker } from "./ModelPicker";
 import { useChannelRuntime } from "./runtime";
 import { SettingsDialog } from "./SettingsDialog";
 import { loadSettings, SETTING_KEYS } from "./settings";
@@ -253,10 +254,11 @@ function ConversationPane({
           <div className="min-w-0">
             <h1 className="truncate text-sm font-semibold">{conversationLabel(conversation)}</h1>
             <p className="truncate font-mono text-xs text-muted-foreground">
-              {conversation.cwd} · {currentModel}
+              {conversation.cwd}
             </p>
           </div>
           <div className="flex-1" />
+          <ModelPicker value={currentModel} onChange={setModel} />
           {usage?.used != null && usage.window ? (
             <ContextDisplay.Bar
               modelContextWindow={usage.window}
