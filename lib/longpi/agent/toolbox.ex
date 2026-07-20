@@ -10,7 +10,15 @@ defmodule Longpi.Agent.Toolbox do
 
   alias Longpi.Agent.Tools
 
-  @default_modules [Tools.Read, Tools.Write, Tools.Edit, Tools.Bash]
+  @default_modules [
+    Tools.Read,
+    Tools.Write,
+    Tools.Edit,
+    Tools.Bash,
+    Tools.Grep,
+    Tools.Find,
+    Tools.Ls
+  ]
 
   @type t :: %{String.t() => module()}
 

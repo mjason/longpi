@@ -9,9 +9,9 @@ defmodule Longpi.Agent.ToolboxTest do
     %{ctx: %{cwd: dir}}
   end
 
-  test "default toolbox exposes the four built-in tools" do
+  test "default toolbox exposes the built-in tools" do
     names = Toolbox.new() |> Toolbox.modules() |> Enum.map(& &1.name()) |> Enum.sort()
-    assert names == ["bash", "edit", "read", "write"]
+    assert names == ["bash", "edit", "find", "grep", "ls", "read", "write"]
   end
 
   test "executes a tool with string-keyed args from JSON", %{tmp_dir: dir, ctx: ctx} do

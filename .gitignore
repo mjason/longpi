@@ -45,3 +45,7 @@ native/longpi_shim/target/
 priv/shim/
 
 config/dev.secret.exs
+
+# Rust search build artifacts
+native/longpi_search/target/
+priv/search/

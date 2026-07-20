@@ -1,0 +1,19 @@
+[package]
+name = "longpi_search"
+version = "0.1.0"
+edition = "2021"
+
+# Uses ripgrep/fd's own engine crates so search is fully cross-platform (pure
+# Rust, Windows included) with no external rg/fd binary to ship or download.
+[dependencies]
+ignore = "0.4"
+grep-searcher = "0.1"
+grep-regex = "0.1"
+globset = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
