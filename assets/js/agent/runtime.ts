@@ -6,9 +6,6 @@ import {
 import { useConversationChannel } from "./channel";
 import type { ThreadItem } from "./types";
 
-/** Slash commands handled by the command channel (see conversation_channel.ex). */
-export const SLASH_COMMANDS = ["compact"];
-
 /**
  * Bridges our Phoenix Channel state into an assistant-ui ExternalStoreRuntime.
  *
@@ -49,8 +46,9 @@ export function useChannelRuntime(conversationId: string) {
       // message. Extensible: add cases as commands are added.
       if (trimmed.startsWith("/")) {
         const name = trimmed.slice(1).split(/\s+/)[0].toLowerCase();
-        if (SLASH_COMMANDS.includes(name)) runCommand(name);
-        else runCommand(name); // server replies "unknown command" -> shown as a notice
+        // Known or not, route to the command channel; the server replies
+        // "unknown command" for anything it doesn't handle, shown as a notice.
+        runCommand(name);
         return;
       }
 
