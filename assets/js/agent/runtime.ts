@@ -27,6 +27,7 @@ export function useChannelRuntime(conversationId: string) {
     pendingApprovals,
     compactionCount,
     notices,
+    usage,
   } = useConversationChannel(conversationId);
 
   const messages = itemsToMessages(items);
@@ -61,7 +62,7 @@ export function useChannelRuntime(conversationId: string) {
     convertMessage: (message: ThreadMessageLike) => message,
   });
 
-  return { runtime, pendingApprovals, respondApproval, compactionCount, notices };
+  return { runtime, pendingApprovals, respondApproval, compactionCount, notices, usage };
 }
 
 type AssistantPart = Extract<ThreadMessageLike["content"], readonly unknown[]>[number];

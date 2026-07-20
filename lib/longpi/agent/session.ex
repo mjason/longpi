@@ -59,6 +59,13 @@ defmodule Longpi.Agent.Session do
   @doc "Manually compacts the conversation now, ignoring the token threshold."
   def compact(session), do: GenServer.call(session, :compact)
 
+  @doc """
+  The last turn's prompt-token usage against the model's context window, as
+  `%{used: integer | nil, window: integer}`. `used` is nil until a turn reports
+  usage.
+  """
+  def context_usage(session), do: GenServer.call(session, :context_usage)
+
   # Server
 
   @impl true
@@ -172,6 +179,9 @@ defmodule Longpi.Agent.Session do
   def handle_call(:pending_approvals, _from, state),
     do: {:reply, Map.keys(state.pending_approvals), state}
 
+  def handle_call(:context_usage, _from, state),
+    do: {:reply, context_usage_payload(state), state}
+
   def handle_call(:compact, _from, %{status: status} = state)
       when status in [:running, :compacting] do
     {:reply, {:error, :busy}, state}
@@ -194,12 +204,16 @@ defmodule Longpi.Agent.Session do
   end
 
   @impl true
+  def handle_info({:turn_event, {:usage, usage}}, state) do
+    state = %{state | last_input_tokens: input_tokens(usage)}
+    {:noreply, notify(state, {:context_usage, context_usage_payload(state)})}
+  end
+
   def handle_info({:turn_event, event}, state) do
     state = notify(state, event)
 
     case event do
       {:text_delta, text} -> {:noreply, %{state | partial: [state.partial | text]}}
-      {:usage, usage} -> {:noreply, %{state | last_input_tokens: input_tokens(usage)}}
       _ -> {:noreply, state}
     end
   end
@@ -274,6 +288,11 @@ defmodule Longpi.Agent.Session do
   end
 
   defp input_tokens(_), do: nil
+
+  # How full the model's context window is, as of the last turn's usage report.
+  defp context_usage_payload(state) do
+    %{used: state.last_input_tokens, window: Longpi.Agent.ContextWindow.for_model(state.model)}
+  end
 
   defp keep_partial_text(state) do
     case IO.iodata_to_binary(state.partial) do

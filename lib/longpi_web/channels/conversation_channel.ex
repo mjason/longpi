@@ -30,7 +30,8 @@ defmodule LongpiWeb.ConversationChannel do
         reply = %{
           messages: history,
           status: Session.status(session),
-          pending_approvals: Session.pending_approvals(session)
+          pending_approvals: Session.pending_approvals(session),
+          context_usage: Session.context_usage(session)
         }
 
         {:ok, reply, socket}
@@ -90,7 +91,8 @@ defmodule LongpiWeb.ConversationChannel do
     reply = %{
       messages: history,
       status: Session.status(session),
-      pending_approvals: Session.pending_approvals(session)
+      pending_approvals: Session.pending_approvals(session),
+      context_usage: Session.context_usage(session)
     }
 
     {:reply, {:ok, reply}, socket}
@@ -124,7 +126,8 @@ defmodule LongpiWeb.ConversationChannel do
   defp serialize_event({:compacted, %{covered_through: covered}}),
     do: {"compacted", %{covered_through: covered}}
 
-  defp serialize_event({:usage, usage}), do: {"usage", %{usage: usage}}
+  defp serialize_event({:context_usage, %{used: used, window: window}}),
+    do: {"context_usage", %{used: used, window: window}}
 
   defp serialize_event({:history, messages}),
     do: {"history", %{messages: Enum.map(messages, &serialize_message/1)}}

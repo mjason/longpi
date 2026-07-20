@@ -53,11 +53,21 @@ defmodule Longpi.Agent.ContextWindow do
   end
 
   defp from_req_llm(spec) do
-    case ReqLLM.model(spec) do
+    case ReqLLM.model(model_spec(spec)) do
       {:ok, %{limits: %{context: c}}} when is_integer(c) and c > 0 -> c
       _ -> nil
     end
   rescue
     _ -> nil
+  end
+
+  # Prefer the inline map form so req_llm doesn't warn (with a full stacktrace)
+  # on every call for gateway models that aren't in its LLMDB catalog. Unknown
+  # providers raise in `to_existing_atom` and fall through to the default.
+  defp model_spec(spec) do
+    case String.split(spec, ":", parts: 2) do
+      [provider, id] -> %{provider: String.to_existing_atom(provider), id: id}
+      _ -> spec
+    end
   end
 end

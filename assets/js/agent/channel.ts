@@ -71,6 +71,9 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   channel.on("compacted", (p: { covered_through: number; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "compacted", coveredThrough: p.covered_through })),
   );
+  channel.on("context_usage", (p: { used: number | null; window: number; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "context_usage", used: p.used, window: p.window })),
+  );
   channel.on("turn_ended", (p: { reason: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "turn_ended", reason: p.reason })),
   );
@@ -81,8 +84,8 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   entry.joined = new Promise((resolve) => {
     channel
       .join()
-      .receive("ok", (reply: { messages: HistoryMessage[]; status: string; pending_approvals?: string[] }) => {
-        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals });
+      .receive("ok", (reply: JoinReply) => {
+        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage });
         resolve();
       })
       .receive("error", (reply: { reason: string }) => {
@@ -94,15 +97,25 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   return entry;
 }
 
-type State = { items: ThreadItem[]; status: SessionStatus };
+export type ContextUsage = { used: number | null; window: number };
+
+type JoinReply = {
+  messages: HistoryMessage[];
+  status: string;
+  pending_approvals?: string[];
+  context_usage?: ContextUsage;
+};
+
+type State = { items: ThreadItem[]; status: SessionStatus; usage: ContextUsage | null };
 
 type Action =
-  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[] }
+  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage }
   | { type: "text_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; id: string; content: string; error: boolean }
   | { type: "approval_request"; id: string }
   | { type: "compacted"; coveredThrough: number }
+  | { type: "context_usage"; used: number | null; window: number }
   | { type: "user_sent"; text: string }
   | { type: "turn_ended"; reason: string }
   | { type: "turn_failed"; reason: string }
@@ -157,13 +170,18 @@ function settle(items: ThreadItem[]): ThreadItem[] {
 function reduce(state: State, action: Action): State {
   switch (action.type) {
     case "reset":
-      return { items: [], status: "connecting" };
+      return { items: [], status: "connecting", usage: null };
 
     case "joined":
       return {
+        ...state,
         items: historyToItems(action.messages, action.pending),
         status: action.status === "running" ? "running" : "idle",
+        usage: action.usage ?? state.usage,
       };
+
+    case "context_usage":
+      return { ...state, usage: { used: action.used, window: action.window } };
 
     case "user_sent":
       return { ...state, status: "running", items: [...state.items, { kind: "user", text: action.text }] };
@@ -220,11 +238,12 @@ function reduce(state: State, action: Action): State {
       if (action.reason === "interrupted") {
         items.push({ kind: "notice", tone: "info", text: "Turn interrupted" });
       }
-      return { items, status: "idle" };
+      return { ...state, items, status: "idle" };
     }
 
     case "turn_failed":
       return {
+        ...state,
         items: [...settle(state.items), { kind: "notice", tone: "error", text: `Turn failed: ${action.reason}` }],
         status: "idle",
       };
@@ -235,7 +254,7 @@ function reduce(state: State, action: Action): State {
 }
 
 export function useConversationChannel(conversationId: string | null) {
-  const [state, dispatch] = useReducer(reduce, { items: [], status: "connecting" });
+  const [state, dispatch] = useReducer(reduce, { items: [], status: "connecting", usage: null });
   const channelRef = useRef<Channel | null>(null);
 
   useEffect(() => {
@@ -252,9 +271,9 @@ export function useConversationChannel(conversationId: string | null) {
       if (cancelled || entry.channel.state !== "joined") return;
       entry.channel
         .push("get_state", {})
-        .receive("ok", (reply: { messages: HistoryMessage[]; status: string; pending_approvals?: string[] }) => {
+        .receive("ok", (reply: JoinReply) => {
           if (!cancelled)
-            dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals });
+            dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage });
         });
     });
 

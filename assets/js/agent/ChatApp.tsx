@@ -13,6 +13,7 @@ import { Input } from "../components/ui/input";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { Thread } from "../components/assistant-ui/thread";
+import type { ContextUsage } from "./channel";
 import { useChannelRuntime } from "./runtime";
 import { SettingsDialog } from "./SettingsDialog";
 import { loadSettings, SETTING_KEYS } from "./settings";
@@ -205,7 +206,7 @@ function Sidebar(props: {
 }
 
 function ConversationPane({ conversation }: { conversation: ConversationSummary }) {
-  const { runtime, pendingApprovals, respondApproval, compactionCount, notices } =
+  const { runtime, pendingApprovals, respondApproval, compactionCount, notices, usage } =
     useChannelRuntime(conversation.id);
 
   // Show the most recent notice briefly (command echoes, errors, interrupts).
@@ -229,6 +230,7 @@ function ConversationPane({ conversation }: { conversation: ConversationSummary 
             </p>
           </div>
           <div className="flex-1" />
+          <ContextMeter usage={usage} />
           {compactionCount > 0 && (
             <span
               className="flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs text-muted-foreground"
@@ -262,6 +264,35 @@ function ConversationPane({ conversation }: { conversation: ConversationSummary 
         ))}
       </main>
     </AssistantRuntimeProvider>
+  );
+}
+
+function formatTokens(n: number): string {
+  return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+}
+
+// How full the model's context window is, as of the last turn. Turns amber as
+// it nears the compaction threshold (compaction auto-summarizes around 80%).
+function ContextMeter({ usage }: { usage: ContextUsage | null }) {
+  if (!usage || usage.used == null || !usage.window) return null;
+  const pct = Math.min(100, Math.round((usage.used / usage.window) * 100));
+  const warn = pct >= 80;
+
+  return (
+    <div
+      className="flex items-center gap-2"
+      title={`Context window: ${usage.used.toLocaleString()} / ${usage.window.toLocaleString()} tokens (${pct}%)`}
+    >
+      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-secondary">
+        <div
+          className={cn("h-full rounded-full transition-[width]", warn ? "bg-amber-500" : "bg-primary")}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className={cn("font-mono text-xs tabular-nums", warn ? "text-amber-600" : "text-muted-foreground")}>
+        {formatTokens(usage.used)}/{formatTokens(usage.window)}
+      </span>
+    </div>
   );
 }
 

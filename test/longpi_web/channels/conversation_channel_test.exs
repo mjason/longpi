@@ -58,6 +58,29 @@ defmodule LongpiWeb.ConversationChannelTest do
     assert_push "turn_ended", %{reason: "complete"}
   end
 
+  test "usage is pushed as context_usage against the model's window", %{socket: socket} do
+    expect(LLMMock, :stream, fn _, _, _, _, sink ->
+      sink.({:usage, %{input_tokens: 4200}})
+      {:ok, %{text: "ok", tool_calls: []}}
+    end)
+
+    ref = push(socket, "send_message", %{"text" => "hi"})
+    assert_reply ref, :ok
+
+    assert_push "context_usage", %{used: 4200, window: window}
+    assert is_integer(window) and window > 0
+  end
+
+  test "join reply carries the current context usage", %{conversation: conversation} do
+    {:ok, reply, _socket} =
+      LongpiWeb.UserSocket
+      |> socket("user", %{})
+      |> subscribe_and_join(LongpiWeb.ConversationChannel, "conversation:#{conversation.id}")
+
+    assert %{context_usage: %{used: nil, window: window}} = reply
+    assert is_integer(window) and window > 0
+  end
+
   test "tool activity is pushed to the client", %{socket: socket, conversation: conversation} do
     File.write!(Path.join(conversation.cwd, "f.txt"), "channel-sees-this")
     call = %{id: "tc_ch", name: "read", args: %{"path" => "f.txt"}}
