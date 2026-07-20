@@ -14,10 +14,35 @@ Discovered per session, project-local winning over global on name conflicts
 - **Project:** `<cwd>/.longpi/extensions/` — extensions for one workspace.
 - **Global:** `~/.longpi/extensions/` — shared across every conversation.
 
-One level deep: a `*.ts` / `*.js` file, or a subdirectory with an `index.ts`.
+One level deep in an `extensions/` dir: a `*.ts` / `*.js` file, a subdirectory
+with an `index.ts`, or a **package** subdirectory (a `package.json` with a
+`"pi": { "extensions": [...] }` manifest — for multi-file extensions that pull
+in dependencies).
 
 Requires `bun` on the PATH. If Bun isn't installed, sessions run with just the
 seven built-in tools.
+
+## Packages (installed with Bun)
+
+Extensions can also be distributed as packages and installed with `bun install`
+(npm, git, or local). List them in `packages.json` — global
+`~/.longpi/packages.json` and/or project `<cwd>/.longpi/packages.json`:
+
+```json
+{
+  "packages": {
+    "my-tools": "^1.2.0",
+    "cool-ext": "github:someone/cool-ext",
+    "local-ext": "file:/abs/path/to/pkg"
+  }
+}
+```
+
+Each entry is `"<local-name>": "<spec>"`. On session start the host runs
+`bun install` into a managed dir (`~/.longpi/packages/` or `<cwd>/.longpi/packages/`,
+re-installing only when the set changes), then loads each package's
+`"pi": { "extensions": [...] }` manifest. Package tools have the **lowest**
+precedence — a global- or project-dir extension of the same name overrides them.
 
 ## Writing an extension
 

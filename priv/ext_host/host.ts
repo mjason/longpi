@@ -13,9 +13,17 @@
 //                   {type:"reload"}
 //   host -> Elixir  {type:"ready", tools:[{name,description,parameters}], errors:[...]}
 //                   {type:"result", id, ok, content}
+//
+// Extension sources, lowest precedence first (later wins on tool name):
+//   1. packages   — deps in ~/.longpi/packages.json / <cwd>/.longpi/packages.json,
+//                   installed with `bun install` and loaded via their package.json
+//                   "pi": { extensions: [...] } manifest.
+//   2. global dir — ~/.longpi/extensions/
+//   3. project dir — <cwd>/.longpi/extensions/  (wins conflicts, matching pi)
 
-import { readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // Keep stdout pristine: anything an extension logs goes to stderr.
@@ -35,12 +43,29 @@ type ToolDef = {
 /** The author-facing `pi` API. MVP surface: registerTool only. */
 type ExtensionAPI = { registerTool(def: ToolDef): void };
 
+type LoadError = { file: string; error: string };
+
 let TOOLS = new Map<string, ToolDef>();
 let CWD = process.cwd();
 let DIRS: string[] = [];
 let reloadCounter = 0;
 
-// One level deep: *.ts/*.js files, or subdir/index.ts (mirrors pi discovery).
+// --- discovery -------------------------------------------------------------
+
+// A package.json with a "pi": { extensions: [...] } manifest — the file paths
+// are resolved relative to the package root. Returns null if not a longpi pkg.
+async function readManifest(pkgRoot: string): Promise<string[] | null> {
+  try {
+    const pkg = JSON.parse(await readFile(join(pkgRoot, "package.json"), "utf8"));
+    const exts = pkg?.pi?.extensions;
+    return Array.isArray(exts) ? exts.map((f: string) => resolve(pkgRoot, f)) : null;
+  } catch {
+    return null;
+  }
+}
+
+// One level deep in an extensions dir: *.ts/*.js files, subdir/index.ts, or a
+// subdir that is itself a package (package.json with a pi manifest).
 async function discover(dir: string): Promise<string[]> {
   let entries;
   try {
@@ -54,6 +79,11 @@ async function discover(dir: string): Promise<string[]> {
     if (entry.isFile() && /\.(ts|js|mjs)$/.test(entry.name)) {
       out.push(path);
     } else if (entry.isDirectory()) {
+      const manifest = await readManifest(path);
+      if (manifest) {
+        out.push(...manifest);
+        continue;
+      }
       for (const index of ["index.ts", "index.js"]) {
         try {
           await stat(join(path, index));
@@ -68,9 +98,87 @@ async function discover(dir: string): Promise<string[]> {
   return out;
 }
 
-async function loadAll(): Promise<{ tools: unknown[]; errors: unknown[] }> {
+// --- packages (bun install) ------------------------------------------------
+
+type PackagesConfig = { config: string; managed: string };
+
+function packageScopes(): PackagesConfig[] {
+  // Global first, project last, so project packages win on name.
+  return [
+    { config: join(homedir(), ".longpi", "packages.json"), managed: join(homedir(), ".longpi", "packages") },
+    { config: join(CWD, ".longpi", "packages.json"), managed: join(CWD, ".longpi", "packages") },
+  ];
+}
+
+async function readPackagesConfig(path: string): Promise<Record<string, string> | null> {
+  try {
+    const json = JSON.parse(await readFile(path, "utf8"));
+    const packages = json?.packages;
+    return packages && typeof packages === "object" ? packages : null;
+  } catch {
+    return null; // missing/invalid config = no packages
+  }
+}
+
+// Install the configured deps into `managed` with Bun, but only when they
+// changed (or node_modules is absent) so warm reloads stay fast and offline.
+async function ensureInstalled(managed: string, deps: Record<string, string>): Promise<void> {
+  await mkdir(managed, { recursive: true });
+  const manifestPath = join(managed, "package.json");
+  const desired = { name: "longpi-managed-packages", private: true, dependencies: deps };
+
+  let needsInstall = false;
+  try {
+    const existing = JSON.parse(await readFile(manifestPath, "utf8"));
+    needsInstall = JSON.stringify(existing.dependencies ?? {}) !== JSON.stringify(deps);
+  } catch {
+    needsInstall = true;
+  }
+  try {
+    await stat(join(managed, "node_modules"));
+  } catch {
+    needsInstall = true;
+  }
+
+  if (!needsInstall) return;
+
+  await writeFile(manifestPath, JSON.stringify(desired, null, 2));
+  // Use the same bun that's running this host.
+  const proc = Bun.spawn([process.execPath, "install", "--no-save"], {
+    cwd: managed,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if ((await proc.exited) !== 0) {
+    throw new Error(`bun install failed: ${await new Response(proc.stderr).text()}`);
+  }
+}
+
+async function loadPackages(errors: LoadError[]): Promise<string[]> {
+  const files: string[] = [];
+  for (const scope of packageScopes()) {
+    const deps = await readPackagesConfig(scope.config);
+    if (!deps || Object.keys(deps).length === 0) continue;
+    try {
+      await ensureInstalled(scope.managed, deps);
+      for (const name of Object.keys(deps)) {
+        const pkgRoot = join(scope.managed, "node_modules", name);
+        const manifest = await readManifest(pkgRoot);
+        if (manifest) files.push(...manifest);
+        else errors.push({ file: name, error: `package "${name}" has no "pi.extensions" manifest` });
+      }
+    } catch (err) {
+      errors.push({ file: scope.config, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return files;
+}
+
+// --- load / execute --------------------------------------------------------
+
+async function loadAll(): Promise<{ tools: unknown[]; errors: LoadError[] }> {
   TOOLS = new Map();
-  const errors: unknown[] = [];
+  const errors: LoadError[] = [];
   // Cache-bust so edited files re-import (self-evolution reload).
   reloadCounter++;
 
@@ -80,19 +188,21 @@ async function loadAll(): Promise<{ tools: unknown[]; errors: unknown[] }> {
     },
   };
 
-  for (const dir of DIRS) {
-    for (const file of await discover(dir)) {
-      try {
-        const url = pathToFileURL(file).href + "?v=" + reloadCounter;
-        const mod = await import(url);
-        if (typeof mod.default !== "function") {
-          errors.push({ file, error: "extension has no default-exported factory function" });
-          continue;
-        }
-        await mod.default(pi);
-      } catch (err) {
-        errors.push({ file, error: err instanceof Error ? (err.stack ?? err.message) : String(err) });
+  // Order = precedence (last import wins on name): packages, then global, then project.
+  const files = await loadPackages(errors);
+  for (const dir of DIRS) files.push(...(await discover(dir)));
+
+  for (const file of files) {
+    try {
+      const url = pathToFileURL(file).href + "?v=" + reloadCounter;
+      const mod = await import(url);
+      if (typeof mod.default !== "function") {
+        errors.push({ file, error: "extension has no default-exported factory function" });
+        continue;
       }
+      await mod.default(pi);
+    } catch (err) {
+      errors.push({ file, error: err instanceof Error ? (err.stack ?? err.message) : String(err) });
     }
   }
 
@@ -127,6 +237,8 @@ async function callTool(tool: string, args: unknown): Promise<{ ok: boolean; con
   }
 }
 
+// --- framing ---------------------------------------------------------------
+
 function writeFrame(obj: unknown): void {
   const payload = Buffer.from(JSON.stringify(obj));
   const header = Buffer.alloc(4);
@@ -139,7 +251,7 @@ async function handle(msg: { type: string; [k: string]: unknown }): Promise<void
     case "load":
       CWD = (msg.cwd as string) || process.cwd();
       DIRS = (msg.dirs as string[]) || [];
-    // fallthrough to report tools like reload does
+    // fallthrough: report tools like reload does
     case "reload": {
       const { tools, errors } = await loadAll();
       writeFrame({ type: "ready", tools, errors });

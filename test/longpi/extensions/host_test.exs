@@ -57,6 +57,54 @@ defmodule Longpi.Extensions.HostTest do
     assert {:ok, "42"} = Toolbox.execute(toolbox, "double", %{"n" => 21}, %{cwd: cwd})
   end
 
+  test "loads a local package dir via its pi.extensions manifest", %{cwd: cwd} do
+    pkg = Path.join([cwd, ".longpi/extensions", "greeter"])
+    File.mkdir_p!(pkg)
+
+    File.write!(
+      Path.join(pkg, "package.json"),
+      ~s({"name":"greeter","pi":{"extensions":["ext.ts"]}})
+    )
+
+    File.write!(Path.join(pkg, "ext.ts"), """
+    export default function (pi) {
+      pi.registerTool({ name: "greet", description: "g", parameters: { type: "object" }, execute() { return "hi"; } });
+    }
+    """)
+
+    {:ok, host} = Host.start_for(cwd)
+    assert "greet" in Enum.map(Host.tool_specs(host), & &1.name)
+    assert {:ok, "hi"} = Host.call_tool(host, "greet", %{})
+  end
+
+  test "bun-installs a file: package and loads its manifest extensions", %{cwd: cwd} do
+    # A package that lives outside the workspace, referenced via a file: spec.
+    src = Path.join(cwd, "src_pkg")
+    File.mkdir_p!(src)
+
+    File.write!(
+      Path.join(src, "package.json"),
+      ~s({"name":"mytools","version":"1.0.0","pi":{"extensions":["index.ts"]}})
+    )
+
+    File.write!(Path.join(src, "index.ts"), """
+    export default function (pi) {
+      pi.registerTool({ name: "reverse", description: "r",
+        parameters: { type: "object", properties: { s: { type: "string" } }, required: ["s"] },
+        execute(args) { return [...String(args.s)].reverse().join(""); } });
+    }
+    """)
+
+    File.write!(
+      Path.join([cwd, ".longpi", "packages.json"]),
+      Jason.encode!(%{packages: %{"mytools" => "file:#{src}"}})
+    )
+
+    {:ok, host} = Host.start_for(cwd)
+    assert "reverse" in Enum.map(Host.tool_specs(host), & &1.name)
+    assert {:ok, "ipgnol"} = Host.call_tool(host, "reverse", %{"s" => "longpi"})
+  end
+
   test "reload hot-loads a newly written extension (self-evolution)", %{cwd: cwd} do
     write_ext(cwd, "a.ts", """
     export default function (pi) {
