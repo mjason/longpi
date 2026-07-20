@@ -108,8 +108,37 @@ defmodule Longpi.Agent.Session do
        # Auto-title the conversation after its first turn if it has no title yet.
        needs_title:
          not is_nil(opts[:conversation_id]) and is_nil(conversation && conversation.title),
-       title_task: nil
-     }}
+       title_task: nil,
+       # Bun extension host for this cwd (nil until loaded / if unavailable).
+       ext_host: nil
+     }, {:continue, :load_extensions}}
+  end
+
+  @impl true
+  def handle_continue(:load_extensions, state) do
+    if Application.get_env(:longpi, :extensions_enabled, true) do
+      case Longpi.Extensions.Host.start_for(state.ctx.cwd) do
+        {:ok, host} ->
+          specs = Longpi.Extensions.Host.tool_specs(host)
+
+          {:noreply,
+           %{state | toolbox: Toolbox.with_extensions(state.toolbox, specs), ext_host: host}}
+
+        :none ->
+          {:noreply, state}
+      end
+    else
+      {:noreply, state}
+    end
+  end
+
+  @impl true
+  def terminate(_reason, state) do
+    if state.ext_host && Process.alive?(state.ext_host) do
+      GenServer.stop(state.ext_host, :normal, 1_000)
+    end
+
+    :ok
   end
 
   defp load_conversation(nil), do: {nil, []}

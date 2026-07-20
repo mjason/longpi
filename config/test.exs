@@ -25,7 +25,9 @@ config :longpi,
   llm_client: Longpi.Agent.LLM.Mock,
   llm_model: "test:model",
   # Auto-titling adds an extra LLM call per session; opt in per test.
-  auto_title: false
+  auto_title: false,
+  # Don't spawn a Bun extension host per session in tests.
+  extensions_enabled: false
 
 # In test we don't send emails
 config :longpi, Longpi.Mailer, adapter: Swoosh.Adapters.Test

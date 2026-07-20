@@ -10,8 +10,23 @@ defmodule Longpi.Agent.ToolboxTest do
   end
 
   test "default toolbox exposes the built-in tools" do
-    names = Toolbox.new() |> Toolbox.modules() |> Enum.map(& &1.name()) |> Enum.sort()
+    names = Toolbox.new() |> Toolbox.specs() |> Enum.map(& &1.name) |> Enum.sort()
     assert names == ["bash", "edit", "find", "grep", "ls", "read", "write"]
+  end
+
+  test "extension specs merge in and override built-ins by name" do
+    echo = %Longpi.Agent.ToolSpec{
+      name: "echo",
+      description: "echoes",
+      schema: %{"type" => "object"},
+      run: fn args, _ctx -> {:ok, "echo:#{inspect(args)}"} end,
+      source: :extension
+    }
+
+    toolbox = Toolbox.new() |> Toolbox.with_extensions([echo])
+    assert "echo" in (Toolbox.specs(toolbox) |> Enum.map(& &1.name))
+    # Extension tools skip NimbleOptions validation; raw args pass through.
+    assert {:ok, "echo:" <> _} = Toolbox.execute(toolbox, "echo", %{"x" => 1}, %{cwd: "/tmp"})
   end
 
   test "executes a tool with string-keyed args from JSON", %{tmp_dir: dir, ctx: ctx} do

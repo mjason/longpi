@@ -164,14 +164,13 @@ defmodule Longpi.Agent.LLM.ReqLLMClient do
     Context.tool_result(message.tool_call_id, message.name, message.content)
   end
 
-  defp to_req_llm_tool(module) do
-    name = module.name()
-
+  defp to_req_llm_tool(%Longpi.Agent.ToolSpec{} = spec) do
     ReqLLM.Tool.new!(
-      name: name,
+      name: spec.name,
       # Admin-overridable via the "tool_desc:<name>" setting.
-      description: Longpi.Agent.Prompts.tool_description(name, module.description()),
-      parameter_schema: module.parameter_schema(),
+      description: Longpi.Agent.Prompts.tool_description(spec.name, spec.description),
+      # NimbleOptions keyword (built-ins) or a raw JSON Schema map (extensions).
+      parameter_schema: spec.schema,
       # Execution happens in Longpi.Agent.Turn; req_llm never calls this.
       callback: fn _args -> {:ok, ""} end
     )

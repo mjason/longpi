@@ -37,7 +37,7 @@ defmodule Longpi.Agent.Turn do
     %{llm: llm, model: model, toolbox: toolbox, sink: sink} = config
     conversation = history ++ Enum.reverse(produced)
 
-    case llm.stream(model, conversation, Toolbox.modules(toolbox), [], sink) do
+    case llm.stream(model, conversation, Toolbox.specs(toolbox), [], sink) do
       {:ok, %{tool_calls: []} = completion} ->
         {:ok, Enum.reverse([Message.assistant(completion.text) | produced])}
 

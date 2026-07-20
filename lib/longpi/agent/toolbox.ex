@@ -2,13 +2,14 @@ defmodule Longpi.Agent.Toolbox do
   @moduledoc """
   The set of tools available to a session, keyed by tool name.
 
-  `execute/4` is the single entry point the agent loop uses: it looks up the
-  tool, validates raw (string-keyed, JSON-decoded) arguments against the
-  tool's NimbleOptions schema, and runs it. All failures come back as
-  `{:error, text}` written for the model to read and correct.
+  Each entry is a `Longpi.Agent.ToolSpec` — built-in modules and
+  extension-contributed tools are normalized to the same shape. `execute/4` is
+  the single entry point the agent loop uses: it looks up the tool, validates
+  raw (string-keyed, JSON-decoded) arguments, and runs it. All failures come
+  back as `{:error, text}` written for the model to read and correct.
   """
 
-  alias Longpi.Agent.Tools
+  alias Longpi.Agent.{Tools, ToolSpec}
 
   @default_modules [
     Tools.Read,
@@ -20,26 +21,33 @@ defmodule Longpi.Agent.Toolbox do
     Tools.Ls
   ]
 
-  @type t :: %{String.t() => module()}
+  @type t :: %{String.t() => ToolSpec.t()}
 
   @spec default_modules() :: [module()]
   def default_modules, do: @default_modules
 
   @spec new([module()]) :: t()
   def new(modules \\ @default_modules) do
-    Map.new(modules, &{&1.name(), &1})
+    modules |> Enum.map(&ToolSpec.from_module/1) |> index()
   end
 
-  @spec modules(t()) :: [module()]
-  def modules(toolbox), do: Map.values(toolbox)
+  @doc """
+  Merges extension-provided specs in, extension winning on name (matching pi:
+  an extension tool overrides a built-in of the same name).
+  """
+  @spec with_extensions(t(), [ToolSpec.t()]) :: t()
+  def with_extensions(toolbox, specs), do: Map.merge(toolbox, index(specs))
+
+  @spec specs(t()) :: [ToolSpec.t()]
+  def specs(toolbox), do: Map.values(toolbox)
 
   @spec execute(t(), String.t(), map(), Longpi.Agent.Tool.ctx()) ::
           {:ok, binary()} | {:error, binary()}
   def execute(toolbox, name, raw_args, ctx) do
     case Map.fetch(toolbox, name) do
-      {:ok, module} ->
-        with {:ok, args} <- validate(module, raw_args) do
-          module.run(args, ctx)
+      {:ok, spec} ->
+        with {:ok, args} <- validate(spec, raw_args) do
+          spec.run.(args, ctx)
         end
 
       :error ->
@@ -47,9 +55,10 @@ defmodule Longpi.Agent.Toolbox do
     end
   end
 
-  defp validate(module, raw_args) do
-    schema = module.parameter_schema()
+  defp index(specs), do: Map.new(specs, &{&1.name, &1})
 
+  # Built-ins carry a NimbleOptions keyword schema and get validated + atom-keyed.
+  defp validate(%ToolSpec{schema: schema, name: name}, raw_args) when is_list(schema) do
     kw =
       for {key, _spec} <- schema,
           {:ok, value} <- [fetch_arg(raw_args, key)],
@@ -60,9 +69,13 @@ defmodule Longpi.Agent.Toolbox do
         {:ok, Map.new(validated)}
 
       {:error, %NimbleOptions.ValidationError{message: message}} ->
-        {:error, "invalid arguments for #{module.name()}: #{message}"}
+        {:error, "invalid arguments for #{name}: #{message}"}
     end
   end
+
+  # Extension tools carry a JSON Schema map; the extension's own handler
+  # validates, so we forward the raw (string-keyed) args untouched.
+  defp validate(%ToolSpec{}, raw_args), do: {:ok, raw_args}
 
   # Args arrive string-keyed from JSON, atom-keyed from Elixir callers.
   defp fetch_arg(raw_args, key) do
