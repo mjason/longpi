@@ -52,22 +52,29 @@ defmodule Longpi.Agent.ContextWindow do
     _ -> nil
   end
 
+  # LLMDB metadata is static, and req_llm logs a warning (with a stacktrace)
+  # for every lookup of a gateway model it doesn't know. Memoize per spec so
+  # that resolution — and any warning — happens once per model, not once per
+  # usage event. Only the req_llm layer is cached; the DB override (from_resource)
+  # stays live so admin edits take effect immediately.
   defp from_req_llm(spec) do
-    case ReqLLM.model(model_spec(spec)) do
+    case :persistent_term.get({__MODULE__, :req_llm, spec}, :miss) do
+      :miss ->
+        value = resolve_from_req_llm(spec)
+        :persistent_term.put({__MODULE__, :req_llm, spec}, value)
+        value
+
+      value ->
+        value
+    end
+  end
+
+  defp resolve_from_req_llm(spec) do
+    case ReqLLM.model(spec) do
       {:ok, %{limits: %{context: c}}} when is_integer(c) and c > 0 -> c
       _ -> nil
     end
   rescue
     _ -> nil
-  end
-
-  # Prefer the inline map form so req_llm doesn't warn (with a full stacktrace)
-  # on every call for gateway models that aren't in its LLMDB catalog. Unknown
-  # providers raise in `to_existing_atom` and fall through to the default.
-  defp model_spec(spec) do
-    case String.split(spec, ":", parts: 2) do
-      [provider, id] -> %{provider: String.to_existing_atom(provider), id: id}
-      _ -> spec
-    end
   end
 end
