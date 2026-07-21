@@ -344,19 +344,19 @@ const AssistantMessage: FC = () => {
             switch (part.type) {
               case "group-chainOfThought":
                 return <div data-slot="aui_chain-of-thought">{children}</div>;
-              case "group-tool":
+              case "group-tool": {
+                // A single tool — or a couple — reads fine as plain cards; a
+                // "1 tool call" wrapper over one card is just noise. Only a busy
+                // turn (3+ tools) collapses into a tidy "N tools" group so it
+                // isn't a wall of cards.
+                if (part.indices.length <= 2) return <>{children}</>;
                 if (ToolGroup) {
                   return <ToolGroup group={part}>{children}</ToolGroup>;
                 }
                 return (
-                  // Tool activity is primary content for a coding agent, so keep
-                  // the group open while running (to show live progress) or when
-                  // it's short. Collapse long, finished runs into a tidy "N tools"
-                  // row so a busy turn doesn't become an ugly wall of cards.
-                  <ToolGroupRoot
-                    variant="ghost"
-                    defaultOpen={part.status.type === "running" || part.indices.length <= 4}
-                  >
+                  // Open while running (to show live progress); collapse once the
+                  // turn is done so the finished run is a tidy summary row.
+                  <ToolGroupRoot variant="ghost" defaultOpen={part.status.type === "running"}>
                     <ToolGroupTrigger
                       count={part.indices.length}
                       active={part.status.type === "running"}
@@ -364,6 +364,7 @@ const AssistantMessage: FC = () => {
                     <ToolGroupContent>{children}</ToolGroupContent>
                   </ToolGroupRoot>
                 );
+              }
               case "group-reasoning": {
                 if (ReasoningGroup) {
                   return (
