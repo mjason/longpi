@@ -137,16 +137,13 @@ defmodule Longpi.Agent.Session do
     if Application.get_env(:longpi, :extensions_enabled, true) do
       case Longpi.Extensions.Host.start_for(state.ctx.cwd) do
         {:ok, host} ->
-          specs = Longpi.Extensions.Host.tool_specs(host)
-          commands = Longpi.Extensions.Host.commands(host)
-
-          {:noreply,
-           %{
-             state
-             | toolbox: Toolbox.with_extensions(state.base_toolbox, specs),
-               ext_host: host,
-               ext_commands: commands
-           }}
+          # `start_for` returns as soon as the host is spawned; waiting for it to
+          # finish loading its modules (Bun cold start + imports) would block the
+          # session — and thus the channel join reading history. Do the wait in a
+          # task and fold the tools/commands in when they arrive, so opening a
+          # conversation is never gated on extension load.
+          load_extensions_async(host, self())
+          {:noreply, %{state | ext_host: host}}
 
         :none ->
           {:noreply, state}
@@ -154,6 +151,14 @@ defmodule Longpi.Agent.Session do
     else
       {:noreply, state}
     end
+  end
+
+  defp load_extensions_async(host, session) do
+    Task.start(fn ->
+      specs = Longpi.Extensions.Host.tool_specs(host)
+      commands = Longpi.Extensions.Host.commands(host)
+      send(session, {:extensions_loaded, host, specs, commands})
+    end)
   end
 
   @impl true
@@ -315,6 +320,20 @@ defmodule Longpi.Agent.Session do
   end
 
   @impl true
+  def handle_info({:extensions_loaded, host, specs, commands}, %{ext_host: host} = state) do
+    state = %{
+      state
+      | toolbox: Toolbox.with_extensions(state.base_toolbox, specs),
+        ext_commands: commands
+    }
+
+    # Push the now-available slash commands to any connected channel.
+    {:noreply, notify(state, {:commands, commands})}
+  end
+
+  # A stale load (the host was replaced by a reload) — ignore it.
+  def handle_info({:extensions_loaded, _host, _specs, _commands}, state), do: {:noreply, state}
+
   def handle_info({:turn_event, {:usage, usage}}, state) do
     state = %{state | last_input_tokens: input_tokens(usage)}
     {:noreply, notify(state, {:context_usage, context_usage_payload(state)})}

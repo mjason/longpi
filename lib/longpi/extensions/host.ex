@@ -122,7 +122,17 @@ defmodule Longpi.Extensions.Host do
 
   def handle_call({:call, :tool, name, args}, from, state) do
     id = state.next_id
-    send_frame(state.port, %{type: "call", id: id, tool: name, args: args})
+    # Inject the current secrets with every call — Elixir owns the state, so a
+    # key added/changed in the UI takes effect on the next tool call with no
+    # /reload.
+    send_frame(state.port, %{
+      type: "call",
+      id: id,
+      tool: name,
+      args: args,
+      env: Longpi.Extensions.secret_env()
+    })
+
     {:noreply, %{state | next_id: id + 1, pending: Map.put(state.pending, id, from)}}
   end
 

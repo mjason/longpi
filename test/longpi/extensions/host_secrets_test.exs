@@ -25,19 +25,21 @@ defmodule Longpi.Extensions.HostSecretsTest do
     }
     """)
 
-    :ok = Extensions.put_secret("MY_SECRET", "from-db")
-
     {:ok, host} = Host.start_for(cwd)
+
+    # No secret yet.
+    assert {:ok, "(unset)"} = Host.call_tool(host, "echo_secret", %{})
+
+    # Adding a secret takes effect on the very next call — no /reload.
+    :ok = Extensions.put_secret("MY_SECRET", "from-db")
     assert {:ok, "from-db"} = Host.call_tool(host, "echo_secret", %{})
 
-    # Changing the secret and reloading applies the new value...
+    # Changing it is likewise immediate.
     :ok = Extensions.put_secret("MY_SECRET", "changed")
-    Host.reload(host)
     assert {:ok, "changed"} = Host.call_tool(host, "echo_secret", %{})
 
-    # ...and deleting it removes the var on the next reload.
+    # And deleting it removes the var on the next call.
     :ok = Extensions.delete_secret("MY_SECRET")
-    Host.reload(host)
     assert {:ok, "(unset)"} = Host.call_tool(host, "echo_secret", %{})
   end
 end

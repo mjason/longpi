@@ -95,9 +95,10 @@ An extension tool with the same name as a built-in **overrides** it.
 Don't hardcode keys and don't ask the user to `export` them into the machine's
 environment. Read them from `process.env.<NAME>`, and have the user add `<NAME>`
 under **Settings → Extensions → Secrets**. Those secrets are stored in the app
-database and injected into this host as environment variables on load and on
-every `/reload` — so `process.env.TAVILY_API_KEY` resolves without touching the
-OS environment. A deleted secret is removed from the host on the next reload.
+database and injected into this host as environment variables **on every tool
+call** — so `process.env.TAVILY_API_KEY` resolves without touching the OS
+environment, and a key added, changed, or removed in the UI takes effect on the
+next call with no `/reload`.
 
 ## Examples
 

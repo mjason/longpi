@@ -9,7 +9,7 @@
 // console output is redirected to stderr so it can't corrupt a frame.
 //
 //   Elixir -> host  {type:"load", cwd, dirs:[...], env:{NAME:value}}
-//                   {type:"call", id, tool, args}          run a tool
+//                   {type:"call", id, tool, args, env}     run a tool
 //                   {type:"command", id, name, args}       run a slash command
 //                   {type:"event", event, payload}         fire a lifecycle hook
 //                   {type:"reload"}
@@ -324,6 +324,9 @@ async function handle(msg: { type: string; [k: string]: unknown }): Promise<void
       break;
     }
     case "call": {
+      // Secrets are re-injected on every call so a key edited in the UI takes
+      // effect immediately, with no reload.
+      applyEnv(msg.env);
       const { ok, content } = await callTool(msg.tool as string, msg.args ?? {});
       writeFrame({ type: "result", id: msg.id, ok, content });
       break;

@@ -16,6 +16,12 @@ defmodule Longpi.Agent.ConversationMessage do
   sqlite do
     table "conversation_messages"
     repo Longpi.Repo
+
+    # The hot path loads a conversation's messages ordered by position. Without
+    # this the query is a full table SCAN + a TEMP B-TREE sort.
+    custom_indexes do
+      index [:conversation_id, :position]
+    end
   end
 
   actions do
