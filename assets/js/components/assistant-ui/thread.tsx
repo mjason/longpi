@@ -25,6 +25,7 @@ import { ApprovalLevelChip } from "@/agent/ApprovalLevelChip";
 import { ComposerContextMeter } from "@/agent/ContextMeter";
 import { ComposerModelPicker } from "@/agent/ModelPicker";
 import { ComposerReasoningPicker } from "@/agent/ReasoningPicker";
+import { useI18n } from "@/agent/i18n";
 import { RegenerateContext } from "@/agent/runtime";
 import { SlashCommandMenu } from "@/agent/SlashCommandMenu";
 import { Button } from "@/components/ui/button";
@@ -192,16 +193,18 @@ const ThreadScrollToBottom: FC = () => {
 };
 
 const ThreadWelcome: FC = () => {
+  const { t } = useI18n();
   return (
     <div className="aui-thread-welcome-root mb-6 flex flex-col items-center px-4 text-center">
       <h1 className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in fill-mode-both text-2xl font-semibold duration-200">
-        How can I help you today?
+        {t("welcome.howCanIHelp")}
       </h1>
     </div>
   );
 };
 
 const Composer: FC = () => {
+  const { t } = useI18n();
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
       <SlashCommandMenu />
@@ -212,7 +215,7 @@ const Composer: FC = () => {
         >
           <ComposerAttachments />
           <ComposerPrimitive.Input
-            placeholder="Send a message…  (/compact to compress context)"
+            placeholder={t("composer.placeholder")}
             className="aui-composer-input caret-primary placeholder:text-muted-foreground/80 max-h-32 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base outline-none"
             rows={1}
             autoFocus
@@ -227,6 +230,7 @@ const Composer: FC = () => {
 };
 
 const ComposerAction: FC = () => {
+  const { t } = useI18n();
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between">
       <div className="flex items-center gap-1.5">
@@ -241,7 +245,7 @@ const ComposerAction: FC = () => {
           <AuiIf condition={(s) => s.composer.dictation == null}>
             <ComposerPrimitive.Dictate asChild>
               <TooltipIconButton
-                tooltip="Voice input"
+                tooltip={t("composer.voice")}
                 side="bottom"
                 type="button"
                 variant="ghost"
@@ -272,7 +276,7 @@ const ComposerAction: FC = () => {
         <AuiIf condition={(s) => !s.thread.isRunning}>
           <ComposerPrimitive.Send asChild>
             <TooltipIconButton
-              tooltip="Send message"
+              tooltip={t("composer.send")}
               side="bottom"
               type="button"
               variant="default"
@@ -421,16 +425,18 @@ const AssistantMessage: FC = () => {
 // It deliberately does NOT use assistant-ui's Reload action, which would spawn a
 // branch we can't navigate — see RegenerateContext.
 const RegenerateButton: FC = () => {
+  const { t } = useI18n();
   const regenerate = useContext(RegenerateContext);
   if (!regenerate) return null;
   return (
-    <TooltipIconButton tooltip="Regenerate" onClick={() => regenerate()}>
+    <TooltipIconButton tooltip={t("msg.regenerate")} onClick={() => regenerate()}>
       <RefreshCwIcon />
     </TooltipIconButton>
   );
 };
 
 const AssistantActionBar: FC = () => {
+  const { t } = useI18n();
   return (
     <ActionBarPrimitive.Root
       hideWhenRunning
@@ -438,7 +444,7 @@ const AssistantActionBar: FC = () => {
       className="aui-assistant-action-bar-root text-muted-foreground animate-in fade-in col-start-3 row-start-2 -ms-1 flex gap-1 duration-200"
     >
       <ActionBarPrimitive.Copy asChild>
-        <TooltipIconButton tooltip="Copy">
+        <TooltipIconButton tooltip={t("msg.copy")}>
           <AuiIf condition={(s) => s.message.isCopied}>
             <CheckIcon className="animate-in zoom-in-50 fade-in duration-200 ease-out" />
           </AuiIf>
@@ -451,7 +457,7 @@ const AssistantActionBar: FC = () => {
       <ActionBarMorePrimitive.Root>
         <ActionBarMorePrimitive.Trigger asChild>
           <TooltipIconButton
-            tooltip="More"
+            tooltip={t("msg.more")}
             className="data-[state=open]:bg-accent"
           >
             <MoreHorizontalIcon />

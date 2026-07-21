@@ -5,7 +5,13 @@ defmodule LongpiWeb.AuthGateTest do
   alias Longpi.Accounts.Seeder
 
   setup do
-    on_exit(fn -> Application.delete_env(:longpi, :auth_enabled) end)
+    on_exit(fn ->
+      Application.delete_env(:longpi, :auth_enabled)
+      # The UI toggle caches its DB setting in persistent_term; scrub it so a
+      # set_enabled from one test can't leak into the next.
+      :persistent_term.erase({Longpi.Auth, :enabled})
+    end)
+
     :ok
   end
 
@@ -85,6 +91,95 @@ defmodule LongpiWeb.AuthGateTest do
     test "the embed page is gated too", %{conn: conn} do
       enable_auth()
       assert redirected_to(get(conn, ~p"/embed")) == "/sign-in"
+    end
+  end
+
+  describe "management UI: users & the sign-in toggle" do
+    test "enabling sign-in with zero accounts is refused", %{conn: conn} do
+      if Ash.count!(Longpi.Accounts.User, authorize?: false) == 0 do
+        conn = post(conn, ~p"/rpc/auth", %{"enabled" => true})
+        assert json_response(conn, 422)["error"] =~ "add a user first"
+        refute Longpi.Auth.enabled?()
+      end
+    end
+
+    test "add user → toggle on (live) → toggle off", %{conn: conn} do
+      assert %{"ok" => true} =
+               conn
+               |> post(~p"/rpc/users", %{"email" => "ui@example.com", "password" => "secret123"})
+               |> json_response(200)
+
+      assert %{"users" => users} = conn |> get(~p"/rpc/users") |> json_response(200)
+      assert Enum.any?(users, &(&1["email"] == "ui@example.com"))
+
+      assert %{"ok" => true} =
+               conn |> post(~p"/rpc/auth", %{"enabled" => true}) |> json_response(200)
+
+      assert Longpi.Auth.enabled?()
+
+      # The toggle is LIVE: an unauthenticated request now 401s...
+      assert conn |> get(~p"/rpc/version") |> json_response(401)
+
+      # ...so turning it back off needs an authorized session.
+      authed = Phoenix.ConnTest.init_test_session(conn, %{embed_authorized: true})
+
+      assert %{"ok" => true} =
+               authed |> post(~p"/rpc/auth", %{"enabled" => false}) |> json_response(200)
+
+      refute Longpi.Auth.enabled?()
+    end
+
+    test "saving an existing email resets its password", %{conn: conn} do
+      conn
+      |> post(~p"/rpc/users", %{"email" => "reset@example.com", "password" => "first-pass1"})
+      |> json_response(200)
+
+      conn
+      |> post(~p"/rpc/users", %{"email" => "reset@example.com", "password" => "second-pass2"})
+      |> json_response(200)
+
+      assert {:ok, _user} =
+               Longpi.Accounts.User
+               |> Ash.Query.for_read(:sign_in_with_password, %{
+                 email: "reset@example.com",
+                 password: "second-pass2"
+               })
+               |> Ash.read_one(authorize?: false)
+    end
+
+    test "the last account cannot be deleted while sign-in is on", %{conn: conn} do
+      %{"id" => id} =
+        conn
+        |> post(~p"/rpc/users", %{"email" => "only@example.com", "password" => "secret123"})
+        |> json_response(200)
+
+      conn |> post(~p"/rpc/auth", %{"enabled" => true}) |> json_response(200)
+
+      authed = Phoenix.ConnTest.init_test_session(conn, %{embed_authorized: true})
+
+      if Ash.count!(Longpi.Accounts.User, authorize?: false) == 1 do
+        assert json_response(post(authed, ~p"/rpc/users/delete", %{"id" => id}), 422)["error"] =~
+                 "last account"
+      end
+    end
+
+    test "a too-short password errors cleanly", %{conn: conn} do
+      body =
+        conn
+        |> post(~p"/rpc/users", %{"email" => "short@example.com", "password" => "tiny"})
+        |> json_response(422)
+
+      assert body["error"] != nil
+    end
+
+    test "the toggle is read-only when config pins auth", %{conn: conn} do
+      enable_auth()
+
+      # A pinned config wins and the endpoint refuses to flip it. (The gate is
+      # bypassed here via an embed-authorized session, since auth is now on.)
+      conn = Phoenix.ConnTest.init_test_session(conn, %{embed_authorized: true})
+      assert json_response(post(conn, ~p"/rpc/auth", %{"enabled" => false}), 422)["error"] =~
+               "pinned"
     end
   end
 

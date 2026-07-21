@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import ChatApp from "./agent/ChatApp";
+import { I18nProvider } from "./agent/i18n";
 import EmbedApp from "./agent/EmbedApp";
 import { ManagementRoute } from "./agent/ManagementPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -15,6 +16,7 @@ installClipboardFallback();
 // explicitly in agent/channel.ts.
 createRoot(document.getElementById("app")!).render(
   <ErrorBoundary>
+    <I18nProvider>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<ChatApp />} />
@@ -24,5 +26,6 @@ createRoot(document.getElementById("app")!).render(
         <Route path="/embed" element={<EmbedApp />} />
       </Routes>
     </BrowserRouter>
+    </I18nProvider>
   </ErrorBoundary>,
 );

@@ -173,6 +173,61 @@ export async function deleteExtensionSecret(name: string): Promise<boolean> {
   return res.ok;
 }
 
+// ── Users & sign-in (management UI owns account management) ────────────────
+
+export type AuthStatus = { enabled: boolean; forced: boolean; userCount: number };
+export type UserRow = { id: string; email: string };
+
+export async function loadAuthStatus(): Promise<AuthStatus | null> {
+  const res = await fetch("/rpc/auth", { headers: buildCSRFHeaders(), cache: "no-store" });
+  return res.ok ? await res.json() : null;
+}
+
+/** Returns an error message, or null on success. */
+export async function setAuthEnabled(enabled: boolean): Promise<string | null> {
+  const res = await fetch("/rpc/auth", {
+    method: "POST",
+    headers: { ...buildCSRFHeaders(), "content-type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (res.ok) return null;
+  return (await res.json().catch(() => ({}))).error || `HTTP ${res.status}`;
+}
+
+export async function loadUsers(): Promise<UserRow[]> {
+  const res = await fetch("/rpc/users", { headers: buildCSRFHeaders(), cache: "no-store" });
+  if (!res.ok) return [];
+  return (await res.json()).users ?? [];
+}
+
+/** Create, or reset the password of, an account. Error message or null. */
+export async function putUser(email: string, password: string): Promise<string | null> {
+  const res = await fetch("/rpc/users", {
+    method: "POST",
+    headers: { ...buildCSRFHeaders(), "content-type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (res.ok) return null;
+  return (await res.json().catch(() => ({}))).error || `HTTP ${res.status}`;
+}
+
+export async function deleteUser(id: string): Promise<string | null> {
+  const res = await fetch("/rpc/users/delete", {
+    method: "POST",
+    headers: { ...buildCSRFHeaders(), "content-type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+  if (res.ok) return null;
+  return (await res.json().catch(() => ({}))).error || `HTTP ${res.status}`;
+}
+
+export type EmbedInfo = { authEnabled: boolean; embedToken: string | null; baseUrl: string };
+
+export async function loadEmbedInfo(): Promise<EmbedInfo | null> {
+  const res = await fetch("/rpc/embed-info", { headers: buildCSRFHeaders(), cache: "no-store" });
+  return res.ok ? await res.json() : null;
+}
+
 export type VersionInfo = {
   enabled: boolean;
   current: string;

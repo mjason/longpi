@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import { Button } from "../components/ui/button";
-import { cn } from "../lib/utils";
+import { useI18n } from "./i18n";
 
 type Choice = "light" | "dark" | "system";
 
@@ -21,10 +21,10 @@ function effectiveTheme(): "light" | "dark" {
   return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
 }
 
-const OPTIONS: { id: Choice; label: string; Icon: typeof Sun }[] = [
-  { id: "light", label: "Light", Icon: Sun },
-  { id: "dark", label: "Dark", Icon: Moon },
-  { id: "system", label: "System", Icon: Monitor },
+const OPTIONS: { id: Choice; labelKey: "theme.light" | "theme.dark" | "theme.system"; Icon: typeof Sun }[] = [
+  { id: "light", labelKey: "theme.light", Icon: Sun },
+  { id: "dark", labelKey: "theme.dark", Icon: Moon },
+  { id: "system", labelKey: "theme.system", Icon: Monitor },
 ];
 
 /**
@@ -34,6 +34,7 @@ const OPTIONS: { id: Choice; label: string; Icon: typeof Sun }[] = [
  * the host forces the theme (data-theme-source="forced").
  */
 export function ThemeToggle() {
+  const { t } = useI18n();
   const [choice, setChoice] = useState<Choice>("system");
   const [effective, setEffective] = useState<"light" | "dark">("light");
   const [forced, setForced] = useState(false);
@@ -63,15 +64,15 @@ export function ThemeToggle() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="size-7" aria-label="Theme">
+        <Button variant="ghost" size="icon" className="size-7" aria-label={t("theme.label")}>
           <Icon className="size-4" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-36">
-        {OPTIONS.map(({ id, label, Icon: OptIcon }) => (
+        {OPTIONS.map(({ id, labelKey, Icon: OptIcon }) => (
           <DropdownMenuItem key={id} onSelect={() => pick(id)} className="gap-2">
             <OptIcon className="size-4 text-muted-foreground" />
-            <span className="flex-1">{label}</span>
+            <span className="flex-1">{t(labelKey)}</span>
             {choice === id && <span className="size-1.5 rounded-full bg-primary" />}
           </DropdownMenuItem>
         ))}

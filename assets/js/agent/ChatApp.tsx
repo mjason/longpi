@@ -39,6 +39,8 @@ import { ExtCommandsContext } from "./ExtCommandsContext";
 import { ConversationModelContext } from "./ModelPicker";
 import { ReasoningEffortContext } from "./ReasoningPicker";
 import { ThemeToggle } from "./ThemeToggle";
+import { useI18n } from "./i18n";
+import { LanguageToggle } from "./LanguageToggle";
 import { RegenerateContext, useChannelRuntime } from "./runtime";
 import { loadSettings, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
@@ -76,6 +78,7 @@ export function groupByProject(conversations: ConversationSummary[]): ProjectGro
 }
 
 export default function ChatApp() {
+  const { t } = useI18n();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const { conversationId } = useParams();
   const navigate = useNavigate();
@@ -112,7 +115,7 @@ export default function ChatApp() {
             navigate(`/c/${conversation.id}`);
           }}
           onDelete={async (conversation) => {
-            if (!confirm(`Delete "${conversationLabel(conversation)}"? This cannot be undone.`))
+            if (!confirm(t("confirm.deleteConversation", { name: conversationLabel(conversation) })))
               return;
             const result = await destroyConversation({
               identity: conversation.id,
@@ -132,11 +135,7 @@ export default function ChatApp() {
           }}
           onDeleteProject={async (project) => {
             const count = project.conversations.length;
-            if (
-              !confirm(
-                `Delete project "${folderName(project.cwd)}" and its ${count} conversation${count === 1 ? "" : "s"}? This cannot be undone.`,
-              )
-            )
+            if (!confirm(t("confirm.deleteProject", { name: folderName(project.cwd), count })))
               return;
             // Prune only the conversations the server actually deleted.
             const outcomes = await Promise.all(
@@ -178,7 +177,7 @@ export default function ChatApp() {
               <div className="mb-4 text-5xl text-primary">π</div>
               <h1 className="mb-2 text-xl font-semibold">Longpi</h1>
               <p className="text-sm text-muted-foreground">
-                Pick a workspace on the left, or start a new conversation to put the agent to work.
+                {t("welcome.pickWorkspace")}
               </p>
             </div>
           </main>
@@ -216,6 +215,7 @@ function Sidebar(props: {
       return next;
     });
 
+  const { t } = useI18n();
   const [createFor, setCreateFor] = useState<{ cwd: string } | null>(null);
 
   return (
@@ -225,12 +225,13 @@ function Sidebar(props: {
           <span className="mr-2 text-primary">π</span>Longpi
         </span>
         <div className="flex-1" />
+        <LanguageToggle />
         <ThemeToggle />
         <Button
           variant="ghost"
           size="icon"
           className="size-7"
-          aria-label="Settings"
+          aria-label={t("sidebar.settings")}
           onClick={() => navigate("/manage")}
         >
           <Settings className="size-4" />
@@ -243,26 +244,26 @@ function Sidebar(props: {
           className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors hover:bg-accent"
         >
           <Plus className="size-4 text-muted-foreground" />
-          New conversation
+          {t("sidebar.newConversation")}
         </button>
         <button
           onClick={() => navigate("/manage/extensions")}
           className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors hover:bg-accent"
         >
           <Puzzle className="size-4 text-muted-foreground" />
-          Extensions
+          {t("sidebar.extensions")}
         </button>
       </nav>
 
       <ScrollArea className="flex-1">
         <div className="flex items-center justify-between px-3 pt-3 pb-1">
           <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-            Projects
+            {t("sidebar.projects")}
           </span>
         </div>
 
         {projects.length === 0 && (
-          <p className="px-4 py-2 text-sm text-muted-foreground">No conversations yet.</p>
+          <p className="px-4 py-2 text-sm text-muted-foreground">{t("sidebar.noConversations")}</p>
         )}
 
         <nav className="pb-2">
@@ -304,9 +305,9 @@ function Sidebar(props: {
                       </button>
                       <button
                         onClick={() => setCreateFor({ cwd: project.cwd })}
-                        aria-label="New conversation here"
+                        aria-label={t("sidebar.newConversationHere")}
                         className="mr-1.5 hidden rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground group-hover:block"
-                        title="New conversation in this project"
+                        title={t("sidebar.newConversationHere")}
                       >
                         <Plus className="size-3.5" />
                       </button>
@@ -318,7 +319,7 @@ function Sidebar(props: {
                     </ContextMenuLabel>
                     <ContextMenuItem onSelect={() => setCreateFor({ cwd: project.cwd })}>
                       <Plus className="size-4" />
-                      New conversation here
+                      {t("sidebar.newConversationHere")}
                     </ContextMenuItem>
                     <ContextMenuItem
                       variant="destructive"
@@ -348,7 +349,7 @@ function Sidebar(props: {
                       </button>
                       <button
                         onClick={() => props.onDelete(conversation)}
-                        aria-label="Delete conversation"
+                        aria-label={t("sidebar.deleteConversation")}
                         className="mr-2 hidden rounded-md p-1.5 text-muted-foreground hover:bg-background hover:text-destructive group-hover:block"
                       >
                         <Trash2 className="size-4" />
@@ -420,11 +421,13 @@ function NewConversationDialog({
     else setError("Could not create the conversation. Check the directory path.");
   }
 
+  const { t } = useI18n();
+
   return (
     <Dialog open onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>New conversation</DialogTitle>
+          <DialogTitle>{t("newConv.title")}</DialogTitle>
         </DialogHeader>
         <form onSubmit={create} className="space-y-3">
           <div className="space-y-1.5">
@@ -511,6 +514,7 @@ export function ConversationPane({
     if (title) onTitled(conversation.id, title);
   }, [title]);
 
+  const { t } = useI18n();
   // Show the most recent notice briefly (command echoes, errors, interrupts).
   const [toast, setToast] = useState<{ tone: "error" | "info"; text: string } | null>(null);
   const lastNotice = notices[notices.length - 1];
@@ -538,7 +542,7 @@ export function ConversationPane({
               title="Older messages have been summarized to fit the model's context window. The full history is still stored."
             >
               <Layers className="size-3.5" />
-              context compacted{compactionCount > 1 ? ` ×${compactionCount}` : ""}
+              {t("pane.contextCompacted")}{compactionCount > 1 ? ` ×${compactionCount}` : ""}
             </span>
           )}
           {headerExtra}

@@ -9,6 +9,7 @@ import { Button } from "../components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { TooltipProvider } from "../components/ui/tooltip";
 import { ConversationPane, DEFAULT_MODEL, conversationLabel } from "./ChatApp";
+import { useI18n } from "./i18n";
 import { loadSettings, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
 
@@ -30,6 +31,7 @@ export function pickConversation(conversations: { cwd: string }[], cwd: string):
  * - `token` authenticates the iframe when auth is enabled (see Longpi.Auth).
  */
 export default function EmbedApp() {
+  const { t } = useI18n();
   const [params] = useSearchParams();
   const cwd = (params.get("cwd") ?? "").trim();
   const modelParam = (params.get("model") ?? "").trim();
@@ -55,7 +57,7 @@ export default function EmbedApp() {
 
   useEffect(() => {
     if (!cwd) {
-      setError("Missing ?cwd= — the host must say which workspace to open.");
+      setError(t("embed.missingCwd"));
       setLoading(false);
       return;
     }
@@ -71,7 +73,7 @@ export default function EmbedApp() {
 
       if (cancelled) return;
       if (!listed.success) {
-        setError("Could not load conversations.");
+        setError(t("embed.loadFailed"));
         setLoading(false);
         return;
       }
@@ -84,7 +86,7 @@ export default function EmbedApp() {
         const created = await createForCwd();
         if (cancelled) return;
         if (!created) {
-          setError("Could not create a conversation for this workspace.");
+          setError(t("embed.createFailed"));
           setLoading(false);
           return;
         }
@@ -167,6 +169,7 @@ export default function EmbedApp() {
  * ThreadList (new / switch) scoped to the embed's cwd.
  */
 function EmbedThreadSwitcher({ count }: { count: number }) {
+  const { t } = useI18n();
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -174,7 +177,7 @@ function EmbedThreadSwitcher({ count }: { count: number }) {
           variant="ghost"
           size="sm"
           className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
-          aria-label="Conversations in this workspace"
+          aria-label={t("embed.threads")}
         >
           <History className="size-4" />
           {count > 1 ? count : null}

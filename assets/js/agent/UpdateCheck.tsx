@@ -1,5 +1,6 @@
 import { ArrowUpCircle, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useI18n } from "./i18n";
 import { applyUpgrade, checkVersion, type VersionInfo } from "./settings";
 
 /** The server version embedded in the page at load, shown before the check answers. */
@@ -23,6 +24,7 @@ export function shouldOfferUpdate(info: VersionInfo | null): boolean {
  * for it to answer again, then reloads onto the new version.
  */
 export function UpdateCheck() {
+  const { t } = useI18n();
   const [info, setInfo] = useState<VersionInfo | null>(null);
   const [state, setState] = useState<"idle" | "updating" | "restarting">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +72,7 @@ export function UpdateCheck() {
   return (
     <div className="shrink-0 border-t border-border px-3 py-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-[11px] text-muted-foreground" title="Server version">
+        <span className="font-mono text-[11px] text-muted-foreground" title={t("update.serverVersion")}>
           v{current}
         </span>
 
@@ -81,20 +83,20 @@ export function UpdateCheck() {
             className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 font-mono text-[11px] font-medium text-primary ring-1 ring-primary/20 transition-colors hover:bg-primary/15"
           >
             <ArrowUpCircle className="size-3" />
-            Update to v{info?.latest}
+            {t("update.updateTo", { version: info?.latest ?? "" })}
           </button>
         )}
 
         {state === "updating" && (
           <span className="inline-flex items-center gap-1 font-mono text-[11px] text-primary">
             <Loader2 className="size-3 animate-spin" />
-            Updating…
+            {t("update.updating")}
           </span>
         )}
         {state === "restarting" && (
           <span className="inline-flex items-center gap-1 font-mono text-[11px] text-primary">
             <Loader2 className="size-3 animate-spin" />
-            Restarting…
+            {t("update.restarting")}
           </span>
         )}
       </div>

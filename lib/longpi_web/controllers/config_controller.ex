@@ -80,6 +80,88 @@ defmodule LongpiWeb.ConfigController do
     json(conn, %{ok: true})
   end
 
+  # ── Users & sign-in (Management → Users) ─────────────────────────────────
+  # Account management lives HERE, in the UI — passwords go straight to the
+  # database and never through config files or shell history.
+
+  def auth_status(conn, _params) do
+    json(conn, %{
+      enabled: Longpi.Auth.enabled?(),
+      forced: Longpi.Auth.forced?(),
+      userCount: Ash.count!(Longpi.Accounts.User, authorize?: false)
+    })
+  end
+
+  def set_auth(conn, %{"enabled" => enabled}) when is_boolean(enabled) do
+    cond do
+      Longpi.Auth.forced?() ->
+        conn
+        |> put_status(422)
+        |> json(%{error: "auth is pinned by config.jsonc / LONGPI_AUTH_ENABLED"})
+
+      enabled and Ash.count!(Longpi.Accounts.User, authorize?: false) == 0 ->
+        conn |> put_status(422) |> json(%{error: "add a user first"})
+
+      true ->
+        :ok = Longpi.Auth.set_enabled(enabled)
+        json(conn, %{ok: true, enabled: enabled})
+    end
+  end
+
+  def list_users(conn, _params) do
+    users =
+      Longpi.Accounts.User
+      |> Ash.read!(authorize?: false)
+      |> Enum.sort_by(& &1.email)
+      |> Enum.map(&%{id: &1.id, email: to_string(&1.email)})
+
+    json(conn, %{users: users})
+  end
+
+  # Create AND reset share the seed_user upsert: same email = new password.
+  def put_user(conn, %{"email" => email, "password" => password})
+      when is_binary(email) and is_binary(password) do
+    case Longpi.Accounts.User
+         |> Ash.Changeset.for_create(:seed_user, %{email: String.trim(email), password: password})
+         |> Ash.create(authorize?: false) do
+      {:ok, user} ->
+        json(conn, %{ok: true, id: user.id, email: to_string(user.email)})
+
+      {:error, error} ->
+        conn |> put_status(422) |> json(%{error: Exception.message(error)})
+    end
+  end
+
+  def delete_user(conn, %{"id" => id}) when is_binary(id) do
+    last? = Ash.count!(Longpi.Accounts.User, authorize?: false) <= 1
+
+    cond do
+      last? and Longpi.Auth.enabled?() ->
+        conn
+        |> put_status(422)
+        |> json(%{error: "cannot delete the last account while sign-in is on"})
+
+      true ->
+        with {:ok, user} <- Ash.get(Longpi.Accounts.User, id, authorize?: false),
+             :ok <- Ash.destroy(user, authorize?: false) do
+          json(conn, %{ok: true})
+        else
+          _ -> conn |> put_status(422) |> json(%{error: "could not delete the account"})
+        end
+    end
+  end
+
+  # Embed integration info for the management UI: whether auth is on, the
+  # embed token (this endpoint sits behind the auth gate, so with auth enabled
+  # only a signed-in user can read it), and the base URL for iframe snippets.
+  def embed_info(conn, _params) do
+    json(conn, %{
+      authEnabled: Longpi.Auth.enabled?(),
+      embedToken: Longpi.Auth.embed_token(),
+      baseUrl: LongpiWeb.Endpoint.url()
+    })
+  end
+
   # Self-update: check GitHub for a newer release, and apply it on demand.
   def version(conn, _params) do
     case Longpi.Updater.check() do

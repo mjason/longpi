@@ -13,10 +13,18 @@ if model = System.get_env("LONGPI_LLM_MODEL") do
   config :longpi, llm_model: model
 end
 
-# Optional auth (any env, so a dev preview can flip it on). Off by default —
-# see Longpi.Auth. Prod re-derives these below, adding config.jsonc's "auth".
-if System.get_env("LONGPI_AUTH_ENABLED") in ~w(true 1) do
-  config :longpi, auth_enabled: true
+# Optional auth (any env, so a dev preview can flip it on). Three-state: an
+# explicit true/false here PINS auth (the UI toggle goes read-only; false is
+# the lock-out recovery hatch); unset leaves it to the admin UI's DB setting.
+cond do
+  System.get_env("LONGPI_AUTH_ENABLED") in ~w(true 1) ->
+    config :longpi, auth_enabled: true
+
+  System.get_env("LONGPI_AUTH_ENABLED") in ~w(false 0) ->
+    config :longpi, auth_enabled: false
+
+  true ->
+    :ok
 end
 
 if users = System.get_env("LONGPI_USERS") do
@@ -149,9 +157,21 @@ if config_env() == :prod do
   # boot) rather than self-registration.
   auth_cfg = cfg["auth"] || %{}
 
+  # Explicit env/config pins auth on or off; absent leaves the admin UI toggle
+  # (DB setting) in control. See Longpi.Auth.enabled?/0.
+  auth_forced =
+    cond do
+      System.get_env("LONGPI_AUTH_ENABLED") in ~w(true 1) -> true
+      System.get_env("LONGPI_AUTH_ENABLED") in ~w(false 0) -> false
+      Map.has_key?(auth_cfg, "enabled") -> auth_cfg["enabled"] == true
+      true -> nil
+    end
+
+  if is_boolean(auth_forced) do
+    config :longpi, auth_enabled: auth_forced
+  end
+
   config :longpi,
-    auth_enabled:
-      System.get_env("LONGPI_AUTH_ENABLED", "") in ~w(true 1) or auth_cfg["enabled"] == true,
     bootstrap_users: System.get_env("LONGPI_USERS") || auth_cfg["users"] || "",
     # Where the bootstrap credentials came from: the seeder warns when a
     # password is left sitting in config.jsonc (env vars don't persist).

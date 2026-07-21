@@ -82,6 +82,12 @@ defmodule LongpiWeb.Router do
     post "/rpc/extensions/secrets/delete", ConfigController, :delete_extension_secret
     get "/rpc/version", ConfigController, :version
     post "/rpc/version/upgrade", ConfigController, :upgrade
+    get "/rpc/embed-info", ConfigController, :embed_info
+    get "/rpc/auth", ConfigController, :auth_status
+    post "/rpc/auth", ConfigController, :set_auth
+    get "/rpc/users", ConfigController, :list_users
+    post "/rpc/users", ConfigController, :put_user
+    post "/rpc/users/delete", ConfigController, :delete_user
     post "/rpc/run", AshTypescriptRpcController, :run
     post "/rpc/validate", AshTypescriptRpcController, :validate
     get "/ash-typescript", PageController, :index

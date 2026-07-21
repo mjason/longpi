@@ -1,4 +1,5 @@
 import { LogOut } from "lucide-react";
+import { useI18n } from "./i18n";
 
 /**
  * Signed-in identity + sign-out link in the sidebar footer. Renders nothing
@@ -6,6 +7,7 @@ import { LogOut } from "lucide-react";
  * unchanged. Values come from the meta tags the server layout embeds.
  */
 export function AuthStatus() {
+  const { t } = useI18n();
   const enabled =
     document.querySelector('meta[name="auth-enabled"]')?.getAttribute("content") === "true";
   const email = document.querySelector('meta[name="user-email"]')?.getAttribute("content");
@@ -21,7 +23,7 @@ export function AuthStatus() {
         className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
         <LogOut className="size-3" />
-        Sign out
+        {t("sidebar.signOut")}
       </a>
     </div>
   );

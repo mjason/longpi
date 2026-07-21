@@ -15,7 +15,48 @@ defmodule Longpi.Auth do
 
   alias Longpi.Accounts.User
 
-  def enabled?, do: Application.get_env(:longpi, :auth_enabled, false)
+  @cache {__MODULE__, :enabled}
+
+  @doc """
+  Whether sign-in is required. Three layers:
+
+    * config.jsonc `auth.enabled` / `LONGPI_AUTH_ENABLED` set an explicit
+      true/false that always wins (false is the lock-out recovery hatch);
+    * otherwise the admin-managed DB setting (`Longpi.Auth.set_enabled/1`,
+      toggled from Management → Users) decides — live, no restart;
+    * neither set → off (the zero-config default).
+  """
+  def enabled? do
+    case Application.get_env(:longpi, :auth_enabled) do
+      value when is_boolean(value) -> value
+      _ -> setting_enabled?()
+    end
+  end
+
+  @doc "Turns sign-in on/off from the management UI (persisted, effective immediately)."
+  def set_enabled(enabled?) when is_boolean(enabled?) do
+    Longpi.Agent.Settings.put("auth_enabled", to_string(enabled?))
+    :persistent_term.put(@cache, enabled?)
+    :ok
+  end
+
+  @doc "True when config.jsonc/env pins auth on or off (the UI toggle is then read-only)."
+  def forced? do
+    is_boolean(Application.get_env(:longpi, :auth_enabled))
+  end
+
+  # Cached so RequireAuth doesn't hit the DB on every request.
+  defp setting_enabled? do
+    case :persistent_term.get(@cache, :miss) do
+      :miss ->
+        enabled = Longpi.Agent.Settings.get("auth_enabled") == "true"
+        :persistent_term.put(@cache, enabled)
+        enabled
+
+      value ->
+        value
+    end
+  end
 
   @doc """
   The signed-in session's bearer token for the websocket.
