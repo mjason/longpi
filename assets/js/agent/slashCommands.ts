@@ -39,9 +39,9 @@ export function slashCommandHelp(): string {
   return SLASH_COMMANDS.map((c) => `/${c.name} — ${c.summary}`).join("   ·   ");
 }
 
-export function matchSlashCommands(text: string): SlashCommand[] | null {
+export function matchSlashCommands(text: string, extra: SlashCommand[] = []): SlashCommand[] | null {
   const match = /^\/(\w*)$/.exec(text);
   if (!match) return null;
   const query = match[1].toLowerCase();
-  return SLASH_COMMANDS.filter((command) => command.name.startsWith(query));
+  return [...SLASH_COMMANDS, ...extra].filter((command) => command.name.startsWith(query));
 }

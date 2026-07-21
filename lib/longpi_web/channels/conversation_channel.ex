@@ -25,13 +25,17 @@ defmodule LongpiWeb.ConversationChannel do
           |> Enum.reject(&(&1.role == :system))
           |> Enum.map(&serialize_message/1)
 
-        socket = assign(socket, conversation_id: conversation_id, session: session)
+        ext = Session.ext_info(session)
+
+        socket =
+          assign(socket, conversation_id: conversation_id, session: session, ext_host: ext.host)
 
         reply = %{
           messages: history,
           status: Session.status(session),
           pending_approvals: Session.pending_approvals(session),
-          context_usage: Session.context_usage(session)
+          context_usage: Session.context_usage(session),
+          commands: ext.commands
         }
 
         {:ok, reply, socket}
@@ -80,8 +84,19 @@ defmodule LongpiWeb.ConversationChannel do
     end
   end
 
-  def handle_in("command", %{"name" => name}, socket) do
-    {:reply, {:error, %{reason: "unknown command: #{name}"}}, socket}
+  # Extension-registered slash commands run in the Bun host; the handler's text
+  # comes back as `content` for the client to surface as a notice.
+  def handle_in("command", %{"name" => name} = payload, socket) do
+    case socket.assigns[:ext_host] do
+      nil ->
+        {:reply, {:error, %{reason: "unknown command: #{name}"}}, socket}
+
+      host ->
+        case Longpi.Extensions.Host.call_command(host, name, payload["arg"] || "") do
+          {:ok, content} -> {:reply, {:ok, %{content: content}}, socket}
+          {:error, reason} -> {:reply, {:error, %{reason: to_string(reason)}}, socket}
+        end
+    end
   end
 
   # Current history snapshot, for a client that re-attached to an
@@ -99,7 +114,8 @@ defmodule LongpiWeb.ConversationChannel do
       messages: history,
       status: Session.status(session),
       pending_approvals: Session.pending_approvals(session),
-      context_usage: Session.context_usage(session)
+      context_usage: Session.context_usage(session),
+      commands: Session.ext_info(session).commands
     }
 
     {:reply, {:ok, reply}, socket}

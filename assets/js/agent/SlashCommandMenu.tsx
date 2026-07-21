@@ -1,6 +1,7 @@
 import { useAuiState, useComposerRuntime } from "@assistant-ui/react";
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "../lib/utils";
+import { useExtCommands } from "./ExtCommandsContext";
 import { matchSlashCommands, type SlashCommand } from "./slashCommands";
 
 /**
@@ -12,7 +13,12 @@ import { matchSlashCommands, type SlashCommand } from "./slashCommands";
 export function SlashCommandMenu() {
   const text = useAuiState((s) => s.composer.text);
   const composer = useComposerRuntime();
-  const matches = useMemo(() => matchSlashCommands(text), [text]);
+  const extCommands = useExtCommands();
+  const extAsSlash = useMemo<SlashCommand[]>(
+    () => extCommands.map((c) => ({ name: c.name, summary: c.description })),
+    [extCommands],
+  );
+  const matches = useMemo(() => matchSlashCommands(text, extAsSlash), [text, extAsSlash]);
   const open = matches !== null && matches.length > 0;
   const [active, setActive] = useState(0);
 

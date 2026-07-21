@@ -14,6 +14,7 @@ import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { Thread } from "../components/assistant-ui/thread";
 import { ContextDisplay } from "../components/assistant-ui/context-display";
+import { ExtCommandsContext } from "./ExtCommandsContext";
 import { ModelPicker } from "./ModelPicker";
 import { useChannelRuntime } from "./runtime";
 import { SettingsDialog } from "./SettingsDialog";
@@ -228,7 +229,7 @@ function ConversationPane({
   onModelChanged: (id: string, model: string) => void;
   onTitled: (id: string, title: string) => void;
 }) {
-  const { runtime, compactionCount, notices, usage, currentModel, setModel, title } =
+  const { runtime, compactionCount, notices, usage, currentModel, setModel, title, commands } =
     useChannelRuntime(conversation.id, conversation.model);
 
   // Keep the sidebar label in sync when the model changes via /model.
@@ -281,7 +282,9 @@ function ConversationPane({
         </header>
 
         <div className="min-h-0 flex-1">
-          <Thread />
+          <ExtCommandsContext.Provider value={commands}>
+            <Thread />
+          </ExtCommandsContext.Provider>
         </div>
 
         {toast && (

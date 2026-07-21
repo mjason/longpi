@@ -33,6 +33,7 @@ export function useChannelRuntime(conversationId: string, defaultModel: string) 
     usage,
     model,
     title,
+    commands,
   } = useConversationChannel(conversationId);
 
   const currentModel = model ?? defaultModel;
@@ -66,9 +67,10 @@ export function useChannelRuntime(conversationId: string, defaultModel: string) 
           else showNotice("info", `Current model: ${currentModel}`);
           return;
         }
-        // compact and anything else route to the command channel; the server
-        // replies "unknown command" for what it doesn't handle.
-        runCommand(name);
+        // compact, extension commands, and anything else route to the command
+        // channel; the server replies "unknown command" for what it doesn't
+        // handle, or the command's output text (shown as a notice).
+        runCommand(name, arg);
         return;
       }
 
@@ -84,7 +86,7 @@ export function useChannelRuntime(conversationId: string, defaultModel: string) 
     convertMessage: (message: ThreadMessageLike) => message,
   });
 
-  return { runtime, compactionCount, notices, usage, currentModel, setModel, title };
+  return { runtime, compactionCount, notices, usage, currentModel, setModel, title, commands };
 }
 
 type AssistantPart = Extract<ThreadMessageLike["content"], readonly unknown[]>[number];

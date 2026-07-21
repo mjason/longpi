@@ -109,10 +109,15 @@ defmodule Longpi.Agent.Session do
        needs_title:
          not is_nil(opts[:conversation_id]) and is_nil(conversation && conversation.title),
        title_task: nil,
-       # Bun extension host for this cwd (nil until loaded / if unavailable).
-       ext_host: nil
+       # Bun extension host for this cwd (nil until loaded / if unavailable),
+       # and the slash commands its extensions registered.
+       ext_host: nil,
+       ext_commands: []
      }, {:continue, :load_extensions}}
   end
+
+  @doc "Extension slash commands + host pid, for the channel to route `/commands`."
+  def ext_info(session), do: GenServer.call(session, :ext_info)
 
   @impl true
   def handle_continue(:load_extensions, state) do
@@ -120,9 +125,15 @@ defmodule Longpi.Agent.Session do
       case Longpi.Extensions.Host.start_for(state.ctx.cwd) do
         {:ok, host} ->
           specs = Longpi.Extensions.Host.tool_specs(host)
+          commands = Longpi.Extensions.Host.commands(host)
 
           {:noreply,
-           %{state | toolbox: Toolbox.with_extensions(state.toolbox, specs), ext_host: host}}
+           %{
+             state
+             | toolbox: Toolbox.with_extensions(state.toolbox, specs),
+               ext_host: host,
+               ext_commands: commands
+           }}
 
         :none ->
           {:noreply, state}
@@ -227,6 +238,9 @@ defmodule Longpi.Agent.Session do
 
   def handle_call(:context_usage, _from, state),
     do: {:reply, context_usage_payload(state), state}
+
+  def handle_call(:ext_info, _from, state),
+    do: {:reply, %{commands: state.ext_commands, host: state.ext_host}, state}
 
   def handle_call({:set_model, _spec}, _from, %{status: status} = state)
       when status in [:running, :compacting] do

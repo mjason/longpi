@@ -94,7 +94,7 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
     channel
       .join()
       .receive("ok", (reply: JoinReply) => {
-        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage });
+        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, commands: reply.commands });
         resolve();
       })
       .receive("error", (reply: { reason: string }) => {
@@ -107,12 +107,14 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
 }
 
 export type ContextUsage = { used: number | null; window: number };
+export type ExtCommand = { name: string; description: string };
 
 type JoinReply = {
   messages: HistoryMessage[];
   status: string;
   pending_approvals?: string[];
   context_usage?: ContextUsage;
+  commands?: ExtCommand[];
 };
 
 type State = {
@@ -123,10 +125,12 @@ type State = {
   model: string | null;
   // Auto-generated title from the first turn; null = use the conversation's own.
   title: string | null;
+  // Slash commands contributed by extensions (for the composer's "/" menu).
+  commands: ExtCommand[];
 };
 
 type Action =
-  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage }
+  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage; commands?: ExtCommand[] }
   | { type: "model_changed"; model: string }
   | { type: "titled"; title: string }
   | { type: "text_delta"; text: string }
@@ -191,7 +195,7 @@ function settle(items: ThreadItem[]): ThreadItem[] {
 function reduce(state: State, action: Action): State {
   switch (action.type) {
     case "reset":
-      return { items: [], status: "connecting", usage: null, model: null, title: null };
+      return { items: [], status: "connecting", usage: null, model: null, title: null, commands: [] };
 
     case "model_changed":
       return { ...state, model: action.model };
@@ -205,6 +209,7 @@ function reduce(state: State, action: Action): State {
         items: historyToItems(action.messages, action.pending),
         status: action.status === "running" ? "running" : "idle",
         usage: action.usage ?? state.usage,
+        commands: action.commands ?? state.commands,
       };
 
     case "context_usage":
@@ -298,6 +303,7 @@ export function useConversationChannel(conversationId: string | null) {
     usage: null,
     model: null,
     title: null,
+    commands: [],
   });
   const channelRef = useRef<Channel | null>(null);
 
@@ -317,7 +323,7 @@ export function useConversationChannel(conversationId: string | null) {
         .push("get_state", {})
         .receive("ok", (reply: JoinReply) => {
           if (!cancelled)
-            dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage });
+            dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, commands: reply.commands });
         });
     });
 
@@ -375,10 +381,12 @@ export function useConversationChannel(conversationId: string | null) {
       );
   }
 
-  function runCommand(name: string) {
-    dispatch({ type: "notice", tone: "info", text: `/${name}` });
+  function runCommand(name: string, arg = "") {
     channelRef.current
-      ?.push("command", { name })
+      ?.push("command", { name, arg })
+      .receive("ok", (reply: { content?: string }) => {
+        if (reply?.content) dispatch({ type: "notice", tone: "info", text: reply.content });
+      })
       .receive("error", (reply: { reason: string }) =>
         dispatch({ type: "notice", tone: "error", text: reply.reason }),
       );
