@@ -221,6 +221,30 @@
   --radius: 0.625rem;
 }
 
+/* ── dark theme: same blue-gray hue (265), inverted lightness ─────────── */
+:root[data-theme="dark"] {
+  --background: oklch(20% 0.015 265);
+  --foreground: oklch(94% 0.008 265);
+  --card: oklch(23% 0.018 265);
+  --card-foreground: oklch(94% 0.008 265);
+  --popover: oklch(24% 0.02 265);
+  --popover-foreground: oklch(94% 0.008 265);
+  --primary: oklch(68% 0.16 265);
+  --primary-foreground: oklch(20% 0.02 265);
+  --secondary: oklch(28% 0.02 265);
+  --secondary-foreground: oklch(92% 0.01 265);
+  --muted: oklch(27% 0.015 265);
+  --muted-foreground: oklch(68% 0.02 265);
+  --accent: oklch(31% 0.025 265);
+  --accent-foreground: oklch(94% 0.008 265);
+  --destructive: oklch(64% 0.19 25);
+  --destructive-foreground: oklch(98% 0.01 25);
+  --border: oklch(31% 0.015 265);
+  --input: oklch(34% 0.018 265);
+  --ring: oklch(68% 0.16 265);
+  --tool: oklch(68% 0.13 165);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

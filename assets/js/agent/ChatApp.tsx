@@ -37,6 +37,7 @@ import { ConversationUsageContext } from "./ContextMeter";
 import { ExtCommandsContext } from "./ExtCommandsContext";
 import { ConversationModelContext } from "./ModelPicker";
 import { ReasoningEffortContext } from "./ReasoningPicker";
+import { ThemeToggle } from "./ThemeToggle";
 import { RegenerateContext, useChannelRuntime } from "./runtime";
 import { loadSettings, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
@@ -223,6 +224,7 @@ function Sidebar(props: {
           <span className="mr-2 text-primary">π</span>Longpi
         </span>
         <div className="flex-1" />
+        <ThemeToggle />
         <Button
           variant="ghost"
           size="icon"

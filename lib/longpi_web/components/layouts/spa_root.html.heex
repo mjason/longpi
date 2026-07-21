@@ -9,6 +9,38 @@ SPDX-License-Identifier: MIT
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
     <meta name="longpi-version" content={to_string(Application.spec(:longpi, :vsn))} />
+    <%!-- Set the theme before first paint (no flash). Priority: a `?theme=`
+          query param (embed mode — host-controlled) > the user's saved choice >
+          the OS preference. React's ThemeToggle dispatches `longpi:set-theme`. --%>
+    <script phx-no-curly-interpolation>
+      (() => {
+        const root = document.documentElement;
+        const system = () => matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        const apply = (theme, source) => {
+          const t = theme === "system" ? system() : theme;
+          root.setAttribute("data-theme", t);
+          root.style.colorScheme = t;
+          root.setAttribute("data-theme-source", source);
+        };
+        const forced = new URLSearchParams(location.search).get("theme");
+        if (forced === "dark" || forced === "light") {
+          apply(forced, "forced");
+        } else {
+          const saved = localStorage.getItem("longpi:theme");
+          apply(saved || "system", saved ? "user" : "system");
+        }
+        matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+          if (root.getAttribute("data-theme-source") === "system") apply("system", "system");
+        });
+        window.addEventListener("longpi:set-theme", (e) => {
+          if (root.getAttribute("data-theme-source") === "forced") return; // embed: host owns the theme
+          const theme = e.detail;
+          if (theme === "system") localStorage.removeItem("longpi:theme");
+          else localStorage.setItem("longpi:theme", theme);
+          apply(theme, theme === "system" ? "system" : "user");
+        });
+      })();
+    </script>
     <.live_title default="Longpi">Longpi</.live_title>
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
     <link phx-track-static rel="stylesheet" href={~p"/assets/index.css"} />
