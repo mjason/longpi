@@ -48,7 +48,7 @@ export function SessionsSection() {
           {rows.map((s) => (
             <div
               key={s.conversation_id}
-              className="flex items-center gap-3 rounded-lg border border-border px-3 py-2.5"
+              className="flex items-center gap-3 rounded-lg ring-1 ring-black/[0.06] dark:ring-white/[0.08] px-3 py-2.5"
             >
               <span
                 className={cn(

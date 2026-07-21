@@ -1,7 +1,17 @@
 import { Check, KeyRound, Loader2, Plus, RotateCcw, Search, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
+import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
+import { Slider } from "../components/ui/slider";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import { Textarea } from "../components/ui/textarea";
 import { cn } from "../lib/utils";
 import {
   addModel,
@@ -142,8 +152,8 @@ export function GeneralTab() {
             </button>
           )}
         </div>
-        <textarea
-          className="min-h-[220px] w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs leading-relaxed outline-none focus-visible:border-ring"
+        <Textarea
+          className="min-h-[220px] resize-y font-mono text-xs leading-relaxed"
           value={systemPrompt}
           onChange={(e) => setSystemPrompt(e.target.value)}
         />
@@ -154,24 +164,21 @@ export function GeneralTab() {
         hint="When a conversation nears the model's context window, older messages are summarized to make room. The full history stays stored."
       >
         <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={compactionEnabled}
-            onChange={(e) => setCompactionEnabled(e.target.checked)}
-            className="size-4 accent-[var(--primary)]"
+            onCheckedChange={(v: boolean | "indeterminate") => setCompactionEnabled(v === true)}
           />
           Enabled
         </label>
         <div className="flex items-center gap-3">
-          <input
-            type="range"
+          <Slider
             min={50}
             max={95}
             step={5}
-            value={compactionPct}
+            value={[compactionPct]}
             disabled={!compactionEnabled}
-            onChange={(e) => setCompactionPct(Number(e.target.value))}
-            className="flex-1 accent-[var(--primary)] disabled:opacity-50"
+            onValueChange={(value: number[]) => setCompactionPct(value[0])}
+            className="flex-1"
           />
           <span className="w-28 text-xs text-muted-foreground">
             compact at {compactionPct}% of window
@@ -232,17 +239,18 @@ export function ProvidersTab() {
       ))}
 
       <div className="flex items-end gap-2 border-t border-border pt-4">
-        <select
-          className="h-9 flex-1 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring"
-          value={presetId}
-          onChange={(e) => setPresetId(e.target.value)}
-        >
-          {PROVIDER_PRESETS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-        </select>
+        <Select value={presetId} onValueChange={setPresetId}>
+          <SelectTrigger className="flex-1">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PROVIDER_PRESETS.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button onClick={addPreset}>
           <Plus className="size-4" /> Add provider
         </Button>
@@ -363,17 +371,15 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
           <div className="max-h-40 space-y-1 overflow-y-auto">
             {discovered.map((id) => (
               <label key={id} className="flex items-center gap-2 font-mono text-xs">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={selected.has(id)}
-                  onChange={() =>
+                  onCheckedChange={() =>
                     setSelected((s) => {
                       const next = new Set(s);
                       next.has(id) ? next.delete(id) : next.add(id);
                       return next;
                     })
                   }
-                  className="size-3.5 accent-[var(--primary)]"
                 />
                 {id}
               </label>
@@ -424,8 +430,8 @@ export function ToolsTab() {
                 </button>
               )}
             </div>
-            <textarea
-              className="min-h-[64px] w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-xs leading-relaxed outline-none focus-visible:border-ring"
+            <Textarea
+              className="min-h-[64px] resize-y text-xs leading-relaxed"
               value={value}
               onChange={(e) => setDrafts((d) => ({ ...d, [tool.name]: e.target.value }))}
             />

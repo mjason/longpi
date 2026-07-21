@@ -42,7 +42,7 @@ export function ExtensionsSection() {
         {data.extensions.length === 0 ? (
           <p className="text-sm text-muted-foreground">No global extensions yet.</p>
         ) : (
-          <div className="divide-y divide-border rounded-lg border border-border">
+          <div className="divide-y divide-border rounded-lg ring-1 ring-black/[0.06] dark:ring-white/[0.08]">
             {data.extensions.map((e) => (
               <div key={e.name} className="flex items-center gap-2.5 px-3 py-2 text-sm">
                 {e["dir?"] ? (
@@ -76,7 +76,7 @@ export function ExtensionsSection() {
         </div>
 
         {packages.length > 0 && (
-          <div className="divide-y divide-border rounded-lg border border-border">
+          <div className="divide-y divide-border rounded-lg ring-1 ring-black/[0.06] dark:ring-white/[0.08]">
             {packages.map(([n, s]) => (
               <div key={n} className="flex items-center gap-2.5 px-3 py-2 text-sm">
                 <Package className="size-4 text-muted-foreground" />

@@ -73,7 +73,7 @@ export function SlashCommandMenu() {
   return (
     <div
       role="listbox"
-      className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-border bg-popover p-1 shadow-lg"
+      className="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl bg-popover p-1 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18),0_2px_10px_-2px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] dark:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.5)] dark:ring-white/[0.08]"
     >
       {matches.map((command, i) => (
         <button

@@ -2,6 +2,7 @@ import { Loader2, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { buildCSRFHeaders, destroyConversation, listConversations } from "../../ash_rpc";
 import { Button } from "../../components/ui/button";
+import { Checkbox } from "../../components/ui/checkbox";
 import { cn } from "../../lib/utils";
 
 type Row = { id: string; title: string | null; cwd: string; model: string; insertedAt: string };
@@ -68,13 +69,13 @@ export function ConversationsSection() {
       {rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">No conversations yet.</p>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
+        <div className="overflow-hidden rounded-lg ring-1 ring-black/[0.06] dark:ring-white/[0.08]">
           <div className="flex items-center gap-3 border-b border-border bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={allSelected}
-              onChange={() => setSelected(allSelected ? new Set() : new Set(rows.map((r) => r.id)))}
-              className="size-4 accent-[var(--primary)]"
+              onCheckedChange={() =>
+                setSelected(allSelected ? new Set() : new Set(rows.map((r) => r.id)))
+              }
               aria-label="Select all"
             />
             <span className="flex-1">Conversation</span>
@@ -90,11 +91,9 @@ export function ConversationsSection() {
                 selected.has(row.id) && "bg-accent/40",
               )}
             >
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={selected.has(row.id)}
-                onChange={() => toggle(row.id)}
-                className="size-4 accent-[var(--primary)]"
+                onCheckedChange={() => toggle(row.id)}
                 aria-label="Select"
               />
               <div className="min-w-0 flex-1">

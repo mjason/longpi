@@ -2,6 +2,7 @@ import { Loader2, Plus, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { Switch } from "../../components/ui/switch";
 import { cn } from "../../lib/utils";
 import { addModel, loadModels, type ModelRow, removeModel, setModel } from "../settings";
 
@@ -81,7 +82,7 @@ export function ModelsSection() {
         const enabledCount = rows.filter((r) => r.enabled).length;
         const allOn = enabledCount === rows.length;
         return (
-          <div key={provider} className="overflow-hidden rounded-lg border border-border">
+          <div key={provider} className="overflow-hidden rounded-lg ring-1 ring-black/[0.06] dark:ring-white/[0.08]">
             <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-2">
               <span className="font-mono text-sm font-semibold">{provider}</span>
               <span className="text-xs text-muted-foreground">
@@ -105,16 +106,20 @@ export function ModelsSection() {
             <div className="divide-y divide-border">
               {rows.map((m) => (
                 <div key={m.id} className="flex items-center gap-3 px-3 py-1.5 text-sm">
-                  <input
-                    type="checkbox"
+                  <Switch
                     checked={m.enabled}
-                    onChange={async () => {
+                    onCheckedChange={async (next: boolean) => {
                       setModels((ms) =>
-                        ms.map((x) => (x.id === m.id ? { ...x, enabled: !x.enabled } : x)),
+                        ms.map((x) => (x.id === m.id ? { ...x, enabled: next } : x)),
                       );
-                      await setModel(m.id, { enabled: !m.enabled });
+                      const res = await setModel(m.id, { enabled: next });
+                      // Revert the optimistic flip if the server rejected it.
+                      if (!res.success) {
+                        setModels((ms) =>
+                          ms.map((x) => (x.id === m.id ? { ...x, enabled: !next } : x)),
+                        );
+                      }
                     }}
-                    className="size-4 accent-[var(--primary)]"
                     aria-label="Enabled"
                   />
                   <span className={cn("flex-1 truncate font-mono", !m.enabled && "text-muted-foreground")}>
