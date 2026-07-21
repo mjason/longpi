@@ -8,6 +8,7 @@ SPDX-License-Identifier: MIT
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
+    <meta name="longpi-version" content={to_string(Application.spec(:longpi, :vsn))} />
     <.live_title default="Longpi">Longpi</.live_title>
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
     <link phx-track-static rel="stylesheet" href={~p"/assets/index.css"} />

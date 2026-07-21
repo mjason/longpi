@@ -39,6 +39,7 @@ import { ConversationModelContext } from "./ModelPicker";
 import { useChannelRuntime } from "./runtime";
 import { loadSettings, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
+import { UpdateCheck } from "./UpdateCheck";
 
 const DEFAULT_MODEL = "openai:gpt-5.4";
 
@@ -355,6 +356,8 @@ function Sidebar(props: {
           })}
         </nav>
       </ScrollArea>
+
+      <UpdateCheck />
 
       {createFor && (
         <NewConversationDialog

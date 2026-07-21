@@ -48,4 +48,38 @@ defmodule LongpiWeb.ConfigController do
       {:error, reason} -> conn |> put_status(422) |> json(%{error: inspect(reason)})
     end
   end
+
+  # Self-update: check GitHub for a newer release, and apply it on demand.
+  def version(conn, _params) do
+    case Longpi.Updater.check() do
+      {:ok, info} ->
+        json(conn, %{
+          enabled: info.enabled,
+          current: info.current,
+          latest: info.latest,
+          tag: info.tag,
+          updateAvailable: info.update_available,
+          notesUrl: info.notes_url
+        })
+
+      {:error, reason} ->
+        # A GitHub hiccup shouldn't error the UI; report what we know locally.
+        json(conn, %{
+          enabled: Longpi.Updater.enabled?(),
+          current: Longpi.Updater.current_version(),
+          latest: nil,
+          tag: nil,
+          updateAvailable: false,
+          notesUrl: nil,
+          error: to_string(reason)
+        })
+    end
+  end
+
+  def upgrade(conn, _params) do
+    case Longpi.Updater.apply_latest() do
+      {:ok, %{updated_to: tag}} -> json(conn, %{ok: true, updatedTo: tag})
+      {:error, reason} -> conn |> put_status(422) |> json(%{error: to_string(reason)})
+    end
+  end
 end

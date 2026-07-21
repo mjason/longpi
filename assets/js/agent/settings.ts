@@ -145,6 +145,39 @@ export async function saveGlobalPackages(packages: Record<string, string>): Prom
   return res.ok;
 }
 
+export type VersionInfo = {
+  enabled: boolean;
+  current: string;
+  latest: string | null;
+  tag: string | null;
+  updateAvailable: boolean;
+  notesUrl: string | null;
+  error?: string;
+};
+
+/** Ask the server what it runs and whether GitHub has a newer release. */
+export async function checkVersion(): Promise<VersionInfo | null> {
+  try {
+    const res = await fetch("/rpc/version", { headers: buildCSRFHeaders(), cache: "no-store" });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/** Trigger the in-app upgrade. The server restarts underneath us on success. */
+export async function applyUpgrade(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch("/rpc/version/upgrade", { method: "POST", headers: buildCSRFHeaders() });
+    if (res.ok) return { ok: true };
+    const body = await res.json().catch(() => ({}));
+    return { ok: false, error: body.error || `HTTP ${res.status}` };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network error" };
+  }
+}
+
 export type ProviderRow = {
   id: string;
   name: string;

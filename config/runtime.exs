@@ -99,4 +99,25 @@ if config_env() == :prod do
     secret_key_base: secret_key_base
 
   config :longpi, :dns_cluster_query, RC.get(cfg, "DNS_CLUSTER_QUERY", "dnsClusterQuery")
+
+  # Self-updater. The install root is the segment of RELEASE_ROOT
+  # (`.../longpi/versions/<tag>`) before `/versions/`; a config.jsonc
+  # `releaseRoot` overrides it. Absent (a bare `mix` run) leaves it nil, which
+  # disables in-app upgrades.
+  release_root =
+    RC.get(cfg, "LONGPI_RELEASE_ROOT", "releaseRoot") ||
+      case System.get_env("RELEASE_ROOT") do
+        root when is_binary(root) ->
+          case String.split(root, "/versions/") do
+            [base, _tag] -> base
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end
+
+  config :longpi, release_root: release_root
+  config :longpi, update_repo: RC.get(cfg, "LONGPI_UPDATE_REPO", "updateRepo", "mjason/longpi")
+  config :longpi, service_name: RC.get(cfg, "LONGPI_SERVICE", "serviceName", "longpi")
 end
