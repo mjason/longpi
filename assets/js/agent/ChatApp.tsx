@@ -36,7 +36,7 @@ import { Thread } from "../components/assistant-ui/thread";
 import { ConversationUsageContext } from "./ContextMeter";
 import { ExtCommandsContext } from "./ExtCommandsContext";
 import { ConversationModelContext } from "./ModelPicker";
-import { useChannelRuntime } from "./runtime";
+import { RegenerateContext, useChannelRuntime } from "./runtime";
 import { loadSettings, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
 import { UpdateCheck } from "./UpdateCheck";
@@ -472,7 +472,7 @@ function ConversationPane({
   onModelChanged: (id: string, model: string) => void;
   onTitled: (id: string, title: string) => void;
 }) {
-  const { runtime, compactionCount, notices, usage, currentModel, setModel, title, commands } =
+  const { runtime, compactionCount, notices, usage, currentModel, setModel, title, commands, regenerate } =
     useChannelRuntime(conversation.id, conversation.model);
 
   const modelCtx = useMemo(
@@ -531,7 +531,9 @@ function ConversationPane({
           <ConversationModelContext.Provider value={modelCtx}>
             <ConversationUsageContext.Provider value={usageCtx}>
               <ExtCommandsContext.Provider value={commands}>
-                <Thread />
+                <RegenerateContext.Provider value={regenerate}>
+                  <Thread />
+                </RegenerateContext.Provider>
               </ExtCommandsContext.Provider>
             </ConversationUsageContext.Provider>
           </ConversationModelContext.Provider>

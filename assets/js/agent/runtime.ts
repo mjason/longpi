@@ -6,9 +6,19 @@ import {
   type ThreadMessageLike,
   useExternalStoreRuntime,
 } from "@assistant-ui/react";
+import { createContext } from "react";
 import { useConversationChannel } from "./channel";
 import { slashCommandHelp } from "./slashCommands";
 import type { MessageAttachment, ThreadItem } from "./types";
+
+/**
+ * Re-run the last turn. Exposed via context (not assistant-ui's Reload action)
+ * because our backend truncates the last turn and streams a fresh reply in
+ * place — it does not keep the old response as a switchable branch. Wiring it
+ * through assistant-ui's reload would spawn a phantom "2/2" branch that can't
+ * be navigated (the old tool history is already gone server-side).
+ */
+export const RegenerateContext = createContext<(() => void) | null>(null);
 
 // Official assistant-ui adapters power the composer's attach button: images are
 // encoded to base64 data URLs for the vision model, text files inlined as text.
@@ -134,9 +144,9 @@ export function useChannelRuntime(conversationId: string, defaultModel: string) 
 
       send(trimmed, attachments);
     },
-    // The Reload action on an assistant message: re-run the last turn. The
-    // server truncates back to the last user message and streams a fresh reply.
-    onReload: async () => regenerate(),
+    // No onReload: regenerate is exposed via RegenerateContext instead, so it
+    // replaces the last turn in place rather than creating a branch we can't
+    // support (see RegenerateContext).
     onCancel: async () => interrupt(),
     // Native in-message tool approval: ToolFallback's Allow/Deny routes here.
     onRespondToToolApproval: ({ approvalId, approved }) =>
@@ -144,7 +154,17 @@ export function useChannelRuntime(conversationId: string, defaultModel: string) 
     convertMessage: (message: ThreadMessageLike) => message,
   });
 
-  return { runtime, compactionCount, notices, usage, currentModel, setModel, title, commands };
+  return {
+    runtime,
+    compactionCount,
+    notices,
+    usage,
+    currentModel,
+    setModel,
+    title,
+    commands,
+    regenerate,
+  };
 }
 
 type AssistantPart = Extract<ThreadMessageLike["content"], readonly unknown[]>[number];
