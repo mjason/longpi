@@ -63,7 +63,7 @@ defmodule Longpi.Extensions.HostTest do
 
     File.write!(
       Path.join(pkg, "package.json"),
-      ~s({"name":"greeter","pi":{"extensions":["ext.ts"]}})
+      ~s({"name":"greeter","longpi":{"extensions":["ext.ts"]}})
     )
 
     File.write!(Path.join(pkg, "ext.ts"), """
@@ -84,7 +84,7 @@ defmodule Longpi.Extensions.HostTest do
 
     File.write!(
       Path.join(src, "package.json"),
-      ~s({"name":"mytools","version":"1.0.0","pi":{"extensions":["index.ts"]}})
+      ~s({"name":"mytools","version":"1.0.0","longpi":{"extensions":["index.ts"]}})
     )
 
     File.write!(Path.join(src, "index.ts"), """
@@ -103,6 +103,39 @@ defmodule Longpi.Extensions.HostTest do
     {:ok, host} = Host.start_for(cwd)
     assert "reverse" in Enum.map(Host.tool_specs(host), & &1.name)
     assert {:ok, "ipgnol"} = Host.call_tool(host, "reverse", %{"s" => "longpi"})
+  end
+
+  test "reports registered commands and runs a command handler", %{cwd: cwd} do
+    write_ext(cwd, "cmd.ts", """
+    export default function (longpi) {
+      longpi.registerCommand("hi", { description: "greets",
+        execute(args) { return `hi ${JSON.stringify(args)}`; } });
+    }
+    """)
+
+    {:ok, host} = Host.start_for(cwd)
+    _ = Host.tool_specs(host)
+    assert [%{"name" => "hi", "description" => "greets"}] = Host.commands(host)
+    assert {:ok, ~s(hi {"n":1})} = Host.call_command(host, "hi", %{"n" => 1})
+  end
+
+  test "fires lifecycle hooks that extensions observe", %{cwd: cwd} do
+    # A hook increments a counter; a tool reads it back (shared module state).
+    write_ext(cwd, "hooks.ts", """
+    export default function (longpi) {
+      let n = 0;
+      longpi.on("turn_start", () => { n++; });
+      longpi.registerTool({ name: "n", description: "count", parameters: { type: "object" },
+        execute() { return String(n); } });
+    }
+    """)
+
+    {:ok, host} = Host.start_for(cwd)
+    assert {:ok, "0"} = Host.call_tool(host, "n", %{})
+
+    for _ <- 1..2, do: Host.fire_event(host, "turn_start", %{})
+    Process.sleep(150)
+    assert {:ok, "2"} = Host.call_tool(host, "n", %{})
   end
 
   test "reload hot-loads a newly written extension (self-evolution)", %{cwd: cwd} do

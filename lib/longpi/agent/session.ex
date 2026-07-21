@@ -141,6 +141,12 @@ defmodule Longpi.Agent.Session do
     :ok
   end
 
+  # Fires a lifecycle hook to the extension host (no-op without one).
+  defp fire_ext_event(%{ext_host: nil}, _event, _payload), do: :ok
+
+  defp fire_ext_event(%{ext_host: host}, event, payload),
+    do: Longpi.Extensions.Host.fire_event(host, event, payload)
+
   defp load_conversation(nil), do: {nil, []}
 
   defp load_conversation(conversation_id) do
@@ -206,6 +212,7 @@ defmodule Longpi.Agent.Session do
       |> Map.merge(%{status: :idle, task: nil, partial: []})
 
     state = notify(state, {:turn_ended, :interrupted})
+    fire_ext_event(state, "turn_end", %{reason: "interrupted"})
     {:reply, :ok, state}
   end
 
@@ -300,6 +307,7 @@ defmodule Longpi.Agent.Session do
         state = persist(state, new_messages)
         state = %{state | messages: state.messages ++ new_messages}
         state = notify(state, {:turn_ended, :complete})
+        fire_ext_event(state, "turn_end", %{reason: "complete"})
         state = maybe_start_titling(state)
         {:noreply, maybe_start_compaction(state)}
 
@@ -307,6 +315,7 @@ defmodule Longpi.Agent.Session do
         state = persist(state, new_messages)
         state = %{state | messages: state.messages ++ new_messages}
         state = notify(state, {:turn_failed, reason})
+        fire_ext_event(state, "turn_end", %{reason: "failed"})
         {:noreply, state}
     end
   end
@@ -458,6 +467,7 @@ defmodule Longpi.Agent.Session do
         Turn.run(config, context)
       end)
 
+    fire_ext_event(state, "turn_start", %{})
     %{state | status: :running, task: task, partial: []}
   end
 

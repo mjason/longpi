@@ -16,8 +16,8 @@ Discovered per session, project-local winning over global on name conflicts
 
 One level deep in an `extensions/` dir: a `*.ts` / `*.js` file, a subdirectory
 with an `index.ts`, or a **package** subdirectory (a `package.json` with a
-`"pi": { "extensions": [...] }` manifest — for multi-file extensions that pull
-in dependencies).
+`"longpi": { "extensions": [...] }` manifest — for multi-file extensions that
+pull in dependencies).
 
 Requires `bun` on the PATH. If Bun isn't installed, sessions run with just the
 seven built-in tools.
@@ -41,18 +41,20 @@ Extensions can also be distributed as packages and installed with `bun install`
 Each entry is `"<local-name>": "<spec>"`. On session start the host runs
 `bun install` into a managed dir (`~/.longpi/packages/` or `<cwd>/.longpi/packages/`,
 re-installing only when the set changes), then loads each package's
-`"pi": { "extensions": [...] }` manifest. Package tools have the **lowest**
+`"longpi": { "extensions": [...] }` manifest. Package tools have the **lowest**
 precedence — a global- or project-dir extension of the same name overrides them.
 
 ## Writing an extension
 
 An extension is a module with a **default-exported factory** that receives the
-`pi` API and registers capabilities. MVP surface: `registerTool`.
+`longpi` API and registers capabilities: **tools**, **slash commands**, and
+**lifecycle hooks**.
 
 ```ts
 // .longpi/extensions/weather.ts
-export default function (pi) {
-  pi.registerTool({
+export default function (longpi) {
+  // A tool the model can call.
+  longpi.registerTool({
     name: "get_weather",
     label: "Weather",
     description: "Returns the current weather for a city.",
@@ -67,15 +69,26 @@ export default function (pi) {
       // ctx.cwd is the session's working directory.
       const res = await fetch(`https://wttr.in/${args.city}?format=3`);
       return await res.text();
-      // Or return { content: [{ type: "text", text: "..." }] } like pi.
+      // Or return { content: [{ type: "text", text: "..." }] }.
     },
   });
+
+  // A slash command (surfaces in the composer's "/" menu). Its return text
+  // shows as a notice.
+  longpi.registerCommand("weather-help", {
+    description: "Explain the weather tool",
+    execute() { return "Ask me the weather for any city."; },
+  });
+
+  // Lifecycle hooks (fire-and-forget): "turn_start" and "turn_end"
+  // (payload { reason: "complete" | "failed" | "interrupted" }).
+  longpi.on("turn_end", (payload) => { console.error("turn ended:", payload.reason); });
 }
 ```
 
-The tool appears alongside the built-ins in the model's tool list; when the
-model calls it, `execute` runs in the Bun host and its text is returned to the
-model. An extension tool with the same name as a built-in **overrides** it.
+A tool appears alongside the built-ins in the model's tool list; when the model
+calls it, `execute` runs in the Bun host and its text is returned to the model.
+An extension tool with the same name as a built-in **overrides** it.
 
 ## Self-evolution
 

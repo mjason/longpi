@@ -9,15 +9,17 @@
 // console output is redirected to stderr so it can't corrupt a frame.
 //
 //   Elixir -> host  {type:"load", cwd, dirs:[...]}
-//                   {type:"call", id, tool, args}
+//                   {type:"call", id, tool, args}          run a tool
+//                   {type:"command", id, name, args}       run a slash command
+//                   {type:"event", event, payload}         fire a lifecycle hook
 //                   {type:"reload"}
-//   host -> Elixir  {type:"ready", tools:[{name,description,parameters}], errors:[...]}
+//   host -> Elixir  {type:"ready", tools:[...], commands:[{name,description}], errors:[...]}
 //                   {type:"result", id, ok, content}
 //
 // Extension sources, lowest precedence first (later wins on tool name):
 //   1. packages   — deps in ~/.longpi/packages.json / <cwd>/.longpi/packages.json,
 //                   installed with `bun install` and loaded via their package.json
-//                   "pi": { extensions: [...] } manifest.
+//                   "longpi": { extensions: [...] } manifest.
 //   2. global dir — ~/.longpi/extensions/
 //   3. project dir — <cwd>/.longpi/extensions/  (wins conflicts, matching pi)
 
@@ -40,24 +42,39 @@ type ToolDef = {
   execute: (args: unknown, ctx: { cwd: string }) => unknown;
 };
 
-/** The author-facing `pi` API. MVP surface: registerTool only. */
-type ExtensionAPI = { registerTool(def: ToolDef): void };
+type CommandDef = {
+  name: string;
+  description: string;
+  execute: (args: unknown, ctx: { cwd: string }) => unknown;
+};
+
+type EventHandler = (payload: unknown, ctx: { cwd: string }) => unknown;
+
+/** The author-facing `longpi` API (an extension's default export is
+ * `(longpi: LongpiAPI) => void | Promise<void>`). */
+type LongpiAPI = {
+  registerTool(def: ToolDef): void;
+  registerCommand(name: string, def: Omit<CommandDef, "name">): void;
+  on(event: string, handler: EventHandler): void;
+};
 
 type LoadError = { file: string; error: string };
 
 let TOOLS = new Map<string, ToolDef>();
+let COMMANDS = new Map<string, CommandDef>();
+let HANDLERS = new Map<string, EventHandler[]>();
 let CWD = process.cwd();
 let DIRS: string[] = [];
 let reloadCounter = 0;
 
 // --- discovery -------------------------------------------------------------
 
-// A package.json with a "pi": { extensions: [...] } manifest — the file paths
-// are resolved relative to the package root. Returns null if not a longpi pkg.
+// A package.json with a "longpi": { extensions: [...] } manifest — the file
+// paths are resolved relative to the package root. Returns null if not one.
 async function readManifest(pkgRoot: string): Promise<string[] | null> {
   try {
     const pkg = JSON.parse(await readFile(join(pkgRoot, "package.json"), "utf8"));
-    const exts = pkg?.pi?.extensions;
+    const exts = pkg?.longpi?.extensions;
     return Array.isArray(exts) ? exts.map((f: string) => resolve(pkgRoot, f)) : null;
   } catch {
     return null;
@@ -65,7 +82,7 @@ async function readManifest(pkgRoot: string): Promise<string[] | null> {
 }
 
 // One level deep in an extensions dir: *.ts/*.js files, subdir/index.ts, or a
-// subdir that is itself a package (package.json with a pi manifest).
+// subdir that is itself a package (package.json with a longpi manifest).
 async function discover(dir: string): Promise<string[]> {
   let entries;
   try {
@@ -165,7 +182,7 @@ async function loadPackages(errors: LoadError[]): Promise<string[]> {
         const pkgRoot = join(scope.managed, "node_modules", name);
         const manifest = await readManifest(pkgRoot);
         if (manifest) files.push(...manifest);
-        else errors.push({ file: name, error: `package "${name}" has no "pi.extensions" manifest` });
+        else errors.push({ file: name, error: `package "${name}" has no "longpi.extensions" manifest` });
       }
     } catch (err) {
       errors.push({ file: scope.config, error: err instanceof Error ? err.message : String(err) });
@@ -176,15 +193,25 @@ async function loadPackages(errors: LoadError[]): Promise<string[]> {
 
 // --- load / execute --------------------------------------------------------
 
-async function loadAll(): Promise<{ tools: unknown[]; errors: LoadError[] }> {
+async function loadAll(): Promise<{ tools: unknown[]; commands: unknown[]; errors: LoadError[] }> {
   TOOLS = new Map();
+  COMMANDS = new Map();
+  HANDLERS = new Map();
   const errors: LoadError[] = [];
   // Cache-bust so edited files re-import (self-evolution reload).
   reloadCounter++;
 
-  const pi: ExtensionAPI = {
+  const longpi: LongpiAPI = {
     registerTool(def: ToolDef) {
       TOOLS.set(def.name, def);
+    },
+    registerCommand(name: string, def: Omit<CommandDef, "name">) {
+      COMMANDS.set(name, { name, ...def });
+    },
+    on(event: string, handler: EventHandler) {
+      const list = HANDLERS.get(event) ?? [];
+      list.push(handler);
+      HANDLERS.set(event, list);
     },
   };
 
@@ -200,7 +227,7 @@ async function loadAll(): Promise<{ tools: unknown[]; errors: LoadError[] }> {
         errors.push({ file, error: "extension has no default-exported factory function" });
         continue;
       }
-      await mod.default(pi);
+      await mod.default(longpi);
     } catch (err) {
       errors.push({ file, error: err instanceof Error ? (err.stack ?? err.message) : String(err) });
     }
@@ -211,7 +238,8 @@ async function loadAll(): Promise<{ tools: unknown[]; errors: LoadError[] }> {
     description: t.description,
     parameters: t.parameters ?? { type: "object", properties: {} },
   }));
-  return { tools, errors };
+  const commands = [...COMMANDS.values()].map((c) => ({ name: c.name, description: c.description }));
+  return { tools, commands, errors };
 }
 
 function toText(result: unknown): string {
@@ -237,6 +265,27 @@ async function callTool(tool: string, args: unknown): Promise<{ ok: boolean; con
   }
 }
 
+async function callCommand(name: string, args: unknown): Promise<{ ok: boolean; content: string }> {
+  const def = COMMANDS.get(name);
+  if (!def) return { ok: false, content: `unknown extension command: ${name}` };
+  try {
+    return { ok: true, content: toText(await def.execute(args, { cwd: CWD })) };
+  } catch (err) {
+    return { ok: false, content: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// Lifecycle hooks are fire-and-forget: run every handler, swallow failures.
+async function fireEvent(event: string, payload: unknown): Promise<void> {
+  for (const handler of HANDLERS.get(event) ?? []) {
+    try {
+      await handler(payload, { cwd: CWD });
+    } catch (err) {
+      process.stderr.write(`extension "${event}" handler error: ${String(err)}\n`);
+    }
+  }
+}
+
 // --- framing ---------------------------------------------------------------
 
 function writeFrame(obj: unknown): void {
@@ -253,8 +302,8 @@ async function handle(msg: { type: string; [k: string]: unknown }): Promise<void
       DIRS = (msg.dirs as string[]) || [];
     // fallthrough: report tools like reload does
     case "reload": {
-      const { tools, errors } = await loadAll();
-      writeFrame({ type: "ready", tools, errors });
+      const { tools, commands, errors } = await loadAll();
+      writeFrame({ type: "ready", tools, commands, errors });
       break;
     }
     case "call": {
@@ -262,6 +311,14 @@ async function handle(msg: { type: string; [k: string]: unknown }): Promise<void
       writeFrame({ type: "result", id: msg.id, ok, content });
       break;
     }
+    case "command": {
+      const { ok, content } = await callCommand(msg.name as string, msg.args ?? {});
+      writeFrame({ type: "result", id: msg.id, ok, content });
+      break;
+    }
+    case "event":
+      await fireEvent(msg.event as string, msg.payload);
+      break;
   }
 }
 

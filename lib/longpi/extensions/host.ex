@@ -45,7 +45,21 @@ defmodule Longpi.Extensions.Host do
 
   @doc "Runs an extension tool in the host, returning `{:ok, text}`/`{:error, text}`."
   @spec call_tool(pid(), String.t(), map()) :: {:ok, binary()} | {:error, binary()}
-  def call_tool(host, name, args), do: GenServer.call(host, {:call, name, args}, @call_timeout)
+  def call_tool(host, name, args),
+    do: GenServer.call(host, {:call, :tool, name, args}, @call_timeout)
+
+  @doc "Extension-registered slash commands as `[%{name, description}]` (waits for load)."
+  @spec commands(pid()) :: [map()]
+  def commands(host), do: GenServer.call(host, :commands, 15_000)
+
+  @doc "Runs an extension slash command, returning `{:ok, text}`/`{:error, text}`."
+  @spec call_command(pid(), String.t(), map()) :: {:ok, binary()} | {:error, binary()}
+  def call_command(host, name, args),
+    do: GenServer.call(host, {:call, :command, name, args}, @call_timeout)
+
+  @doc "Fires a lifecycle event to the extensions (fire-and-forget hooks)."
+  @spec fire_event(pid(), String.t(), map()) :: :ok
+  def fire_event(host, event, payload), do: GenServer.cast(host, {:event, event, payload})
 
   @doc "Re-discovers and hot-reloads the extension dirs (self-evolution)."
   @spec reload(pid()) :: [ToolSpec.t()]
@@ -73,27 +87,49 @@ defmodule Longpi.Extensions.Host do
     send_frame(port, %{type: "load", cwd: cwd, dirs: extension_dirs(cwd)})
 
     {:ok,
-     %{port: port, cwd: cwd, tools: [], ready?: false, waiters: [], pending: %{}, next_id: 0}}
+     %{
+       port: port,
+       cwd: cwd,
+       tools: [],
+       commands: [],
+       ready?: false,
+       waiters: [],
+       pending: %{},
+       next_id: 0
+     }}
   end
 
   @impl true
-  def handle_call(:tool_specs, _from, %{ready?: true} = state) do
-    {:reply, build_specs(state), state}
-  end
+  def handle_call(:tool_specs, _from, %{ready?: true} = state),
+    do: {:reply, build_specs(state), state}
 
-  def handle_call(:tool_specs, from, state) do
-    {:noreply, %{state | waiters: [from | state.waiters]}}
+  def handle_call(:commands, _from, %{ready?: true} = state), do: {:reply, state.commands, state}
+
+  def handle_call(kind, from, state) when kind in [:tool_specs, :commands] do
+    {:noreply, %{state | waiters: [{from, kind} | state.waiters]}}
   end
 
   def handle_call(:reload, from, state) do
     send_frame(state.port, %{type: "reload"})
-    {:noreply, %{state | ready?: false, waiters: [from | state.waiters]}}
+    {:noreply, %{state | ready?: false, waiters: [{from, :tool_specs} | state.waiters]}}
   end
 
-  def handle_call({:call, name, args}, from, state) do
+  def handle_call({:call, :tool, name, args}, from, state) do
     id = state.next_id
     send_frame(state.port, %{type: "call", id: id, tool: name, args: args})
     {:noreply, %{state | next_id: id + 1, pending: Map.put(state.pending, id, from)}}
+  end
+
+  def handle_call({:call, :command, name, args}, from, state) do
+    id = state.next_id
+    send_frame(state.port, %{type: "command", id: id, name: name, args: args})
+    {:noreply, %{state | next_id: id + 1, pending: Map.put(state.pending, id, from)}}
+  end
+
+  @impl true
+  def handle_cast({:event, event, payload}, state) do
+    if state.ready?, do: send_frame(state.port, %{type: "event", event: event, payload: payload})
+    {:noreply, state}
   end
 
   @impl true
@@ -101,9 +137,8 @@ defmodule Longpi.Extensions.Host do
     case Jason.decode(data) do
       {:ok, %{"type" => "ready", "tools" => tools} = msg} ->
         log_errors(state.cwd, msg["errors"])
-        state = %{state | tools: tools, ready?: true}
-        specs = build_specs(state)
-        Enum.each(state.waiters, &GenServer.reply(&1, specs))
+        state = %{state | tools: tools, commands: msg["commands"] || [], ready?: true}
+        reply_waiters(state)
         {:noreply, %{state | waiters: []}}
 
       {:ok, %{"type" => "result", "id" => id, "ok" => ok, "content" => content}} ->
@@ -119,7 +154,7 @@ defmodule Longpi.Extensions.Host do
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
     Logger.warning("longpi extension host exited (status #{status})")
     Enum.each(Map.values(state.pending), &GenServer.reply(&1, {:error, "extension host exited"}))
-    Enum.each(state.waiters, &GenServer.reply(&1, []))
+    Enum.each(state.waiters, fn {from, _kind} -> GenServer.reply(from, []) end)
     {:stop, :normal, state}
   end
 
@@ -137,6 +172,13 @@ defmodule Longpi.Extensions.Host do
         run: fn args, _ctx -> call_tool(host, name, args) end,
         source: :extension
       }
+    end)
+  end
+
+  defp reply_waiters(state) do
+    Enum.each(state.waiters, fn
+      {from, :commands} -> GenServer.reply(from, state.commands)
+      {from, _} -> GenServer.reply(from, build_specs(state))
     end)
   end
 
