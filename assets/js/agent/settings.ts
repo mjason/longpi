@@ -123,6 +123,26 @@ export async function stopSession(conversationId: string): Promise<void> {
   });
 }
 
+export type GlobalExtensions = {
+  dir: string;
+  extensions: { name: string; "dir?": boolean }[];
+  packages: Record<string, string>;
+};
+
+export async function loadGlobalExtensions(): Promise<GlobalExtensions> {
+  const res = await fetch("/rpc/extensions", { headers: buildCSRFHeaders() });
+  if (!res.ok) return { dir: "", extensions: [], packages: {} };
+  return await res.json();
+}
+
+export async function saveGlobalPackages(packages: Record<string, string>): Promise<void> {
+  await fetch("/rpc/extensions/packages", {
+    method: "POST",
+    headers: { ...buildCSRFHeaders(), "content-type": "application/json" },
+    body: JSON.stringify({ packages }),
+  });
+}
+
 export type ProviderRow = {
   id: string;
   name: string;

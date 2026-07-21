@@ -12,6 +12,7 @@ import { useState } from "react";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { ConversationsSection } from "./sections/ConversationsSection";
+import { ExtensionsSection } from "./sections/ExtensionsSection";
 import { SessionsSection } from "./sections/SessionsSection";
 import { GeneralTab, ModelsTab, ProvidersTab, ToolsTab } from "./SettingsDialog";
 
@@ -32,10 +33,6 @@ type Section = {
   group: string;
   render: () => React.ReactNode;
 };
-
-const Placeholder = ({ what }: { what: string }) => (
-  <p className="py-10 text-sm text-muted-foreground">{what} — coming next.</p>
-);
 
 const SECTIONS: Section[] = [
   {
@@ -76,7 +73,7 @@ const SECTIONS: Section[] = [
     description: "Global extensions and installed packages.",
     icon: Blocks,
     group: "Extend",
-    render: () => <Placeholder what="Global extensions & packages" />,
+    render: () => <ExtensionsSection />,
   },
   {
     id: "conversations",

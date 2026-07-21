@@ -48,6 +48,8 @@ defmodule LongpiWeb.Router do
     post "/rpc/discover-models", ConfigController, :discover_models
     get "/rpc/sessions", ConfigController, :sessions
     post "/rpc/sessions/stop", ConfigController, :stop_session
+    get "/rpc/extensions", ConfigController, :extensions
+    post "/rpc/extensions/packages", ConfigController, :save_packages
     post "/rpc/run", AshTypescriptRpcController, :run
     post "/rpc/validate", AshTypescriptRpcController, :validate
     get "/ash-typescript", PageController, :index

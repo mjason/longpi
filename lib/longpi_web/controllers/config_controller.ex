@@ -33,4 +33,19 @@ defmodule LongpiWeb.ConfigController do
     Longpi.Agent.Sessions.stop(id)
     json(conn, %{ok: true})
   end
+
+  def extensions(conn, _params) do
+    json(conn, %{
+      dir: Longpi.Extensions.global_dir(),
+      extensions: Longpi.Extensions.list_global(),
+      packages: Longpi.Extensions.read_packages()
+    })
+  end
+
+  def save_packages(conn, %{"packages" => packages}) when is_map(packages) do
+    case Longpi.Extensions.write_packages(packages) do
+      :ok -> json(conn, %{ok: true})
+      {:error, reason} -> conn |> put_status(422) |> json(%{error: inspect(reason)})
+    end
+  end
 end
