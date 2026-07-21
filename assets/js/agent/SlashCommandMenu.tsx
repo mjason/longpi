@@ -2,7 +2,8 @@ import { useAuiState, useComposerRuntime } from "@assistant-ui/react";
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "../lib/utils";
 import { useExtCommands } from "./ExtCommandsContext";
-import { matchSlashCommands, type SlashCommand } from "./slashCommands";
+import { type I18nKey, useI18n } from "./i18n";
+import { BUILTIN_COMMAND_NAMES, matchSlashCommands, type SlashCommand } from "./slashCommands";
 
 /**
  * Autocomplete for slash commands, rendered inside the (relative) composer root
@@ -11,6 +12,7 @@ import { matchSlashCommands, type SlashCommand } from "./slashCommands";
  * Enter-to-send handler so selecting a command doesn't also send raw text.
  */
 export function SlashCommandMenu() {
+  const { t } = useI18n();
   const text = useAuiState((s) => s.composer.text);
   const composer = useComposerRuntime();
   const extCommands = useExtCommands();
@@ -99,7 +101,9 @@ export function SlashCommandMenu() {
         >
           <span className="font-mono text-sm font-medium text-foreground">/{command.name}</span>
           <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            {command.summary}
+            {BUILTIN_COMMAND_NAMES.has(command.name)
+              ? t(`slash.${command.name}` as I18nKey)
+              : command.summary}
           </span>
         </button>
       ))}

@@ -1,3 +1,4 @@
+import type { I18nKey } from "./i18n";
 /**
  * Slash commands available in the composer. This is the single source of truth
  * for both the autocomplete menu (SlashCommandMenu) and the send interceptor
@@ -36,9 +37,18 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
 ];
 
-/** One-line help listing every command, for the /help command. */
-export function slashCommandHelp(): string {
-  return SLASH_COMMANDS.map((c) => `/${c.name} — ${c.summary}`).join("   ·   ");
+/** Names of the built-in commands whose summaries have i18n keys (slash.<name>). */
+export const BUILTIN_COMMAND_NAMES = new Set(SLASH_COMMANDS.map((c) => c.name));
+
+/**
+ * One-line help listing every command, for the /help command. Takes the
+ * translator so the list follows the UI language; extension commands are not
+ * listed here (they surface in the "/" menu with their own descriptions).
+ */
+export function slashCommandHelp(t: (key: I18nKey) => string): string {
+  return SLASH_COMMANDS.map((c) => `/${c.name} — ${t(`slash.${c.name}` as I18nKey)}`).join(
+    "   ·   ",
+  );
 }
 
 export function matchSlashCommands(text: string, extra: SlashCommand[] = []): SlashCommand[] | null {

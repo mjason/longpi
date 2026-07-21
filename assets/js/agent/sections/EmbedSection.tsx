@@ -20,7 +20,8 @@ export function EmbedSection() {
   if (!info) return <Loader2 className="my-10 size-5 animate-spin text-muted-foreground" />;
 
   const tokenPart = info.authEnabled && info.embedToken ? `&token=${info.embedToken}` : "";
-  const snippet = `<iframe\n  src="${info.baseUrl}/embed?cwd=/path/to/workspace&theme=dark${tokenPart}"\n  style="width:100%;height:100%;border:0"\n></iframe>`;
+  // No inline style: sizing/borders are the HOST app's concern, not ours.
+  const snippet = `<iframe src="${info.baseUrl}/embed?cwd=/path/to/workspace&theme=dark${tokenPart}"></iframe>`;
 
   return (
     <div className="space-y-8 py-4">

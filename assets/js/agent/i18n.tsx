@@ -141,6 +141,13 @@ const en = {
   "embedPage.param.model": "model for a newly created conversation (optional)",
   "embedPage.param.token": "the embed token above (required when sign-in is on)",
 
+  // Slash commands (the "/" menu; extension commands keep their own text)
+  "slash.compact": "Summarize older messages to free up context",
+  "slash.model": "Switch the model, e.g. /model openai:gpt-5.4",
+  "slash.reload": "Reload extensions (pick up newly written ones)",
+  "slash.rename": "Rename this conversation, e.g. /rename 部署调优",
+  "slash.help": "List the available commands",
+
   // Common
   "common.save": "Save",
   "common.saved": "Saved",
@@ -267,6 +274,12 @@ const zh: Record<I18nKey, string> = {
   "embedPage.param.theme": "强制深色或浅色（由宿主控制）",
   "embedPage.param.model": "新建会话时使用的模型（可选）",
   "embedPage.param.token": "上方的嵌入 token（开启登录时必填）",
+
+  "slash.compact": "压缩较早的消息以释放上下文",
+  "slash.model": "切换模型，如 /model openai:gpt-5.4",
+  "slash.reload": "重新加载扩展（加载新写入的扩展）",
+  "slash.rename": "重命名当前会话，如 /rename 部署调优",
+  "slash.help": "列出可用命令",
 
   "common.save": "保存",
   "common.saved": "已保存",

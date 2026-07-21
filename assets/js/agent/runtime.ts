@@ -9,6 +9,7 @@ import {
 } from "@assistant-ui/react";
 import { createContext } from "react";
 import { useConversationChannel } from "./channel";
+import { useI18n } from "./i18n";
 import { slashCommandHelp } from "./slashCommands";
 import type { MessageAttachment, ThreadItem } from "./types";
 
@@ -111,6 +112,7 @@ export function useChannelRuntime(
     commands,
   } = useConversationChannel(conversationId);
 
+  const { t } = useI18n();
   const currentModel = model ?? defaultModel;
 
   const messages = itemsToMessages(items);
@@ -136,7 +138,7 @@ export function useChannelRuntime(
         const arg = rest.join(" ").trim();
 
         if (name === "help") {
-          showNotice("info", slashCommandHelp());
+          showNotice("info", slashCommandHelp(t));
           return;
         }
         if (name === "model") {
