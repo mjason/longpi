@@ -1,0 +1,36 @@
+{
+  // longpi server configuration.
+  //
+  // Copy to ~/.config/longpi/config.jsonc and edit. This file is the single
+  // source of truth for a deployment — no environment variables are used.
+  //
+  // Secrets are NOT stored here: secret_key_base and token_signing_secret are
+  // generated on first boot into <dataDir>/secrets.json (0600).
+
+  // Run the web server (a release started with `bin/longpi start`).
+  "server": true,
+
+  // HTTP listen port.
+  "port": 4000,
+
+  // Bind address. "127.0.0.1" (default) is loopback-only; use "0.0.0.0" to
+  // expose the server on the LAN.
+  "listenIp": "127.0.0.1",
+
+  // Advertised URL (used for links, cookies, websocket origin).
+  "host": "localhost",
+  "scheme": "http",
+  // "urlPort": 443,        // defaults to 443 for https, otherwise "port"
+
+  // Enable the websocket origin check — turn on when behind a reverse proxy.
+  "checkOrigin": false,
+
+  // Data directory: holds secrets.json and, by default, the SQLite database.
+  // Defaults to $XDG_DATA_HOME/longpi (i.e. ~/.local/share/longpi).
+  // "dataDir": "/var/lib/longpi",
+
+  // Explicit SQLite path (defaults to <dataDir>/longpi.db).
+  // "databasePath": "/var/lib/longpi/longpi.db",
+
+  "poolSize": 10
+}

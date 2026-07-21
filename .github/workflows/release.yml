@@ -1,0 +1,58 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    env:
+      MIX_ENV: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.19"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get --only prod
+          npm install --prefix assets
+
+      - name: Compile, build native + assets, assemble release
+        run: |
+          mix compile
+          mix shim.build
+          mix search.build
+          mix tailwind.install --if-missing
+          mix esbuild.install --if-missing
+          mix assets.deploy
+          mix release --overwrite
+
+      - name: Package tarball
+        run: |
+          OUT="longpi-${GITHUB_REF_NAME}-linux-x86_64.tar.gz"
+          tar -C _build/prod/rel/longpi -czf "$OUT" .
+          sha256sum "$OUT" > "$OUT.sha256"
+          mkdir -p artifacts
+          mv "$OUT" "$OUT.sha256" artifacts/
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true

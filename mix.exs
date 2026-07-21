@@ -10,10 +10,26 @@ defmodule Longpi.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      releases: releases(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
       consolidate_protocols: Mix.env() != :dev,
       usage_rules: usage_rules()
+    ]
+  end
+
+  # Production release. Linux-first: a self-contained tree (bundled ERTS + the
+  # Rust shim/search binaries under priv/) that runs with no Elixir/Rust
+  # toolchain on the target. Runtime configuration is NOT baked in — the release
+  # reads ~/.config/longpi/config.jsonc at boot (config/runtime.exs +
+  # Longpi.RuntimeConfig), so no environment variables are needed to deploy.
+  # A Bun runtime on the target is still required for the extension host.
+  defp releases do
+    [
+      longpi: [
+        include_executables_for: [:unix],
+        include_erts: true
+      ]
     ]
   end
 
