@@ -39,7 +39,9 @@ const reasoningVariants = cva("aui-reasoning-root mb-4 w-full", {
     },
   },
   defaultVariants: {
-    variant: "outline",
+    // Borderless, matching assistant-ui's default reasoning look — a boxed
+    // card here reads as a stark bordered tile against the rest of the thread.
+    variant: "ghost",
   },
 });
 
