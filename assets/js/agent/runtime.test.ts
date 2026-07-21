@@ -132,7 +132,7 @@ describe("itemsToMessages", () => {
     const messages = itemsToMessages(items);
     expect(messages).toHaveLength(1);
     expect(messages[0].role).toBe("assistant");
-    const parts = messages[0].content as { type: string }[];
+    const parts = messages[0].content as unknown as { type: string }[];
     expect(parts.map((p) => p.type)).toEqual(["text", "tool-call"]);
   });
 

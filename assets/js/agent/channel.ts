@@ -154,6 +154,14 @@ type Action =
   | { type: "notice"; tone: "error" | "info"; text: string }
   | { type: "reset" };
 
+// Cap live tool output so a chatty long-running command (a build, `find /`, a
+// test run) can't grow the reducer state unboundedly. Keep the tail — the most
+// recent output is what the user watches — with an elision marker.
+const MAX_TOOL_OUTPUT = 32_768;
+function capTail(text: string): string {
+  return text.length > MAX_TOOL_OUTPUT ? "…\n" + text.slice(-MAX_TOOL_OUTPUT) : text;
+}
+
 function historyToItems(messages: HistoryMessage[], pending: string[] = []): ThreadItem[] {
   const items: ThreadItem[] = [];
   const pendingSet = new Set(pending);
@@ -291,7 +299,7 @@ function reduce(state: State, action: Action): State {
         ...state,
         items: state.items.map((item) =>
           item.kind === "tool" && item.id === action.id
-            ? { ...item, output: (item.output ?? "") + action.chunk }
+            ? { ...item, output: capTail((item.output ?? "") + action.chunk) }
             : item,
         ),
       };
@@ -317,8 +325,10 @@ function reduce(state: State, action: Action): State {
       // stopped so the user gets clear feedback (not a silent, stuck spinner).
       const interrupted = action.reason === "interrupted";
       const items = settle(state.items).map((item) =>
-        interrupted && item.kind === "tool" && item.content === undefined && !item.awaitingApproval
-          ? { ...item, content: "⏹ Stopped by user", error: true }
+        // A tool with no result was killed with the turn — including one that was
+        // mid-approval (clear awaitingApproval so its dead Allow/Deny gate closes).
+        interrupted && item.kind === "tool" && item.content === undefined
+          ? { ...item, content: "⏹ Stopped by user", error: true, awaitingApproval: false }
           : item,
       );
       if (interrupted) {

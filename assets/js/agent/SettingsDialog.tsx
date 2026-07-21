@@ -1,7 +1,6 @@
 import { Check, KeyRound, Loader2, Plus, RotateCcw, Search, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { cn } from "../lib/utils";
 import {
@@ -9,70 +8,23 @@ import {
   APPROVAL_LEVELS,
   discoverModels,
   loadDefaults,
-  loadModels,
   loadProviders,
   loadSettings,
   loadToolCatalog,
-  type ModelRow,
   PROVIDER_PRESETS,
   type ProviderRow,
-  removeModel,
   removeProvider,
   saveProvider,
   saveProviderKey,
   saveSetting,
-  setModel,
   SETTING_KEYS,
   type ToolCatalogEntry,
   toolDescKey,
 } from "./settings";
 
-type Tab = "general" | "providers" | "models" | "tools";
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "providers", label: "Providers" },
-  { id: "models", label: "Models" },
-  { id: "tools", label: "Tools" },
-];
-
-export function SettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const [tab, setTab] = useState<Tab>("general");
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
-        </DialogHeader>
-
-        <div className="flex gap-1 border-b border-border">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={cn(
-                "-mb-px border-b-2 px-3 py-1.5 text-sm transition-colors",
-                tab === t.id
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="max-h-[60vh] overflow-y-auto pr-1">
-          {open && tab === "general" && <GeneralTab />}
-          {open && tab === "providers" && <ProvidersTab />}
-          {open && tab === "models" && <ModelsTab />}
-          {open && tab === "tools" && <ToolsTab />}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
+// The management UI (ManagementPanel + sections/*) renders these tab bodies
+// directly — GeneralTab, ProvidersTab, ToolsTab. There is no standalone settings
+// dialog or Models tab here anymore (models live in sections/ModelsSection).
 
 function SaveButton({ onSave, label = "Save" }: { onSave: () => Promise<void>; label?: string }) {
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
@@ -432,91 +384,6 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
           </Button>
         </div>
       )}
-    </div>
-  );
-}
-
-export function ModelsTab() {
-  const [models, setModels] = useState<ModelRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [spec, setSpec] = useState("");
-  const [label, setLabel] = useState("");
-
-  const refresh = () => loadModels().then(setModels);
-
-  useEffect(() => {
-    refresh().then(() => setLoading(false));
-  }, []);
-
-  async function add() {
-    if (!spec.trim()) return;
-    await addModel(spec.trim(), label.trim(), models.length);
-    setSpec("");
-    setLabel("");
-    refresh();
-  }
-
-  if (loading) return <Spinner />;
-
-  return (
-    <div className="space-y-4 py-4">
-      <p className="text-xs text-muted-foreground">
-        Models available for new conversations. Disable one to hide it without deleting.
-      </p>
-
-      <div className="space-y-2">
-        {models.length === 0 && <p className="text-sm text-muted-foreground">No models yet.</p>}
-        {models.map((m) => (
-          <div key={m.id} className="flex items-center gap-3 rounded-md px-3 py-2 ring-1 ring-black/[0.06] dark:ring-white/[0.08]">
-            <input
-              type="checkbox"
-              checked={m.enabled}
-              onChange={async () => {
-                await setModel(m.id, { enabled: !m.enabled });
-                refresh();
-              }}
-              className="size-4 accent-[var(--primary)]"
-              aria-label="Enabled"
-            />
-            <div className="min-w-0 flex-1">
-              <div className="truncate font-mono text-sm">{m.spec}</div>
-              {m.label && <div className="truncate text-xs text-muted-foreground">{m.label}</div>}
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-7"
-              aria-label="Remove model"
-              onClick={async () => {
-                await removeModel(m.id);
-                refresh();
-              }}
-            >
-              <Trash2 className="size-4 text-destructive" />
-            </Button>
-          </div>
-        ))}
-      </div>
-
-      <div className="flex items-end gap-2 border-t border-border pt-4">
-        <div className="flex-1 space-y-1.5">
-          <Input
-            className="font-mono text-sm"
-            placeholder="provider:model (e.g. openai:gpt-5.4)"
-            value={spec}
-            onChange={(e) => setSpec(e.target.value)}
-          />
-          <Input
-            className="text-sm"
-            placeholder="Label (optional)"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-          />
-        </div>
-        <Button onClick={add} disabled={!spec.trim()}>
-          <Plus className="size-4" /> Add
-        </Button>
-      </div>
     </div>
   );
 }

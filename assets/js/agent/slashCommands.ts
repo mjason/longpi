@@ -31,13 +31,6 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
 ];
 
-export const SLASH_COMMAND_NAMES = SLASH_COMMANDS.map((c) => c.name);
-
-/**
- * Returns the commands to suggest for the current composer text, or null when
- * the text is not a bare slash-command token (e.g. it has a space, so the
- * command is already chosen and the user is typing arguments).
- */
 /** One-line help listing every command, for the /help command. */
 export function slashCommandHelp(): string {
   return SLASH_COMMANDS.map((c) => `/${c.name} — ${c.summary}`).join("   ·   ");

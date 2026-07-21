@@ -20,7 +20,16 @@ import {
 } from "../ash_rpc";
 import { TooltipProvider } from "../components/ui/tooltip";
 import { Button } from "../components/ui/button";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuTrigger,
+} from "../components/ui/context-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { Thread } from "../components/assistant-ui/thread";
@@ -186,22 +195,6 @@ function Sidebar(props: {
   const navigate = useNavigate();
   const projects = useMemo(() => groupByProject(props.conversations), [props.conversations]);
 
-  // Right-click menu for a project folder (anchored at the cursor).
-  const [menu, setMenu] = useState<{ x: number; y: number; project: ProjectGroup } | null>(null);
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenu(null);
-    window.addEventListener("mousedown", close);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", close);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [menu]);
-
   // A project folder is open when it's in this set. Default-collapsed, but the
   // active conversation's project stays open (effect below), so the tree opens
   // straight to what you're looking at.
@@ -273,47 +266,64 @@ function Sidebar(props: {
             const hasActive = project.conversations.some((c) => c.id === props.selectedId);
             return (
               <div key={project.cwd}>
-                <div
-                  className={cn(
-                    "group flex items-center transition-colors hover:bg-accent/60",
-                    !open && hasActive && "bg-accent/40",
-                    menu?.project.cwd === project.cwd && "bg-accent/60",
-                  )}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setMenu({ x: e.clientX, y: e.clientY, project });
-                  }}
-                >
-                  <button
-                    onClick={() => toggleFolder(project.cwd)}
-                    className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-1.5 text-left"
-                    title={project.cwd}
-                  >
-                    <ChevronRight
+                <ContextMenu>
+                  <ContextMenuTrigger asChild>
+                    <div
                       className={cn(
-                        "size-3.5 shrink-0 text-muted-foreground transition-transform",
-                        open && "rotate-90",
+                        "group flex items-center transition-colors hover:bg-accent/60",
+                        !open && hasActive && "bg-accent/40",
                       )}
-                    />
-                    {open ? (
-                      <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
-                    ) : (
-                      <Folder className="size-4 shrink-0 text-muted-foreground" />
-                    )}
-                    <span className="truncate text-sm font-medium">{folderName(project.cwd)}</span>
-                    <span className="ml-auto shrink-0 pl-1 text-xs text-muted-foreground group-hover:hidden">
-                      {project.conversations.length}
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => setCreateFor({ cwd: project.cwd })}
-                    aria-label="New conversation here"
-                    className="mr-1.5 hidden rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground group-hover:block"
-                    title="New conversation in this project"
-                  >
-                    <Plus className="size-3.5" />
-                  </button>
-                </div>
+                    >
+                      <button
+                        onClick={() => toggleFolder(project.cwd)}
+                        className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-1.5 text-left"
+                        title={project.cwd}
+                      >
+                        <ChevronRight
+                          className={cn(
+                            "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                            open && "rotate-90",
+                          )}
+                        />
+                        {open ? (
+                          <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <Folder className="size-4 shrink-0 text-muted-foreground" />
+                        )}
+                        <span className="truncate text-sm font-medium">
+                          {folderName(project.cwd)}
+                        </span>
+                        <span className="ml-auto shrink-0 pl-1 text-xs text-muted-foreground group-hover:hidden">
+                          {project.conversations.length}
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => setCreateFor({ cwd: project.cwd })}
+                        aria-label="New conversation here"
+                        className="mr-1.5 hidden rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground group-hover:block"
+                        title="New conversation in this project"
+                      >
+                        <Plus className="size-3.5" />
+                      </button>
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-52">
+                    <ContextMenuLabel className="truncate text-muted-foreground">
+                      {folderName(project.cwd)}
+                    </ContextMenuLabel>
+                    <ContextMenuItem onSelect={() => setCreateFor({ cwd: project.cwd })}>
+                      <Plus className="size-4" />
+                      New conversation here
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      variant="destructive"
+                      onSelect={() => props.onDeleteProject(project)}
+                    >
+                      <Trash2 className="size-4" />
+                      Delete project
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
 
                 {open &&
                   project.conversations.map((conversation) => (
@@ -345,41 +355,6 @@ function Sidebar(props: {
           })}
         </nav>
       </ScrollArea>
-
-      {menu && (
-        <div
-          className="fixed z-50 min-w-44 overflow-hidden rounded-xl bg-popover p-1 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18),0_2px_10px_-2px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] dark:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.5)] dark:ring-white/[0.08]"
-          style={{
-            left: Math.min(menu.x, window.innerWidth - 190),
-            top: Math.min(menu.y, window.innerHeight - 130),
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className="truncate px-2.5 py-1.5 text-xs text-muted-foreground">
-            {folderName(menu.project.cwd)}
-          </div>
-          <button
-            onClick={() => {
-              setCreateFor({ cwd: menu.project.cwd });
-              setMenu(null);
-            }}
-            className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent"
-          >
-            <Plus className="size-4 text-muted-foreground" />
-            New conversation here
-          </button>
-          <button
-            onClick={() => {
-              props.onDeleteProject(menu.project);
-              setMenu(null);
-            }}
-            className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
-          >
-            <Trash2 className="size-4" />
-            Delete project
-          </button>
-        </div>
-      )}
 
       {createFor && (
         <NewConversationDialog
@@ -438,47 +413,50 @@ function NewConversationDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
-      onMouseDown={onClose}
-    >
-      <form
-        onSubmit={create}
-        onMouseDown={(e) => e.stopPropagation()}
-        className="w-full max-w-sm space-y-3 rounded-xl border-0 bg-card p-5 shadow-[0_16px_48px_-12px_rgba(0,0,0,0.35)] ring-1 ring-black/[0.06] dark:ring-white/[0.08]"
-      >
-        <h2 className="text-sm font-semibold">New conversation</h2>
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Workspace directory</label>
-          <Input
-            autoFocus
-            className="font-mono text-xs"
-            placeholder="/path/to/workspace"
-            value={cwd}
-            onChange={(e) => setCwd(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Model</label>
-          <Input
-            className="font-mono text-xs"
-            placeholder="provider:model"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-          />
-        </div>
-        {error && <p className="text-xs text-destructive">{error}</p>}
-        <div className="flex justify-end gap-2 pt-1">
-          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" size="sm" disabled={creating || !cwd.trim()}>
-            {creating ? <Loader2 className="animate-spin" /> : <Plus />}
-            Create
-          </Button>
-        </div>
-      </form>
-    </div>
+    <Dialog open onOpenChange={(next) => !next && onClose()}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>New conversation</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={create} className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="new-conv-cwd" className="text-xs text-muted-foreground">
+              Workspace directory
+            </Label>
+            <Input
+              id="new-conv-cwd"
+              autoFocus
+              className="font-mono text-xs"
+              placeholder="/path/to/workspace"
+              value={cwd}
+              onChange={(e) => setCwd(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-conv-model" className="text-xs text-muted-foreground">
+              Model
+            </Label>
+            <Input
+              id="new-conv-model"
+              className="font-mono text-xs"
+              placeholder="provider:model"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+            />
+          </div>
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" disabled={creating || !cwd.trim()}>
+              {creating ? <Loader2 className="animate-spin" /> : <Plus />}
+              Create
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
