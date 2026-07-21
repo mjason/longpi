@@ -8,7 +8,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { ConversationsSection } from "./sections/ConversationsSection";
@@ -96,11 +96,31 @@ const SECTIONS: Section[] = [
 
 const GROUPS = ["Agent", "Extend", "Data"];
 
-/** Full-screen management dashboard: left-nav sections, right content. */
-export function ManagementPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [active, setActive] = useState<SectionId>("general");
-  if (!open) return null;
+/** The `/manage/:section` route: a full-screen management dashboard. */
+export function ManagementRoute() {
+  const { section } = useParams();
+  const navigate = useNavigate();
+  const active = (SECTIONS.some((s) => s.id === section) ? section : "general") as SectionId;
 
+  return (
+    <ManagementPanel
+      active={active}
+      onSelect={(id) => navigate(`/manage/${id}`)}
+      onClose={() => navigate("/")}
+    />
+  );
+}
+
+/** Full-screen management dashboard: left-nav sections, right content. */
+function ManagementPanel({
+  active,
+  onSelect,
+  onClose,
+}: {
+  active: SectionId;
+  onSelect: (id: SectionId) => void;
+  onClose: () => void;
+}) {
   const section = SECTIONS.find((s) => s.id === active) ?? SECTIONS[0];
 
   return (
@@ -120,7 +140,7 @@ export function ManagementPanel({ open, onClose }: { open: boolean; onClose: () 
                   {SECTIONS.filter((s) => s.group === group).map((s) => (
                     <button
                       key={s.id}
-                      onClick={() => setActive(s.id)}
+                      onClick={() => onSelect(s.id)}
                       className={cn(
                         "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
                         s.id === active

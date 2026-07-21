@@ -59,6 +59,10 @@ defmodule LongpiWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :index
+    # Client-side routes: serve the SPA so deep links / refresh resolve.
+    get "/c/:id", PageController, :index
+    get "/manage", PageController, :index
+    get "/manage/:section", PageController, :index
     auth_routes AuthController, Longpi.Accounts.User, path: "/auth"
     sign_out_route AuthController
 

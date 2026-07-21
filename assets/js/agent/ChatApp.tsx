@@ -1,6 +1,7 @@
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { Layers, Loader2, Plus, Settings, Trash2 } from "lucide-react";
 import React, { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   buildCSRFHeaders,
   createConversation,
@@ -17,7 +18,6 @@ import { ContextDisplay } from "../components/assistant-ui/context-display";
 import { ExtCommandsContext } from "./ExtCommandsContext";
 import { ModelPicker } from "./ModelPicker";
 import { useChannelRuntime } from "./runtime";
-import { ManagementPanel } from "./ManagementPanel";
 import { loadSettings, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
 
@@ -31,7 +31,8 @@ function conversationLabel(conversation: ConversationSummary): string {
 
 export default function ChatApp() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { conversationId } = useParams();
+  const navigate = useNavigate();
 
   useEffect(() => {
     (async () => {
@@ -42,30 +43,37 @@ export default function ChatApp() {
       });
       if (result.success) {
         setConversations(result.data);
-        if (result.data.length > 0) setSelectedId(result.data[0].id);
+        // Land on the most recent conversation when none is in the URL.
+        if (!conversationId && result.data.length > 0) {
+          navigate(`/c/${result.data[0].id}`, { replace: true });
+        }
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const selected = conversations.find((c) => c.id === selectedId) ?? null;
+  const selected = conversations.find((c) => c.id === conversationId) ?? null;
 
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex h-screen bg-background text-foreground">
         <Sidebar
           conversations={conversations}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
+          selectedId={conversationId ?? null}
+          onSelect={(id) => navigate(`/c/${id}`)}
           onCreated={(conversation) => {
             setConversations((prev) => [conversation, ...prev]);
-            setSelectedId(conversation.id);
+            navigate(`/c/${conversation.id}`);
           }}
           onDelete={async (conversation) => {
             if (!confirm(`Delete "${conversationLabel(conversation)}"? This cannot be undone.`))
               return;
             await destroyConversation({ identity: conversation.id, headers: buildCSRFHeaders() });
-            setConversations((prev) => prev.filter((c) => c.id !== conversation.id));
-            setSelectedId((cur) => (cur === conversation.id ? null : cur));
+            const remaining = conversations.filter((c) => c.id !== conversation.id);
+            setConversations(remaining);
+            if (conversationId === conversation.id) {
+              navigate(remaining.length > 0 ? `/c/${remaining[0].id}` : "/", { replace: true });
+            }
           }}
         />
         {selected ? (
@@ -106,11 +114,11 @@ function Sidebar(props: {
   onCreated: (conversation: ConversationSummary) => void;
   onDelete: (conversation: ConversationSummary) => void;
 }) {
+  const navigate = useNavigate();
   const [cwd, setCwd] = useState("");
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Prefill the model from the saved default_model setting.
   useEffect(() => {
@@ -153,13 +161,12 @@ function Sidebar(props: {
           size="icon"
           className="size-7"
           aria-label="Settings"
-          onClick={() => setSettingsOpen(true)}
+          onClick={() => navigate("/manage")}
         >
           <Settings className="size-4" />
         </Button>
       </div>
 
-      <ManagementPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       <form onSubmit={create} className="space-y-2 border-b border-border p-3">
         <Input

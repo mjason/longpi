@@ -1,5 +1,7 @@
 import { createRoot } from "react-dom/client";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 import ChatApp from "./agent/ChatApp";
+import { ManagementRoute } from "./agent/ManagementPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { installClipboardFallback } from "./lib/clipboard";
 
@@ -12,6 +14,13 @@ installClipboardFallback();
 // explicitly in agent/channel.ts.
 createRoot(document.getElementById("app")!).render(
   <ErrorBoundary>
-    <ChatApp />
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<ChatApp />} />
+        <Route path="/c/:conversationId" element={<ChatApp />} />
+        <Route path="/manage" element={<ManagementRoute />} />
+        <Route path="/manage/:section" element={<ManagementRoute />} />
+      </Routes>
+    </BrowserRouter>
   </ErrorBoundary>,
 );
