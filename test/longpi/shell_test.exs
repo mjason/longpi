@@ -171,4 +171,19 @@ defmodule Longpi.ShellTest do
     end)
     |> Enum.find(&(&1 != :continue))
   end
+
+  describe "login shell environment" do
+    test "sources the user's profile so tools on the profile PATH resolve" do
+      home = tmp_path()
+      File.mkdir_p!(home)
+      # Whichever login shell runs, one of these sets the marker.
+      for f <- [".profile", ".bash_profile", ".zprofile", ".zshenv"] do
+        File.write!(Path.join(home, f), "export LONGPI_SHTEST=sourced\n")
+      end
+
+      {:ok, result} = Shell.run("echo marker=$LONGPI_SHTEST", env: %{"HOME" => home})
+      assert result.output =~ "marker=sourced"
+    end
+  end
+
 end

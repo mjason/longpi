@@ -240,7 +240,13 @@ defmodule Longpi.Shell.Command do
         {"powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command]}
 
       _ ->
-        {System.find_executable("bash") || "/bin/sh", ["-c", command]}
+        # Run through the user's LOGIN shell so it sources their profile
+        # (~/.zprofile, ~/.zshenv, ~/.profile, ...) and the command sees the
+        # same PATH as the user's terminal — otherwise tools installed under
+        # ~/.local/bin, ~/.cargo/bin, etc. are "not found" under systemd's
+        # minimal PATH. Login (not interactive) avoids prompt/job-control hangs.
+        shell = System.get_env("SHELL") || System.find_executable("bash") || "/bin/sh"
+        {shell, ["-l", "-c", command]}
     end
   end
 
