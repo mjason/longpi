@@ -94,6 +94,9 @@ defmodule Longpi.Agent.Session do
        model:
          (conversation && conversation.model) || opts[:model] ||
            Application.fetch_env!(:longpi, :llm_model),
+       # `base_toolbox` is the built-ins only; `toolbox` merges extensions on
+       # top and is rebuilt from the base on reload.
+       base_toolbox: Toolbox.new(opts[:tools] || Toolbox.default_modules()),
        toolbox: Toolbox.new(opts[:tools] || Toolbox.default_modules()),
        stream_to: opts[:stream_to],
        conversation_id: opts[:conversation_id],
@@ -119,6 +122,12 @@ defmodule Longpi.Agent.Session do
   @doc "Extension slash commands + host pid, for the channel to route `/commands`."
   def ext_info(session), do: GenServer.call(session, :ext_info)
 
+  @doc """
+  Hot-reloads the extension host: re-discovers extension files/packages and
+  rebuilds the toolbox and command list. Returns `{:ok, %{tools, commands}}`.
+  """
+  def reload_extensions(session), do: GenServer.call(session, :reload_extensions, 60_000)
+
   @impl true
   def handle_continue(:load_extensions, state) do
     if Application.get_env(:longpi, :extensions_enabled, true) do
@@ -130,7 +139,7 @@ defmodule Longpi.Agent.Session do
           {:noreply,
            %{
              state
-             | toolbox: Toolbox.with_extensions(state.toolbox, specs),
+             | toolbox: Toolbox.with_extensions(state.base_toolbox, specs),
                ext_host: host,
                ext_commands: commands
            }}
@@ -241,6 +250,19 @@ defmodule Longpi.Agent.Session do
 
   def handle_call(:ext_info, _from, state),
     do: {:reply, %{commands: state.ext_commands, host: state.ext_host}, state}
+
+  def handle_call(:reload_extensions, _from, %{ext_host: nil} = state),
+    do: {:reply, {:error, :no_extensions}, state}
+
+  def handle_call(:reload_extensions, _from, state) do
+    specs = Longpi.Extensions.Host.reload(state.ext_host)
+    commands = Longpi.Extensions.Host.commands(state.ext_host)
+    toolbox = Toolbox.with_extensions(state.base_toolbox, specs)
+    state = %{state | toolbox: toolbox, ext_commands: commands}
+    # Push the fresh command list so the composer's slash menu updates live.
+    state = notify(state, {:commands, commands})
+    {:reply, {:ok, %{tools: length(specs), commands: length(commands)}}, state}
+  end
 
   def handle_call({:set_model, _spec}, _from, %{status: status} = state)
       when status in [:running, :compacting] do

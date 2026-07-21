@@ -84,6 +84,21 @@ defmodule LongpiWeb.ConversationChannel do
     end
   end
 
+  def handle_in("command", %{"name" => "reload"}, socket) do
+    case Session.reload_extensions(socket.assigns.session) do
+      {:ok, %{tools: tools, commands: commands}} ->
+        {:reply,
+         {:ok, %{content: "Extensions reloaded — #{tools} tool(s), #{commands} command(s)."}},
+         socket}
+
+      {:error, :no_extensions} ->
+        {:reply, {:error, %{reason: "No extension host for this conversation."}}, socket}
+
+      {:error, reason} ->
+        {:reply, {:error, %{reason: to_string(reason)}}, socket}
+    end
+  end
+
   # Extension-registered slash commands run in the Bun host; the handler's text
   # comes back as `content` for the client to surface as a notice.
   def handle_in("command", %{"name" => name} = payload, socket) do
@@ -155,6 +170,8 @@ defmodule LongpiWeb.ConversationChannel do
   defp serialize_event({:model_changed, model}), do: {"model_changed", %{model: model}}
 
   defp serialize_event({:titled, title}), do: {"titled", %{title: title}}
+
+  defp serialize_event({:commands, commands}), do: {"commands", %{commands: commands}}
 
   defp serialize_event({:history, messages}),
     do: {"history", %{messages: Enum.map(messages, &serialize_message/1)}}

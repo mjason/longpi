@@ -83,6 +83,9 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   channel.on("titled", (p: { title: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "titled", title: p.title })),
   );
+  channel.on("commands", (p: { commands: ExtCommand[]; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "commands_updated", commands: p.commands })),
+  );
   channel.on("turn_ended", (p: { reason: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "turn_ended", reason: p.reason })),
   );
@@ -133,6 +136,7 @@ type Action =
   | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage; commands?: ExtCommand[] }
   | { type: "model_changed"; model: string }
   | { type: "titled"; title: string }
+  | { type: "commands_updated"; commands: ExtCommand[] }
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
@@ -202,6 +206,9 @@ function reduce(state: State, action: Action): State {
 
     case "titled":
       return { ...state, title: action.title };
+
+    case "commands_updated":
+      return { ...state, commands: action.commands };
 
     case "joined":
       return {

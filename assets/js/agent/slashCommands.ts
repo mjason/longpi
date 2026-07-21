@@ -22,6 +22,10 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     takesArgs: true,
   },
   {
+    name: "reload",
+    summary: "Reload extensions (pick up newly written ones)",
+  },
+  {
     name: "help",
     summary: "List the available commands",
   },
