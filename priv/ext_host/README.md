@@ -90,6 +90,17 @@ A tool appears alongside the built-ins in the model's tool list; when the model
 calls it, `execute` runs in the Bun host and its text is returned to the model.
 An extension tool with the same name as a built-in **overrides** it.
 
+## Examples
+
+Runnable, copy-ready extensions live in `examples/` next to this file:
+
+- `examples/weather.ts` — the smallest useful extension (one tool, no API key).
+- `examples/web-search.ts` — a tool that calls an external API (Tavily) with a
+  key read from `process.env.TAVILY_API_KEY`. The canonical pattern for any
+  API-backed tool.
+
+Copy one into `.longpi/extensions/`, adjust it, and `/reload`.
+
 ## Self-evolution
 
 The agent can write a new `.ts` file into `.longpi/extensions/` with its
