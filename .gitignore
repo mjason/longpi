@@ -49,3 +49,8 @@ config/dev.secret.exs
 # Rust search build artifacts
 native/longpi_search/target/
 priv/search/
+
+# e2e (Playwright)
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/

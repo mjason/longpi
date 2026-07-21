@@ -46,8 +46,10 @@ defmodule LongpiWeb.ConversationChannel do
   end
 
   @impl true
-  def handle_in("send_message", %{"text" => text}, socket) do
-    case Session.send_message(socket.assigns.session, text) do
+  def handle_in("send_message", %{"text" => text} = payload, socket) do
+    attachments = sanitize_attachments(payload["attachments"])
+
+    case Session.send_message(socket.assigns.session, text, attachments) do
       :ok -> {:reply, :ok, socket}
       {:error, :busy} -> {:reply, {:error, %{reason: "busy"}}, socket}
     end
@@ -187,10 +189,50 @@ defmodule LongpiWeb.ConversationChannel do
     %{
       role: message.role,
       content: message[:content] || "",
+      attachments: message[:attachments] || [],
       tool_calls: message[:tool_calls] || [],
       tool_call_id: message[:tool_call_id],
       name: message[:name],
       error: message[:error?] || false
     }
   end
+
+  # Keep only well-formed attachments, capped, with just the fields we use — the
+  # payload is untrusted browser input that gets persisted and sent to the model.
+  @max_attachments 10
+  # ~6MB image decoded; 512KB inlined text. Bounds untrusted payloads that get
+  # persisted to SQLite and forwarded to the model.
+  @max_image_bytes 8_000_000
+  @max_text_bytes 512_000
+
+  defp sanitize_attachments(list) when is_list(list) do
+    list
+    |> Enum.map(&normalize_attachment/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.take(@max_attachments)
+  end
+
+  defp sanitize_attachments(_), do: []
+
+  defp normalize_attachment(%{"type" => "image", "data" => data, "media_type" => media_type} = a)
+       when is_binary(data) and is_binary(media_type) do
+    if String.starts_with?(media_type, "image/") and byte_size(data) <= @max_image_bytes and
+         match?({:ok, _}, Base.decode64(data)) do
+      %{
+        "type" => "image",
+        "name" => to_string(a["name"] || "image"),
+        "media_type" => media_type,
+        "data" => data
+      }
+    end
+  end
+
+  defp normalize_attachment(%{"type" => "file", "text" => text} = attachment)
+       when is_binary(text) do
+    if byte_size(text) <= @max_text_bytes do
+      %{"type" => "file", "name" => to_string(attachment["name"] || "file"), "text" => text}
+    end
+  end
+
+  defp normalize_attachment(_), do: nil
 end

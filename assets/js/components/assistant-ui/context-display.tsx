@@ -48,7 +48,9 @@ const getStrokeColor = (percent: number): string => {
   const severity = getUsageSeverity(percent);
   if (severity === "critical") return "stroke-red-500";
   if (severity === "warning") return "stroke-amber-500";
-  return "stroke-foreground";
+  // Soft grey at normal usage so a tiny low-% arc doesn't read as a stark dot
+  // pulling the ring off-center; amber/red still stand out when it matters.
+  return "stroke-muted-foreground";
 };
 
 const getBarColor = (percent: number): string => {
@@ -189,21 +191,22 @@ function ContextDisplayTrigger({
   children,
   ...props
 }: React.ComponentProps<"button">) {
+  // This project's Tooltip is Radix (asChild), not base-ui (render). Using
+  // `render` here leaked it to the DOM as an attribute and dropped the button's
+  // classes, so the ring never centered. asChild applies our styled button.
   return (
-    <TooltipTrigger
-      render={
-        <button
-          type="button"
-          data-slot="context-display-trigger"
-          className={cn(
-            "inline-flex items-center rounded-md transition-colors",
-            className,
-          )}
-          {...props}
-        />
-      }
-    >
-      {children}
+    <TooltipTrigger asChild>
+      <button
+        type="button"
+        data-slot="context-display-trigger"
+        className={cn(
+          "inline-flex items-center justify-center rounded-md transition-colors",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </button>
     </TooltipTrigger>
   );
 }
@@ -242,7 +245,7 @@ function ContextDisplayContent({
       sideOffset={8}
       data-slot="context-display-popover"
       className={cn(
-        "bg-popover text-popover-foreground w-56 rounded-lg border p-3 text-left shadow-md [&_[data-slot=tooltip-arrow]]:hidden",
+        "bg-popover text-popover-foreground w-56 rounded-xl border-0 p-3 text-left shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18),0_2px_10px_-2px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] dark:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.5)] dark:ring-white/[0.08] [&_[data-slot=tooltip-arrow]]:hidden",
         className,
       )}
     >
@@ -284,7 +287,7 @@ function ContextDisplayContent({
   );
 }
 
-const RING_SIZE = 18;
+const RING_SIZE = 20;
 const RING_STROKE = 2.5;
 const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
@@ -306,24 +309,28 @@ function RingVisual() {
         r={RING_RADIUS}
         fill="none"
         strokeWidth={RING_STROKE}
-        className="stroke-muted"
+        className="stroke-muted-foreground/25"
       />
-      <circle
-        cx={RING_SIZE / 2}
-        cy={RING_SIZE / 2}
-        r={RING_RADIUS}
-        fill="none"
-        strokeWidth={RING_STROKE}
-        strokeLinecap="round"
-        strokeDasharray={RING_CIRCUMFERENCE}
-        strokeDashoffset={
-          RING_CIRCUMFERENCE - (percent / 100) * RING_CIRCUMFERENCE
-        }
-        className={cn(
-          "transition-[stroke-dashoffset,stroke] duration-300",
-          getStrokeColor(percent),
-        )}
-      />
+      {/* Below ~2% the used arc is just a dot at 12 o'clock, which reads as the
+          ring being pushed off-center. Show only the centered track there. */}
+      {percent >= 2 && (
+        <circle
+          cx={RING_SIZE / 2}
+          cy={RING_SIZE / 2}
+          r={RING_RADIUS}
+          fill="none"
+          strokeWidth={RING_STROKE}
+          strokeLinecap="round"
+          strokeDasharray={RING_CIRCUMFERENCE}
+          strokeDashoffset={
+            RING_CIRCUMFERENCE - (percent / 100) * RING_CIRCUMFERENCE
+          }
+          className={cn(
+            "transition-[stroke-dashoffset,stroke] duration-300",
+            getStrokeColor(percent),
+          )}
+        />
+      )}
     </svg>
   );
 }
@@ -333,22 +340,24 @@ function RingPercentLabel() {
   return <span className="font-mono tabular-nums">{Math.round(percent)}%</span>;
 }
 
-const ContextDisplayRing: FC<PresetProps> = ({
+const ContextDisplayRing: FC<PresetProps & { showLabel?: boolean }> = ({
   modelContextWindow,
   className,
   side,
   usage,
+  showLabel = true,
 }) => (
   <ContextDisplayRoot modelContextWindow={modelContextWindow} usage={usage}>
     <ContextDisplayTrigger
       className={cn(
-        "text-muted-foreground hover:text-foreground gap-1.5 px-1.5 py-1 text-xs",
+        "text-muted-foreground hover:text-foreground px-1.5 py-1 text-xs",
+        showLabel && "gap-1.5",
         className,
       )}
       aria-label="Context usage"
     >
       <RingVisual />
-      <RingPercentLabel />
+      {showLabel && <RingPercentLabel />}
     </ContextDisplayTrigger>
     <ContextDisplayContent side={side} />
   </ContextDisplayRoot>

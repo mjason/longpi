@@ -1,11 +1,67 @@
 import {
   type AppendMessage,
+  CompositeAttachmentAdapter,
+  SimpleImageAttachmentAdapter,
+  SimpleTextAttachmentAdapter,
   type ThreadMessageLike,
   useExternalStoreRuntime,
 } from "@assistant-ui/react";
 import { useConversationChannel } from "./channel";
 import { slashCommandHelp } from "./slashCommands";
-import type { ThreadItem } from "./types";
+import type { MessageAttachment, ThreadItem } from "./types";
+
+// Official assistant-ui adapters power the composer's attach button: images are
+// encoded to base64 data URLs for the vision model, text files inlined as text.
+// Stateless, so one shared instance is fine.
+const attachmentAdapter = new CompositeAttachmentAdapter([
+  new SimpleImageAttachmentAdapter(),
+  new SimpleTextAttachmentAdapter(),
+]);
+
+/** Pull our wire-format attachments out of an assistant-ui AppendMessage. */
+export function extractAttachments(message: AppendMessage): MessageAttachment[] {
+  const out: MessageAttachment[] = [];
+  for (const attachment of message.attachments ?? []) {
+    for (const part of attachment.content ?? []) {
+      if (part.type === "image") {
+        const match = /^data:([^;]+);base64,(.*)$/s.exec(part.image);
+        if (match) out.push({ type: "image", name: attachment.name, media_type: match[1], data: match[2] });
+      } else if (part.type === "text") {
+        out.push({ type: "file", name: attachment.name, text: part.text });
+      }
+    }
+  }
+  return out;
+}
+
+/** Rebuild an assistant-ui attachment (for rendering a sent user message) from
+ * our wire format. Images show a thumbnail; text files a document tile. */
+export function toUiAttachments(attachments: MessageAttachment[]) {
+  return attachments.map((attachment, index) =>
+    attachment.type === "image"
+      ? {
+          id: `att-${index}`,
+          type: "image" as const,
+          name: attachment.name,
+          contentType: attachment.media_type,
+          content: [
+            {
+              type: "image" as const,
+              image: `data:${attachment.media_type};base64,${attachment.data}`,
+            },
+          ],
+          status: { type: "complete" as const },
+        }
+      : {
+          id: `att-${index}`,
+          type: "document" as const,
+          name: attachment.name,
+          contentType: "text/plain",
+          content: [{ type: "text" as const, text: attachment.text }],
+          status: { type: "complete" as const },
+        },
+  );
+}
 
 /**
  * Bridges our Phoenix Channel state into an assistant-ui ExternalStoreRuntime.
@@ -43,13 +99,15 @@ export function useChannelRuntime(conversationId: string, defaultModel: string) 
   const runtime = useExternalStoreRuntime({
     messages,
     isRunning: status === "running",
+    adapters: { attachments: attachmentAdapter },
     onNew: async (message: AppendMessage) => {
       const text = message.content
         .filter((part): part is { type: "text"; text: string } => part.type === "text")
         .map((part) => part.text)
         .join("");
       const trimmed = text.trim();
-      if (!trimmed) return;
+      const attachments = extractAttachments(message);
+      if (!trimmed && attachments.length === 0) return;
 
       // Slash commands go to the command channel instead of being sent as a
       // message. Extensible: add cases as commands are added.
@@ -74,7 +132,7 @@ export function useChannelRuntime(conversationId: string, defaultModel: string) 
         return;
       }
 
-      send(trimmed);
+      send(trimmed, attachments);
     },
     // The Reload action on an assistant message: re-run the last turn. The
     // server truncates back to the last user message and streams a fresh reply.
@@ -94,7 +152,7 @@ type AssistantPart = Extract<ThreadMessageLike["content"], readonly unknown[]>[n
 // Collapse our flat thread-item list into assistant-ui messages: consecutive
 // assistant text and tool items belong to one assistant message, and tool
 // results are attached to their originating tool-call part.
-function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
+export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
   const messages: ThreadMessageLike[] = [];
   let assistantParts: AssistantPart[] | null = null;
 
@@ -129,6 +187,9 @@ function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
           id: `m-${messages.length}`,
           role: "user",
           content: [{ type: "text", text: item.text }],
+          ...(item.attachments?.length
+            ? { attachments: toUiAttachments(item.attachments) }
+            : {}),
         });
         break;
 

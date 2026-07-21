@@ -58,6 +58,63 @@ defmodule LongpiWeb.ConversationChannelTest do
     assert_push "turn_ended", %{reason: "complete"}
   end
 
+  test "send_message keeps only well-formed attachments and persists them", %{
+    socket: socket,
+    conversation: conversation
+  } do
+    expect(LLMMock, :stream, fn _, _, _, _, _ -> {:ok, %{text: "ok", tool_calls: []}} end)
+
+    valid = %{
+      "type" => "image",
+      "data" => "AAAA",
+      "media_type" => "image/png",
+      "name" => "ok.png"
+    }
+
+    malformed = %{"type" => "image", "data" => "no-media-type"}
+
+    ref =
+      push(socket, "send_message", %{
+        "text" => "here is a picture",
+        "attachments" => [valid, malformed]
+      })
+
+    assert_reply ref, :ok
+    assert_push "turn_ended", %{reason: "complete"}
+
+    user =
+      conversation.id
+      |> Longpi.Agent.list_messages!()
+      |> Enum.find(&(&1.role == :user))
+
+    assert user.content == "here is a picture"
+    # sanitize_attachments dropped the malformed one, kept the valid image
+    assert [attachment] = user.attachments
+    assert attachment["type"] == "image"
+    assert attachment["media_type"] == "image/png"
+    assert attachment["data"] == "AAAA"
+    assert attachment["name"] == "ok.png"
+  end
+
+  test "send_message with no attachments still works (back-compat)", %{
+    socket: socket,
+    conversation: conversation
+  } do
+    expect(LLMMock, :stream, fn _, _, _, _, _ -> {:ok, %{text: "ok", tool_calls: []}} end)
+
+    ref = push(socket, "send_message", %{"text" => "just text"})
+    assert_reply ref, :ok
+    assert_push "turn_ended", %{reason: "complete"}
+
+    user =
+      conversation.id
+      |> Longpi.Agent.list_messages!()
+      |> Enum.find(&(&1.role == :user))
+
+    assert user.content == "just text"
+    assert user.attachments == []
+  end
+
   test "usage is pushed as context_usage against the model's window", %{socket: socket} do
     expect(LLMMock, :stream, fn _, _, _, _, sink ->
       sink.({:usage, %{input_tokens: 4200}})

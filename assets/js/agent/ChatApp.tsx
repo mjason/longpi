@@ -1,6 +1,16 @@
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import { Layers, Loader2, Plus, Settings, Trash2 } from "lucide-react";
-import React, { useEffect, useState } from "react";
+import {
+  ChevronRight,
+  Folder,
+  FolderOpen,
+  Layers,
+  Loader2,
+  Plus,
+  Puzzle,
+  Settings,
+  Trash2,
+} from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   buildCSRFHeaders,
@@ -14,19 +24,42 @@ import { Input } from "../components/ui/input";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { Thread } from "../components/assistant-ui/thread";
-import { ContextDisplay } from "../components/assistant-ui/context-display";
+import { ConversationUsageContext } from "./ContextMeter";
 import { ExtCommandsContext } from "./ExtCommandsContext";
-import { ModelPicker } from "./ModelPicker";
+import { ConversationModelContext } from "./ModelPicker";
 import { useChannelRuntime } from "./runtime";
 import { loadSettings, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
 
 const DEFAULT_MODEL = "openai:gpt-5.4";
 
-function conversationLabel(conversation: ConversationSummary): string {
+export function conversationLabel(conversation: ConversationSummary): string {
   if (conversation.title) return conversation.title;
   const parts = conversation.cwd.split("/").filter(Boolean);
   return parts[parts.length - 1] ?? conversation.cwd;
+}
+
+/** Last path segment of a workspace path — the folder label shown in the tree. */
+export function folderName(cwd: string): string {
+  const parts = cwd.split("/").filter(Boolean);
+  return parts[parts.length - 1] ?? cwd;
+}
+
+type ProjectGroup = { cwd: string; conversations: ConversationSummary[] };
+
+/**
+ * Group conversations by their workspace (cwd) into projects, most-recent
+ * project first. Input is assumed sorted newest-first, so first-seen cwd wins
+ * ordering and each group keeps that order.
+ */
+export function groupByProject(conversations: ConversationSummary[]): ProjectGroup[] {
+  const groups = new Map<string, ConversationSummary[]>();
+  for (const c of conversations) {
+    const existing = groups.get(c.cwd);
+    if (existing) existing.push(c);
+    else groups.set(c.cwd, [c]);
+  }
+  return [...groups.entries()].map(([cwd, list]) => ({ cwd, conversations: list }));
 }
 
 export default function ChatApp() {
@@ -68,10 +101,45 @@ export default function ChatApp() {
           onDelete={async (conversation) => {
             if (!confirm(`Delete "${conversationLabel(conversation)}"? This cannot be undone.`))
               return;
-            await destroyConversation({ identity: conversation.id, headers: buildCSRFHeaders() });
+            const result = await destroyConversation({
+              identity: conversation.id,
+              headers: buildCSRFHeaders(),
+            });
+            // Only prune on a confirmed server delete — otherwise the row would
+            // vanish from the UI but return on refresh.
+            if (!result.success) {
+              alert("Could not delete the conversation. Please try again.");
+              return;
+            }
             const remaining = conversations.filter((c) => c.id !== conversation.id);
             setConversations(remaining);
-            if (conversationId === conversation.id) {
+            if (conversationId && !remaining.some((c) => c.id === conversationId)) {
+              navigate(remaining.length > 0 ? `/c/${remaining[0].id}` : "/", { replace: true });
+            }
+          }}
+          onDeleteProject={async (project) => {
+            const count = project.conversations.length;
+            if (
+              !confirm(
+                `Delete project "${folderName(project.cwd)}" and its ${count} conversation${count === 1 ? "" : "s"}? This cannot be undone.`,
+              )
+            )
+              return;
+            // Prune only the conversations the server actually deleted.
+            const outcomes = await Promise.all(
+              project.conversations.map(async (c) => ({
+                id: c.id,
+                ok: (await destroyConversation({ identity: c.id, headers: buildCSRFHeaders() }))
+                  .success,
+              })),
+            );
+            const deleted = new Set(outcomes.filter((o) => o.ok).map((o) => o.id));
+            const remaining = conversations.filter((c) => !deleted.has(c.id));
+            setConversations(remaining);
+            if (outcomes.some((o) => !o.ok)) {
+              alert("Some conversations in this project couldn't be deleted. Please try again.");
+            }
+            if (conversationId && !remaining.some((c) => c.id === conversationId)) {
               navigate(remaining.length > 0 ? `/c/${remaining[0].id}` : "/", { replace: true });
             }
           }}
@@ -113,9 +181,233 @@ function Sidebar(props: {
   onSelect: (id: string) => void;
   onCreated: (conversation: ConversationSummary) => void;
   onDelete: (conversation: ConversationSummary) => void;
+  onDeleteProject: (project: ProjectGroup) => void;
 }) {
   const navigate = useNavigate();
-  const [cwd, setCwd] = useState("");
+  const projects = useMemo(() => groupByProject(props.conversations), [props.conversations]);
+
+  // Right-click menu for a project folder (anchored at the cursor).
+  const [menu, setMenu] = useState<{ x: number; y: number; project: ProjectGroup } | null>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenu(null);
+    window.addEventListener("mousedown", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
+  // A project folder is open when it's in this set. Default-collapsed, but the
+  // active conversation's project stays open (effect below), so the tree opens
+  // straight to what you're looking at.
+  const [openFolders, setOpenFolders] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    const selected = props.conversations.find((c) => c.id === props.selectedId);
+    if (!selected) return;
+    setOpenFolders((prev) => (prev.has(selected.cwd) ? prev : new Set(prev).add(selected.cwd)));
+  }, [props.selectedId, props.conversations]);
+
+  const toggleFolder = (cwd: string) =>
+    setOpenFolders((prev) => {
+      const next = new Set(prev);
+      next.has(cwd) ? next.delete(cwd) : next.add(cwd);
+      return next;
+    });
+
+  const [createFor, setCreateFor] = useState<{ cwd: string } | null>(null);
+
+  return (
+    <aside className="flex w-72 shrink-0 flex-col border-r border-border bg-card/30">
+      <div className="flex h-14 shrink-0 items-center border-b border-border px-4">
+        <span className="font-semibold tracking-wide">
+          <span className="mr-2 text-primary">π</span>Longpi
+        </span>
+        <div className="flex-1" />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          aria-label="Settings"
+          onClick={() => navigate("/manage")}
+        >
+          <Settings className="size-4" />
+        </Button>
+      </div>
+
+      <nav className="border-b border-border p-2">
+        <button
+          onClick={() => setCreateFor({ cwd: "" })}
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors hover:bg-accent"
+        >
+          <Plus className="size-4 text-muted-foreground" />
+          New conversation
+        </button>
+        <button
+          onClick={() => navigate("/manage/extensions")}
+          className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors hover:bg-accent"
+        >
+          <Puzzle className="size-4 text-muted-foreground" />
+          Extensions
+        </button>
+      </nav>
+
+      <ScrollArea className="flex-1">
+        <div className="flex items-center justify-between px-3 pt-3 pb-1">
+          <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            Projects
+          </span>
+        </div>
+
+        {projects.length === 0 && (
+          <p className="px-4 py-2 text-sm text-muted-foreground">No conversations yet.</p>
+        )}
+
+        <nav className="pb-2">
+          {projects.map((project) => {
+            const open = openFolders.has(project.cwd);
+            const hasActive = project.conversations.some((c) => c.id === props.selectedId);
+            return (
+              <div key={project.cwd}>
+                <div
+                  className={cn(
+                    "group flex items-center transition-colors hover:bg-accent/60",
+                    !open && hasActive && "bg-accent/40",
+                    menu?.project.cwd === project.cwd && "bg-accent/60",
+                  )}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setMenu({ x: e.clientX, y: e.clientY, project });
+                  }}
+                >
+                  <button
+                    onClick={() => toggleFolder(project.cwd)}
+                    className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-1.5 text-left"
+                    title={project.cwd}
+                  >
+                    <ChevronRight
+                      className={cn(
+                        "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                        open && "rotate-90",
+                      )}
+                    />
+                    {open ? (
+                      <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <Folder className="size-4 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className="truncate text-sm font-medium">{folderName(project.cwd)}</span>
+                    <span className="ml-auto shrink-0 pl-1 text-xs text-muted-foreground group-hover:hidden">
+                      {project.conversations.length}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setCreateFor({ cwd: project.cwd })}
+                    aria-label="New conversation here"
+                    className="mr-1.5 hidden rounded-md p-1 text-muted-foreground hover:bg-background hover:text-foreground group-hover:block"
+                    title="New conversation in this project"
+                  >
+                    <Plus className="size-3.5" />
+                  </button>
+                </div>
+
+                {open &&
+                  project.conversations.map((conversation) => (
+                    <div
+                      key={conversation.id}
+                      className={cn(
+                        "group relative flex items-center transition-colors hover:bg-accent",
+                        conversation.id === props.selectedId &&
+                          "border-l-2 border-primary bg-accent",
+                      )}
+                    >
+                      <button
+                        onClick={() => props.onSelect(conversation.id)}
+                        className="min-w-0 flex-1 py-1.5 pr-2 pl-8 text-left"
+                      >
+                        <div className="truncate text-sm">{conversationLabel(conversation)}</div>
+                      </button>
+                      <button
+                        onClick={() => props.onDelete(conversation)}
+                        aria-label="Delete conversation"
+                        className="mr-2 hidden rounded-md p-1.5 text-muted-foreground hover:bg-background hover:text-destructive group-hover:block"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            );
+          })}
+        </nav>
+      </ScrollArea>
+
+      {menu && (
+        <div
+          className="fixed z-50 min-w-44 overflow-hidden rounded-xl bg-popover p-1 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18),0_2px_10px_-2px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] dark:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.5)] dark:ring-white/[0.08]"
+          style={{
+            left: Math.min(menu.x, window.innerWidth - 190),
+            top: Math.min(menu.y, window.innerHeight - 130),
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="truncate px-2.5 py-1.5 text-xs text-muted-foreground">
+            {folderName(menu.project.cwd)}
+          </div>
+          <button
+            onClick={() => {
+              setCreateFor({ cwd: menu.project.cwd });
+              setMenu(null);
+            }}
+            className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent"
+          >
+            <Plus className="size-4 text-muted-foreground" />
+            New conversation here
+          </button>
+          <button
+            onClick={() => {
+              props.onDeleteProject(menu.project);
+              setMenu(null);
+            }}
+            className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 className="size-4" />
+            Delete project
+          </button>
+        </div>
+      )}
+
+      {createFor && (
+        <NewConversationDialog
+          initialCwd={createFor.cwd}
+          onClose={() => setCreateFor(null)}
+          onCreated={(conversation) => {
+            setCreateFor(null);
+            setOpenFolders((prev) => new Set(prev).add(conversation.cwd));
+            props.onCreated(conversation);
+          }}
+        />
+      )}
+    </aside>
+  );
+}
+
+/** Modal for starting a conversation: workspace path + model, prefilled from
+ * the "+" the user clicked (a project's cwd, or blank for a new workspace). */
+function NewConversationDialog({
+  initialCwd,
+  onClose,
+  onCreated,
+}: {
+  initialCwd: string;
+  onClose: () => void;
+  onCreated: (conversation: ConversationSummary) => void;
+}) {
+  const [cwd, setCwd] = useState(initialCwd);
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -141,89 +433,52 @@ function Sidebar(props: {
     });
 
     setCreating(false);
-    if (result.success) {
-      setCwd("");
-      props.onCreated(result.data);
-    } else {
-      setError("Could not create the conversation. Check the directory path.");
-    }
+    if (result.success) onCreated(result.data);
+    else setError("Could not create the conversation. Check the directory path.");
   }
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-r border-border bg-card/30">
-      <div className="flex items-center border-b border-border px-4 py-4">
-        <span className="font-semibold tracking-wide">
-          <span className="mr-2 text-primary">π</span>Longpi
-        </span>
-        <div className="flex-1" />
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7"
-          aria-label="Settings"
-          onClick={() => navigate("/manage")}
-        >
-          <Settings className="size-4" />
-        </Button>
-      </div>
-
-
-      <form onSubmit={create} className="space-y-2 border-b border-border p-3">
-        <Input
-          className="font-mono text-xs"
-          placeholder="/path/to/workspace"
-          value={cwd}
-          onChange={(e) => setCwd(e.target.value)}
-        />
-        <Input
-          className="font-mono text-xs"
-          placeholder="provider:model"
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-        />
-        <Button type="submit" size="sm" className="w-full" disabled={creating || !cwd.trim()}>
-          {creating ? <Loader2 className="animate-spin" /> : <Plus />}
-          New conversation
-        </Button>
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
+      onMouseDown={onClose}
+    >
+      <form
+        onSubmit={create}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="w-full max-w-sm space-y-3 rounded-xl border-0 bg-card p-5 shadow-[0_16px_48px_-12px_rgba(0,0,0,0.35)] ring-1 ring-black/[0.06] dark:ring-white/[0.08]"
+      >
+        <h2 className="text-sm font-semibold">New conversation</h2>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Workspace directory</label>
+          <Input
+            autoFocus
+            className="font-mono text-xs"
+            placeholder="/path/to/workspace"
+            value={cwd}
+            onChange={(e) => setCwd(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Model</label>
+          <Input
+            className="font-mono text-xs"
+            placeholder="provider:model"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+          />
+        </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" size="sm" disabled={creating || !cwd.trim()}>
+            {creating ? <Loader2 className="animate-spin" /> : <Plus />}
+            Create
+          </Button>
+        </div>
       </form>
-
-      <ScrollArea className="flex-1">
-        <nav className="py-2">
-          {props.conversations.length === 0 && (
-            <p className="px-4 py-2 text-sm text-muted-foreground">No conversations yet.</p>
-          )}
-          {props.conversations.map((conversation) => (
-            <div
-              key={conversation.id}
-              className={cn(
-                "group relative flex items-center transition-colors hover:bg-accent",
-                conversation.id === props.selectedId && "border-l-2 border-primary bg-accent",
-              )}
-            >
-              <button
-                onClick={() => props.onSelect(conversation.id)}
-                className="min-w-0 flex-1 px-4 py-2.5 text-left"
-              >
-                <div className="truncate text-sm font-medium">
-                  {conversationLabel(conversation)}
-                </div>
-                <div className="truncate font-mono text-xs text-muted-foreground">
-                  {conversation.model}
-                </div>
-              </button>
-              <button
-                onClick={() => props.onDelete(conversation)}
-                aria-label="Delete conversation"
-                className="mr-2 hidden rounded-md p-1.5 text-muted-foreground hover:bg-background hover:text-destructive group-hover:block"
-              >
-                <Trash2 className="size-4" />
-              </button>
-            </div>
-          ))}
-        </nav>
-      </ScrollArea>
-    </aside>
+    </div>
   );
 }
 
@@ -238,6 +493,16 @@ function ConversationPane({
 }) {
   const { runtime, compactionCount, notices, usage, currentModel, setModel, title, commands } =
     useChannelRuntime(conversation.id, conversation.model);
+
+  const modelCtx = useMemo(
+    () => ({ model: currentModel, setModel }),
+    [currentModel, setModel],
+  );
+
+  const usageCtx = useMemo(
+    () => (usage?.used != null && usage.window ? { used: usage.used, window: usage.window } : null),
+    [usage?.used, usage?.window],
+  );
 
   // Keep the sidebar label in sync when the model changes via /model.
   useEffect(() => {
@@ -262,7 +527,7 @@ function ConversationPane({
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-border px-4 py-2.5">
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
           <div className="min-w-0">
             <h1 className="truncate text-sm font-semibold">{conversationLabel(conversation)}</h1>
             <p className="truncate font-mono text-xs text-muted-foreground">
@@ -270,13 +535,6 @@ function ConversationPane({
             </p>
           </div>
           <div className="flex-1" />
-          <ModelPicker value={currentModel} onChange={setModel} />
-          {usage?.used != null && usage.window ? (
-            <ContextDisplay.Bar
-              modelContextWindow={usage.window}
-              usage={{ inputTokens: usage.used, totalTokens: usage.used }}
-            />
-          ) : null}
           {compactionCount > 0 && (
             <span
               className="flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs text-muted-foreground"
@@ -289,9 +547,13 @@ function ConversationPane({
         </header>
 
         <div className="min-h-0 flex-1">
-          <ExtCommandsContext.Provider value={commands}>
-            <Thread />
-          </ExtCommandsContext.Provider>
+          <ConversationModelContext.Provider value={modelCtx}>
+            <ConversationUsageContext.Provider value={usageCtx}>
+              <ExtCommandsContext.Provider value={commands}>
+                <Thread />
+              </ExtCommandsContext.Provider>
+            </ConversationUsageContext.Provider>
+          </ConversationModelContext.Provider>
         </div>
 
         {toast && (

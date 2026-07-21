@@ -32,7 +32,8 @@ defmodule Longpi.Agent.Session do
   end
 
   @doc "Starts a turn. Returns `{:error, :busy}` if one is already running."
-  def send_message(session, text), do: GenServer.call(session, {:send_message, text})
+  def send_message(session, text, attachments \\ []),
+    do: GenServer.call(session, {:send_message, text, attachments})
 
   @doc "Aborts the running turn, keeping any partial assistant text."
   def interrupt(session), do: GenServer.call(session, :interrupt)
@@ -196,13 +197,13 @@ defmodule Longpi.Agent.Session do
   end
 
   @impl true
-  def handle_call({:send_message, _text}, _from, %{status: status} = state)
+  def handle_call({:send_message, _text, _attachments}, _from, %{status: status} = state)
       when status in [:running, :compacting] do
     {:reply, {:error, :busy}, state}
   end
 
-  def handle_call({:send_message, text}, _from, state) do
-    user_message = Message.user(text)
+  def handle_call({:send_message, text, attachments}, _from, state) do
+    user_message = Message.user(text, attachments)
     state = persist(state, [user_message])
     messages = state.messages ++ [user_message]
     {:reply, :ok, run_turn(%{state | messages: messages}, messages)}

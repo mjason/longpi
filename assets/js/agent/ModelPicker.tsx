@@ -1,6 +1,25 @@
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { buildCSRFHeaders, listEnabledModels } from "../ash_rpc";
 import { ModelSelector, type ModelOption } from "../components/assistant-ui/model-selector";
+import { modelIcon } from "../components/model-icons";
+
+/** Current conversation's model + live switcher, surfaced to the composer's
+ * inline model picker. Null outside a conversation. */
+export const ConversationModelContext = createContext<{
+  model: string;
+  setModel: (spec: string) => void;
+} | null>(null);
+
+/**
+ * Model switcher docked in the composer action row (ChatGPT/Codex style).
+ * Reads the conversation's live model from context; renders nothing when there
+ * is no conversation (e.g. the management view has no composer anyway).
+ */
+export function ComposerModelPicker() {
+  const ctx = useContext(ConversationModelContext);
+  if (!ctx) return null;
+  return <ModelPicker value={ctx.model} onChange={ctx.setModel} align="start" />;
+}
 
 /**
  * Header model switcher built on assistant-ui's ModelSelector. Loads the
@@ -10,9 +29,11 @@ import { ModelSelector, type ModelOption } from "../components/assistant-ui/mode
 export function ModelPicker({
   value,
   onChange,
+  align = "end",
 }: {
   value: string;
   onChange: (spec: string) => void;
+  align?: "start" | "end";
 }) {
   const [models, setModels] = useState<ModelOption[]>([]);
 
@@ -20,7 +41,13 @@ export function ModelPicker({
     listEnabledModels({ fields: ["spec", "label"], headers: buildCSRFHeaders() }).then(
       (result) => {
         if (result.success) {
-          setModels(result.data.map((m) => ({ id: m.spec, name: m.label || m.spec })));
+          setModels(
+            result.data.map((m) => ({
+              id: m.spec,
+              name: m.label || m.spec,
+              icon: modelIcon(m.spec, m.label),
+            })),
+          );
         }
       },
     );
@@ -29,17 +56,19 @@ export function ModelPicker({
   // Keep the current model selectable even if it isn't in the enabled list.
   const options = models.some((m) => m.id === value)
     ? models
-    : [{ id: value, name: value }, ...models];
+    : [{ id: value, name: value, icon: modelIcon(value) }, ...models];
 
   return (
     <ModelSelector
       models={options}
       value={value}
       onValueChange={onChange}
-      align="end"
+      align={align}
       searchable
       variant="ghost"
       size="sm"
+      // Match the 28px composer controls (attach, approval, context ring, send).
+      className="h-7"
     />
   );
 }

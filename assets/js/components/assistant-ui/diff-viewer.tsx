@@ -147,9 +147,9 @@ const diffViewerVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-background border",
+        default: "bg-background ring-1 ring-black/[0.06] dark:ring-white/[0.08]",
         ghost: "bg-transparent",
-        muted: "border-muted-foreground/20 bg-muted border",
+        muted: "bg-muted ring-1 ring-black/[0.06] dark:ring-white/[0.08]",
       },
       size: {
         sm: "text-xs",
@@ -205,9 +205,9 @@ function DiffViewerFileBadge({ filename }: { filename?: string | undefined }) {
   return (
     <span
       data-slot="diff-viewer-file-badge"
-      className="bg-background inline-flex size-5 shrink-0 items-end justify-end rounded-sm border text-[8px] leading-none font-bold"
+      className="bg-background text-muted-foreground inline-flex size-5 shrink-0 items-center justify-center rounded-[5px] text-[8px] leading-none font-semibold tracking-tight ring-1 ring-black/[0.06] dark:ring-white/[0.08]"
     >
-      <span className="p-0.5">{ext}</span>
+      {ext.slice(0, 3)}
     </span>
   );
 }
@@ -270,7 +270,7 @@ function DiffViewerHeader({
     <div
       data-slot="diff-viewer-header"
       className={cn(
-        "bg-muted text-muted-foreground flex items-center gap-2 border-b px-4 py-2",
+        "bg-muted text-muted-foreground flex items-center gap-2 border-b border-black/[0.06] px-4 py-2 dark:border-white/[0.08]",
         className,
       )}
       {...props}
@@ -373,7 +373,7 @@ function DiffViewerSplitLine({
         data-slot="diff-viewer-split-left"
         data-type={left?.type ?? "empty"}
         className={cn(
-          "flex w-1/2 border-e",
+          "flex w-1/2 border-e border-black/[0.06] dark:border-white/[0.08]",
           diffLineVariants({ type: left?.type ?? "empty" }),
         )}
       >

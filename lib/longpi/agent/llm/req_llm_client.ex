@@ -15,10 +15,18 @@ defmodule Longpi.Agent.LLM.ReqLLMClient do
   @behaviour Longpi.Agent.LLM
 
   alias ReqLLM.{Context, StreamResponse, ToolCall}
+  alias ReqLLM.Message.ContentPart
+
+  @doc """
+  Translates internal message maps to a `ReqLLM.Context`. Exposed so the
+  message-to-context mapping (including multimodal attachments) is testable
+  without a live provider call.
+  """
+  def build_context(messages), do: Context.new(Enum.map(messages, &to_req_llm_message/1))
 
   @impl true
   def stream(model, messages, tools, opts, sink) do
-    context = Context.new(Enum.map(messages, &to_req_llm_message/1))
+    context = build_context(messages)
 
     # Admin-configured provider credentials take priority; falling back to
     # req_llm's own env/config lookup when a provider isn't set in the db.
@@ -146,6 +154,14 @@ defmodule Longpi.Agent.LLM.ReqLLMClient do
   end
 
   defp to_req_llm_message(%{role: :system, content: content}), do: Context.system(content)
+
+  defp to_req_llm_message(%{role: :user, attachments: [_ | _] = attachments} = message) do
+    text = message[:content] || ""
+    parts = Enum.reject(Enum.map(attachments, &attachment_part/1), &is_nil/1)
+    parts = if text == "", do: parts, else: [ContentPart.text(text) | parts]
+    Context.user(parts)
+  end
+
   defp to_req_llm_message(%{role: :user, content: content}), do: Context.user(content)
 
   defp to_req_llm_message(%{role: :assistant, tool_calls: calls} = message)
@@ -163,6 +179,17 @@ defmodule Longpi.Agent.LLM.ReqLLMClient do
   defp to_req_llm_message(%{role: :tool} = message) do
     Context.tool_result(message.tool_call_id, message.name, message.content)
   end
+
+  # Attachments are string-keyed maps straight off the wire (see Message.user/2).
+  defp attachment_part(%{"type" => "image", "data" => data, "media_type" => media_type}) do
+    case Base.decode64(data) do
+      {:ok, bytes} -> ContentPart.image(bytes, media_type)
+      :error -> nil
+    end
+  end
+
+  defp attachment_part(%{"type" => "file", "text" => text}), do: ContentPart.text(text)
+  defp attachment_part(_), do: nil
 
   defp to_req_llm_tool(%Longpi.Agent.ToolSpec{} = spec) do
     ReqLLM.Tool.new!(

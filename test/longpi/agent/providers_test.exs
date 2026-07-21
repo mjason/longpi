@@ -42,6 +42,40 @@ defmodule Longpi.Agent.ProvidersTest do
     assert Keyword.get(opts, :api_key) == "sk-keep"
   end
 
+  test "put upserts base_url and label on the unique_name identity (no duplicate)" do
+    {:ok, created} =
+      Longpi.Agent.put_provider(%{name: "listenai", base_url: "https://a/v1", label: "First"})
+
+    assert created.base_url == "https://a/v1"
+    assert created.label == "First"
+
+    {:ok, updated} =
+      Longpi.Agent.put_provider(%{name: "listenai", base_url: "https://b/v1", label: "Renamed"})
+
+    assert updated.id == created.id
+    assert updated.base_url == "https://b/v1"
+    assert updated.label == "Renamed"
+
+    assert Ash.count!(Longpi.Agent.Provider) == 1
+  end
+
+  test "set_provider_key stores the api_key for request injection" do
+    {:ok, provider} = Longpi.Agent.put_provider(%{name: "openai"})
+    {:ok, _} = Longpi.Agent.set_provider_key(provider, %{api_key: "sk-live"})
+
+    assert Keyword.get(Providers.request_opts("openai:x"), :api_key) == "sk-live"
+  end
+
+  test "destroy_provider removes the provider" do
+    {:ok, provider} = Longpi.Agent.put_provider(%{name: "openai", base_url: "https://gw"})
+    assert Ash.count!(Longpi.Agent.Provider) == 1
+
+    :ok = Ash.destroy!(provider)
+
+    assert Ash.count!(Longpi.Agent.Provider) == 0
+    assert Providers.request_opts("openai:x") == []
+  end
+
   test "api_key is not a public attribute (never sent over RPC)" do
     public =
       Ash.Resource.Info.public_attributes(Longpi.Agent.Provider) |> Enum.map(& &1.name)

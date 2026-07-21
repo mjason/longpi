@@ -3,6 +3,7 @@ import {
   clearProviderKey,
   createModel,
   destroyModel,
+  destroyProvider,
   listModels,
   listProviders,
   listSettings,
@@ -158,9 +159,9 @@ export const PROVIDER_PRESETS = [
   { id: "google", label: "Google Gemini", name: "google", baseUrl: "", compatible: false },
   {
     id: "compatible",
-    label: "OpenAI-compatible gateway (OpenRouter, self-hosted, …)",
+    label: "OpenAI-compatible gateway",
     name: "openai",
-    baseUrl: "https://",
+    baseUrl: "",
     compatible: true,
   },
 ] as const;
@@ -193,6 +194,10 @@ export async function discoverModels(providerName: string): Promise<{ models?: s
 
 export async function saveProviderKey(id: string, apiKey: string) {
   return setProviderKey({ identity: id, input: { apiKey }, fields: ["id"], headers: buildCSRFHeaders() });
+}
+
+export async function removeProvider(id: string) {
+  return destroyProvider({ identity: id, headers: buildCSRFHeaders() });
 }
 
 export async function clearKey(id: string) {

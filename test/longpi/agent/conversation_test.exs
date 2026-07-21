@@ -32,6 +32,66 @@ defmodule Longpi.Agent.ConversationTest do
     assert contents == ["first", "second", "third"]
   end
 
+  test "destroying a conversation with messages removes the row AND its messages" do
+    conversation = create_conversation!()
+
+    for {content, position} <- Enum.with_index(["one", "two", "three"]) do
+      Longpi.Agent.append_message!(%{
+        conversation_id: conversation.id,
+        role: :user,
+        content: content,
+        position: position
+      })
+    end
+
+    assert Ash.count!(ConversationMessage) == 3
+
+    # Regression: destroy used to fail (FK, no ON DELETE CASCADE) on any
+    # conversation that had messages, leaving the row behind.
+    Longpi.Agent.destroy_conversation!(conversation)
+
+    assert {:error, %Ash.Error.Invalid{}} = Longpi.Agent.get_conversation(conversation.id)
+    assert Ash.count!(Longpi.Agent.Conversation) == 0
+    assert Ash.count!(ConversationMessage) == 0
+  end
+
+  test "destroying a conversation with zero messages still works" do
+    conversation = create_conversation!()
+
+    Longpi.Agent.destroy_conversation!(conversation)
+
+    assert {:error, %Ash.Error.Invalid{}} = Longpi.Agent.get_conversation(conversation.id)
+    assert Ash.count!(Longpi.Agent.Conversation) == 0
+  end
+
+  test "destroying a compacted conversation removes the row, messages AND compactions" do
+    conversation = create_conversation!()
+
+    Longpi.Agent.append_message!(%{
+      conversation_id: conversation.id,
+      role: :user,
+      content: "hello",
+      position: 0
+    })
+
+    Longpi.Agent.create_compaction!(%{
+      conversation_id: conversation.id,
+      summary: "summary so far",
+      covered_through: 0,
+      input_tokens: 1234
+    })
+
+    assert Ash.count!(Longpi.Agent.Compaction) == 1
+
+    # Regression: compactions have their own non-cascading FK, so destroy failed
+    # (and the row reappeared on refresh) for any auto-compacted conversation.
+    Longpi.Agent.destroy_conversation!(conversation)
+
+    assert Ash.count!(Longpi.Agent.Conversation) == 0
+    assert Ash.count!(ConversationMessage) == 0
+    assert Ash.count!(Longpi.Agent.Compaction) == 0
+  end
+
   test "message maps roundtrip through persistence, including tool fields" do
     conversation = create_conversation!()
     call = %{id: "tc_9", name: "read", args: %{"path" => "f.txt"}}

@@ -1,6 +1,6 @@
 import { Channel, Socket } from "phoenix";
 import { useEffect, useReducer, useRef } from "react";
-import type { HistoryMessage, SessionStatus, ThreadItem } from "./types";
+import type { HistoryMessage, MessageAttachment, SessionStatus, ThreadItem } from "./types";
 
 let socket: Socket | null = null;
 
@@ -144,7 +144,7 @@ type Action =
   | { type: "approval_request"; id: string }
   | { type: "compacted"; coveredThrough: number }
   | { type: "context_usage"; used: number | null; window: number }
-  | { type: "user_sent"; text: string }
+  | { type: "user_sent"; text: string; attachments?: MessageAttachment[] }
   | { type: "turn_ended"; reason: string }
   | { type: "turn_failed"; reason: string }
   | { type: "notice"; tone: "error" | "info"; text: string }
@@ -156,7 +156,11 @@ function historyToItems(messages: HistoryMessage[], pending: string[] = []): Thr
 
   for (const message of messages) {
     if (message.role === "user") {
-      items.push({ kind: "user", text: message.content });
+      items.push({
+        kind: "user",
+        text: message.content,
+        ...(message.attachments?.length ? { attachments: message.attachments } : {}),
+      });
     } else if (message.role === "assistant") {
       if (message.content.trim() !== "") {
         items.push({ kind: "assistant", text: message.content, streaming: false });
@@ -223,7 +227,18 @@ function reduce(state: State, action: Action): State {
       return { ...state, usage: { used: action.used, window: action.window } };
 
     case "user_sent":
-      return { ...state, status: "running", items: [...state.items, { kind: "user", text: action.text }] };
+      return {
+        ...state,
+        status: "running",
+        items: [
+          ...state.items,
+          {
+            kind: "user",
+            text: action.text,
+            ...(action.attachments?.length ? { attachments: action.attachments } : {}),
+          },
+        ],
+      };
 
     case "text_delta": {
       const items = [...state.items];
@@ -340,10 +355,10 @@ export function useConversationChannel(conversationId: string | null) {
     };
   }, [conversationId]);
 
-  function send(text: string) {
-    dispatch({ type: "user_sent", text });
+  function send(text: string, attachments: MessageAttachment[] = []) {
+    dispatch({ type: "user_sent", text, attachments });
     channelRef.current
-      ?.push("send_message", { text })
+      ?.push("send_message", { text, attachments })
       .receive("error", (reply: { reason: string }) =>
         dispatch({
           type: "notice",

@@ -17,6 +17,7 @@ import {
   PROVIDER_PRESETS,
   type ProviderRow,
   removeModel,
+  removeProvider,
   saveProvider,
   saveProviderKey,
   saveSetting,
@@ -151,10 +152,10 @@ export function GeneralTab() {
                 await saveSetting(SETTING_KEYS.approvalLevel, lvl.id);
               }}
               className={cn(
-                "rounded-md border px-3 py-2 text-left transition-colors",
+                "rounded-md px-3 py-2 text-left ring-1 transition-colors",
                 approvalLevel === lvl.id
-                  ? "border-primary bg-accent"
-                  : "border-border hover:bg-accent/50",
+                  ? "bg-accent ring-primary"
+                  : "ring-black/[0.06] hover:bg-accent/50 dark:ring-white/[0.08]",
               )}
             >
               <div className="text-sm font-medium">{lvl.label}</div>
@@ -299,6 +300,7 @@ export function ProvidersTab() {
 }
 
 function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onChange: () => void }) {
+  const [label, setLabel] = useState(provider.label ?? "");
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl ?? "");
   const [apiKey, setApiKey] = useState("");
   const [discovered, setDiscovered] = useState<string[] | null>(null);
@@ -306,16 +308,20 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
   const [discovering, setDiscovering] = useState(false);
   const [discoverError, setDiscoverError] = useState<string | null>(null);
 
+  async function persist() {
+    await saveProvider(provider.name, baseUrl, label);
+    if (apiKey.trim()) {
+      await saveProviderKey(provider.id, apiKey);
+      setApiKey("");
+    }
+  }
+
   async function discover() {
     setDiscovering(true);
     setDiscoverError(null);
     // Save base_url/key first so the server can reach the endpoint.
-    await saveProvider(provider.name, baseUrl, provider.label ?? "");
-    if (apiKey.trim()) {
-      await saveProviderKey(provider.id, apiKey);
-      setApiKey("");
-      onChange();
-    }
+    await persist();
+    onChange();
     const result = await discoverModels(provider.name);
     setDiscovering(false);
     if (result.error) setDiscoverError(result.error);
@@ -323,6 +329,13 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
       setDiscovered(result.models ?? []);
       setSelected(new Set(result.models ?? []));
     }
+  }
+
+  async function remove() {
+    if (!confirm(`Remove provider "${label || provider.name}"? Saved models keep working only if another provider serves them.`))
+      return;
+    await removeProvider(provider.id);
+    onChange();
   }
 
   async function addSelected() {
@@ -335,9 +348,8 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
   }
 
   return (
-    <div className="space-y-2 rounded-md border border-border p-3">
+    <div className="space-y-2 rounded-md p-3 ring-1 ring-black/[0.06] dark:ring-white/[0.08]">
       <div className="flex items-center gap-2">
-        <span className="text-sm font-semibold">{provider.label || provider.name}</span>
         <span className="font-mono text-xs text-muted-foreground">{provider.name}</span>
         <div className="flex-1" />
         <span
@@ -349,7 +361,19 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
           <KeyRound className="size-3" />
           {provider.configured ? "key set" : "no key"}
         </span>
+        <button
+          onClick={remove}
+          aria-label="Remove provider"
+          className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-destructive"
+        >
+          <Trash2 className="size-4" />
+        </button>
       </div>
+      <Input
+        placeholder="display name (e.g. listenai)"
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+      />
       <Input
         className="font-mono text-xs"
         placeholder="base URL (e.g. https://openrouter.listenai.com/v1)"
@@ -367,11 +391,7 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
         <SaveButton
           label="Save"
           onSave={async () => {
-            await saveProvider(provider.name, baseUrl, provider.label ?? "");
-            if (apiKey.trim()) {
-              await saveProviderKey(provider.id, apiKey);
-              setApiKey("");
-            }
+            await persist();
             onChange();
           }}
         />
@@ -384,7 +404,7 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
       {discoverError && <p className="text-xs text-destructive">{discoverError}</p>}
 
       {discovered && (
-        <div className="space-y-2 rounded-md border border-border bg-card/40 p-2">
+        <div className="space-y-2 rounded-md bg-card/40 p-2 ring-1 ring-black/[0.06] dark:ring-white/[0.08]">
           <p className="text-xs text-muted-foreground">
             {discovered.length} models found. Select the ones to add.
           </p>
@@ -447,7 +467,7 @@ export function ModelsTab() {
       <div className="space-y-2">
         {models.length === 0 && <p className="text-sm text-muted-foreground">No models yet.</p>}
         {models.map((m) => (
-          <div key={m.id} className="flex items-center gap-3 rounded-md border border-border px-3 py-2">
+          <div key={m.id} className="flex items-center gap-3 rounded-md px-3 py-2 ring-1 ring-black/[0.06] dark:ring-white/[0.08]">
             <input
               type="checkbox"
               checked={m.enabled}

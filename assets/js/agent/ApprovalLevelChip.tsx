@@ -48,7 +48,7 @@ export function ApprovalLevelChip() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-sm transition-colors hover:bg-accent",
+          "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors hover:bg-accent",
           isFull ? "text-destructive" : "text-muted-foreground",
         )}
       >
@@ -58,7 +58,7 @@ export function ApprovalLevelChip() {
       </button>
 
       {open && (
-        <div className="absolute bottom-full left-0 z-50 mb-2 w-72 rounded-lg border border-border bg-popover p-1 shadow-lg">
+        <div className="absolute bottom-full left-0 z-50 mb-2 w-72 rounded-xl border-0 bg-popover p-1 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18),0_2px_10px_-2px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] dark:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.5)] dark:ring-white/[0.08]">
           {APPROVAL_LEVELS.map((lvl) => {
             const LvlIcon = ICONS[lvl.id] ?? Shield;
             const selected = lvl.id === level;

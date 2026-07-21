@@ -16,6 +16,15 @@ defmodule Longpi.Agent.Message do
 
   def user(text), do: %{role: :user, content: text}
 
+  @doc """
+  A user message with attachments. `attachments` is a list of string-keyed
+  maps (kept as-is from the wire so JSON persistence round-trips cleanly):
+  `%{"type" => "image", "media_type" => _, "data" => base64, "name" => _}` or
+  `%{"type" => "file", "text" => _, "name" => _}`. Empty list ⇒ plain text.
+  """
+  def user(text, []), do: user(text)
+  def user(text, attachments), do: %{role: :user, content: text, attachments: attachments}
+
   def assistant(text, tool_calls \\ []),
     do: %{role: :assistant, content: text, tool_calls: tool_calls}
 

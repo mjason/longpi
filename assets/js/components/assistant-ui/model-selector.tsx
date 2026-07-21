@@ -406,7 +406,11 @@ function ModelSelectorContent({
       align={align}
       sideOffset={sideOffset}
       className={cn(
-        "bg-popover/95 w-72 min-w-(--anchor-width) overflow-hidden rounded-xl p-0 shadow-lg backdrop-blur-sm",
+        // Match the ChatGPT/assistant-ui look: no hard border, a soft diffuse
+        // shadow, and generous rounding. A whisper-thin ring keeps the edge
+        // legible on light backgrounds without reading as a border. The search
+        // box blends into the list — no hard divider line under it.
+        "bg-popover/95 w-72 min-w-(--anchor-width) overflow-hidden rounded-2xl border-0 p-0 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18),0_2px_10px_-2px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] backdrop-blur-sm [&_[cmdk-input-wrapper]]:border-0 dark:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.5)] dark:ring-white/[0.08]",
         className,
       )}
       {...props}
@@ -585,7 +589,7 @@ function ModelSelectorEffort({
     <div
       data-slot="model-selector-effort"
       className={cn(
-        "flex items-center justify-between gap-3 border-t px-3 py-2",
+        "flex items-center justify-between gap-3 border-t border-black/[0.06] px-3 py-2 dark:border-white/[0.08]",
         className,
       )}
       onKeyDownCapture={(e) => {

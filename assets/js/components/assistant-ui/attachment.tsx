@@ -70,6 +70,41 @@ const useAttachmentSrc = () => {
   return useFileSrc(file) ?? src;
 };
 
+// Text/markdown/document attachments: read the pending File, or pull the text
+// content from an already-sent attachment.
+const useAttachmentText = () => {
+  const { file, text } = useAuiState(
+    useShallow((s): { file?: File; text?: string } => {
+      if (s.attachment.type !== "document" && s.attachment.type !== "file") return {};
+      if (s.attachment.file) return { file: s.attachment.file };
+      const text = s.attachment.content?.filter((c) => c.type === "text")[0]?.text;
+      return text != null ? { text } : {};
+    }),
+  );
+
+  const [fileText, setFileText] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (!file) {
+      setFileText(undefined);
+      return;
+    }
+    let alive = true;
+    file.text().then((t) => {
+      if (alive) setFileText(t);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [file]);
+
+  return fileText ?? text;
+};
+
+// Sent text files are stored wrapped in <attachment name=…>…</attachment>;
+// show the bare contents in the preview.
+const unwrapAttachment = (text: string) =>
+  text.replace(/^<attachment name=[^>]*>\n?/, "").replace(/\n?<\/attachment>\s*$/, "");
+
 type AttachmentPreviewProps = {
   src: string;
 };
@@ -93,24 +128,34 @@ const AttachmentPreview: FC<AttachmentPreviewProps> = ({ src }) => {
 
 const AttachmentPreviewDialog: FC<PropsWithChildren> = ({ children }) => {
   const src = useAttachmentSrc();
+  const text = useAttachmentText();
+  const name = useAuiState((s) => s.attachment.name);
 
-  if (!src) return children;
+  // No preview available (e.g. a non-text file with no thumbnail): render the
+  // tile without a dialog so clicking it does nothing surprising.
+  if (!src && text == null) return children;
 
   return (
     <Dialog>
       <DialogTrigger
-        className="aui-attachment-preview-trigger hover:bg-accent/50 cursor-pointer transition-colors"
+        className="aui-attachment-preview-trigger cursor-pointer transition-opacity hover:opacity-80"
         asChild
       >
         {children}
       </DialogTrigger>
-      <DialogContent className="aui-attachment-preview-dialog-content [&>button]:bg-foreground/60 [&_svg]:text-background [&>button]:hover:[&_svg]:text-destructive p-2 sm:max-w-3xl [&>button]:rounded-full [&>button]:p-1 [&>button]:opacity-100 [&>button]:ring-0!">
-        <DialogTitle className="aui-sr-only sr-only">
-          Image Attachment Preview
+      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-3xl">
+        <DialogTitle className="truncate border-b border-black/[0.06] px-4 py-2.5 pr-10 text-sm font-medium dark:border-white/[0.08]">
+          {name || (src ? "Image" : "File")}
         </DialogTitle>
-        <div className="aui-attachment-preview bg-background relative mx-auto flex max-h-[80dvh] w-full items-center justify-center overflow-hidden">
-          <AttachmentPreview src={src} />
-        </div>
+        {src ? (
+          <div className="bg-muted/30 flex max-h-[75dvh] w-full items-center justify-center overflow-hidden p-3">
+            <AttachmentPreview src={src} />
+          </div>
+        ) : (
+          <pre className="max-h-[75dvh] overflow-auto px-4 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap wrap-break-word">
+            {unwrapAttachment(text ?? "")}
+          </pre>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -137,7 +182,6 @@ const AttachmentUI: FC = () => {
   const aui = useAui();
   const isComposer = aui.attachment.source !== "message";
 
-  const isImage = useAuiState((s) => s.attachment.type === "image");
   const typeLabel = useAuiState((s) => {
     const type = s.attachment.type;
     switch (type) {
@@ -172,20 +216,13 @@ const AttachmentUI: FC = () => {
 
   return (
     <Tooltip>
-      <AttachmentPrimitive.Root
-        className={cn(
-          "aui-attachment-root relative",
-          isImage &&
-            !isComposer &&
-            "aui-attachment-root-message only:*:first:size-24",
-        )}
-      >
+      <AttachmentPrimitive.Root className="aui-attachment-root relative">
         <AttachmentPreviewDialog>
           <TooltipTrigger asChild>
             <div
               className={cn(
-                "aui-attachment-tile bg-muted relative size-14 cursor-pointer overflow-hidden rounded-[calc(var(--composer-radius)-var(--composer-padding))] border transition-opacity hover:opacity-75",
-                isError && "border-destructive",
+                "aui-attachment-tile bg-muted relative size-14 cursor-pointer overflow-hidden rounded-[calc(var(--composer-radius)-var(--composer-padding))] ring-1 ring-black/[0.06] transition-opacity hover:opacity-75 dark:ring-white/[0.08]",
+                isError && "ring-destructive",
               )}
               role="button"
               tabIndex={0}

@@ -17,11 +17,36 @@ defmodule Longpi.Agent.Conversation do
   end
 
   actions do
-    defaults [:read, :destroy]
+    defaults [:read]
 
     create :create do
       primary? true
       accept [:title, :cwd, :model, :system_prompt]
+    end
+
+    # Delete children first, then the row. Their FKs have no ON DELETE CASCADE
+    # (SQLite can't alter one in place), so without this the destroy fails on any
+    # conversation that has messages OR compactions and the row reappears on
+    # refresh. after_action?: false ⇒ children go BEFORE the parent.
+    destroy :destroy do
+      primary? true
+      change cascade_destroy(:messages, return_notifications?: false, after_action?: false)
+      change cascade_destroy(:compactions, return_notifications?: false, after_action?: false)
+
+      # Stop any live Session once the row is gone, so it can't keep running and
+      # later crash trying to persist to a deleted conversation. No-op if none.
+      change fn changeset, _context ->
+        id = changeset.data.id
+
+        Ash.Changeset.after_transaction(changeset, fn _changeset, result ->
+          case result do
+            {:error, _} -> :ok
+            _ -> Longpi.Agent.Sessions.stop(id)
+          end
+
+          result
+        end)
+      end
     end
 
     update :update do
@@ -60,5 +85,6 @@ defmodule Longpi.Agent.Conversation do
 
   relationships do
     has_many :messages, Longpi.Agent.ConversationMessage
+    has_many :compactions, Longpi.Agent.Compaction
   end
 end

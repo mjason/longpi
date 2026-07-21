@@ -38,6 +38,40 @@ defmodule Longpi.Agent.SessionTest do
     assert roles == [:system, :user, :assistant]
   end
 
+  test "send_message/3 passes user attachments through to the LLM client", %{session: session} do
+    test_pid = self()
+    image = %{"type" => "image", "media_type" => "image/png", "data" => "AAAA", "name" => "s.png"}
+
+    expect(LLMMock, :stream, fn _, messages, _, _, _ ->
+      send(test_pid, {:captured, messages})
+      {:ok, %{text: "seen", tool_calls: []}}
+    end)
+
+    assert :ok = Session.send_message(session, "describe this", [image])
+    assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
+
+    assert_received {:captured, messages}
+    user = Enum.find(messages, &(&1.role == :user))
+    assert user.content == "describe this"
+    assert user.attachments == [image]
+  end
+
+  test "send_message/2 (no attachments) carries no :attachments key", %{session: session} do
+    test_pid = self()
+
+    expect(LLMMock, :stream, fn _, messages, _, _, _ ->
+      send(test_pid, {:captured, messages})
+      {:ok, %{text: "ok", tool_calls: []}}
+    end)
+
+    assert :ok = Session.send_message(session, "plain")
+    assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
+
+    assert_received {:captured, messages}
+    user = Enum.find(messages, &(&1.role == :user))
+    refute Map.has_key?(user, :attachments)
+  end
+
   test "rejects a message while a turn is running", %{session: session} do
     expect(LLMMock, :stream, fn _, _, _, _, _ ->
       Process.sleep(500)

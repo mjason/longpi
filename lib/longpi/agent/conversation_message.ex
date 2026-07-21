@@ -27,6 +27,7 @@ defmodule Longpi.Agent.ConversationMessage do
       accept [
         :role,
         :content,
+        :attachments,
         :tool_calls,
         :tool_call_id,
         :tool_name,
@@ -61,6 +62,14 @@ defmodule Longpi.Agent.ConversationMessage do
     end
 
     attribute :tool_calls, {:array, :map} do
+      allow_nil? false
+      default []
+      public? true
+    end
+
+    # User-message attachments: string-keyed maps (image = base64 + media_type,
+    # file = inlined text). Stored as JSON, so keys stay strings on the way back.
+    attribute :attachments, {:array, :map} do
       allow_nil? false
       default []
       public? true
@@ -103,6 +112,7 @@ defmodule Longpi.Agent.ConversationMessage do
       position: position,
       role: message.role,
       content: message[:content] || "",
+      attachments: message[:attachments] || [],
       tool_calls: Enum.map(message[:tool_calls] || [], &encode_call/1),
       tool_call_id: message[:tool_call_id],
       tool_name: message[:name],
@@ -112,7 +122,10 @@ defmodule Longpi.Agent.ConversationMessage do
 
   @doc "Converts a stored row back to the agent-loop message map."
   def to_message(%{role: :user} = record) do
-    %{role: :user, content: record.content}
+    case record.attachments do
+      [] -> %{role: :user, content: record.content}
+      attachments -> %{role: :user, content: record.content, attachments: attachments}
+    end
   end
 
   def to_message(%{role: :assistant} = record) do
