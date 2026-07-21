@@ -129,3 +129,13 @@ and restarts; the unit's `ExecStartPre` migrates the database before the new
 version boots. Override with `LONGPI_PORT`, `LONGPI_SERVICE`, `LONGPI_HOME`,
 `LONGPI_DATA_DIR` env vars (installer only — they do not affect the running
 service, which reads config.jsonc).
+
+### In-app updates and GitHub rate limits
+
+The web UI's one-click updater checks the GitHub releases API, which allows
+60 requests/hour/IP unauthenticated. The server caches each check for 15 minutes,
+revalidates with an `ETag` (a `304` costs no rate limit), and on a `403`/`429`
+keeps showing the last known release instead of erroring — so normal use stays
+well under the limit. If you still hit it (many machines behind one IP, or heavy
+reloading), set a `githubToken` in config.jsonc to raise the limit to
+5000/hour.

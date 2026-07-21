@@ -33,4 +33,10 @@
   // "databasePath": "/var/lib/longpi/longpi.db",
 
   "poolSize": 10
+
+  // Optional: a GitHub token for the in-app updater. The update check caches
+  // results and revalidates with an ETag, so the unauthenticated 60/hour limit
+  // is rarely a problem — set this only if you see rate-limit errors. A
+  // fine-grained token with public read access is enough.
+  // "githubToken": "ghp_...",
 }

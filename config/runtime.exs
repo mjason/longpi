@@ -120,4 +120,9 @@ if config_env() == :prod do
   config :longpi, release_root: release_root
   config :longpi, update_repo: RC.get(cfg, "LONGPI_UPDATE_REPO", "updateRepo", "mjason/longpi")
   config :longpi, service_name: RC.get(cfg, "LONGPI_SERVICE", "serviceName", "longpi")
+
+  # Optional: a GitHub token lifts the update check's rate limit from 60/hour to
+  # 5000/hour. Unset is fine — the updater caches results and revalidates with an
+  # ETag, so unauthenticated checks rarely hit the limit.
+  config :longpi, github_token: RC.get(cfg, ["LONGPI_GITHUB_TOKEN", "GITHUB_TOKEN"], "githubToken")
 end
