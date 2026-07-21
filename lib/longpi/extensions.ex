@@ -6,8 +6,15 @@ defmodule Longpi.Extensions do
   from that conversation.
   """
 
-  @doc "The global extensions directory (`~/.longpi/extensions`)."
-  def global_dir, do: Path.expand("~/.longpi/extensions")
+  @doc """
+  The global extensions directory (`~/.longpi/extensions`).
+
+  Overridable via `config :longpi, :global_extensions_dir` so tests don't read
+  the developer's real global extensions.
+  """
+  def global_dir do
+    Application.get_env(:longpi, :global_extensions_dir) || Path.expand("~/.longpi/extensions")
+  end
 
   @doc "The global packages config file (`~/.longpi/packages.json`)."
   def global_packages_path, do: Path.expand("~/.longpi/packages.json")

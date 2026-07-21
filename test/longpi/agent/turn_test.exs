@@ -36,6 +36,39 @@ defmodule Longpi.Agent.TurnTest do
     assert_received {:ev, {:text_delta, "hi there"}}
   end
 
+  test "writing an extension file signals :extensions_changed for auto-reload", %{
+    config: config,
+    dir: dir
+  } do
+    ext_path = Path.join(dir, ".longpi/extensions/foo.ts")
+
+    call = %{
+      id: "c1",
+      name: "write",
+      args: %{"path" => ext_path, "content" => "export default function(){}"}
+    }
+
+    LLMMock
+    |> expect(:stream, fn _, _, _, _, _ -> {:ok, %{text: "", tool_calls: [call]}} end)
+    |> expect(:stream, fn _, _, _, _, _ -> {:ok, %{text: "done", tool_calls: []}} end)
+
+    Turn.run(config, [Message.user("add an extension")])
+
+    assert_received {:ev, :extensions_changed}
+    assert File.exists?(ext_path)
+  end
+
+  test "a non-extension write does not signal :extensions_changed", %{config: config, dir: dir} do
+    call = %{id: "c1", name: "write", args: %{"path" => Path.join(dir, "notes.txt"), "content" => "hi"}}
+
+    LLMMock
+    |> expect(:stream, fn _, _, _, _, _ -> {:ok, %{text: "", tool_calls: [call]}} end)
+    |> expect(:stream, fn _, _, _, _, _ -> {:ok, %{text: "done", tool_calls: []}} end)
+
+    Turn.run(config, [Message.user("write notes")])
+    refute_received {:ev, :extensions_changed}
+  end
+
   test "reasoning_effort is passed to the LLM only when set", %{config: config} do
     test_pid = self()
 

@@ -68,7 +68,7 @@ defmodule Longpi.Extensions.Host do
   @doc "Global + project extension directories, in load order (project wins)."
   @spec extension_dirs(String.t()) :: [String.t()]
   def extension_dirs(cwd) do
-    [Path.expand("~/.longpi/extensions"), Path.join(cwd, ".longpi/extensions")]
+    [Longpi.Extensions.global_dir(), Path.join(cwd, ".longpi/extensions")]
   end
 
   # Server

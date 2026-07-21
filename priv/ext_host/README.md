@@ -109,7 +109,7 @@ Runnable, copy-ready extensions live in `examples/` next to this file:
   key read from `process.env.TAVILY_API_KEY`. The canonical pattern for any
   API-backed tool.
 
-Copy one into `.longpi/extensions/`, adjust it, and `/reload`.
+Copy one into `.longpi/extensions/` and adjust it — it hot-reloads automatically.
 
 ## Self-evolution
 

@@ -125,7 +125,9 @@ defmodule Longpi.Agent.Session do
        # Bun extension host for this cwd (nil until loaded / if unavailable),
        # and the slash commands its extensions registered.
        ext_host: nil,
-       ext_commands: []
+       ext_commands: [],
+       # Debounce timer for auto-reloading extensions after a file change.
+       ext_reload_timer: nil
      }, {:continue, :load_extensions}}
   end
 
@@ -354,6 +356,21 @@ defmodule Longpi.Agent.Session do
   # A stale load (the host was replaced by a reload) — ignore it.
   def handle_info({:extensions_loaded, _host, _specs, _commands}, state), do: {:noreply, state}
 
+  # The agent wrote/edited an extension file this turn — hot-reload the host so
+  # the new tool is live on the next turn, with no manual /reload. Debounced so
+  # a burst of edits triggers one reload.
+  def handle_info({:turn_event, :extensions_changed}, state) do
+    {:noreply, schedule_ext_reload(state)}
+  end
+
+  def handle_info(:auto_reload_extensions, %{ext_host: nil} = state),
+    do: {:noreply, %{state | ext_reload_timer: nil}}
+
+  def handle_info(:auto_reload_extensions, state) do
+    reload_extensions_async(state.ext_host, self())
+    {:noreply, %{state | ext_reload_timer: nil}}
+  end
+
   def handle_info({:turn_event, {:usage, usage}}, state) do
     state = %{state | last_input_tokens: input_tokens(usage)}
     {:noreply, notify(state, {:context_usage, context_usage_payload(state)})}
@@ -516,6 +533,21 @@ defmodule Longpi.Agent.Session do
     :ok
   rescue
     _ -> :ok
+  end
+
+  # Debounce: coalesce a burst of extension writes into one reload ~400ms later.
+  defp schedule_ext_reload(state) do
+    if t = state.ext_reload_timer, do: Process.cancel_timer(t)
+    %{state | ext_reload_timer: Process.send_after(self(), :auto_reload_extensions, 400)}
+  end
+
+  # Reload off the session process so the 15s host-call can't block it.
+  defp reload_extensions_async(host, session) do
+    Task.start(fn ->
+      specs = Longpi.Extensions.Host.reload(host)
+      commands = Longpi.Extensions.Host.commands(host)
+      send(session, {:extensions_loaded, host, specs, commands})
+    end)
   end
 
   defp persist_reasoning(nil, _effort), do: :ok

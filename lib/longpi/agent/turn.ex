@@ -80,8 +80,23 @@ defmodule Longpi.Agent.Turn do
       end
 
     sink.({:tool_result, %{call: call, content: content, error?: error?}})
+
+    # Self-evolution: when the agent writes/edits an extension file, tell the
+    # session so it hot-reloads the host — no manual /reload.
+    if not error? and extension_write?(call, ctx), do: sink.(:extensions_changed)
+
     Message.tool_result(call, content, error?)
   end
+
+  defp extension_write?(%{name: name, args: args}, ctx) when name in ["write", "edit"] do
+    path = Longpi.Agent.Tool.resolve_path(Map.get(args, "path", ""), ctx)
+
+    String.ends_with?(path, [".ts", ".js", ".mjs"]) and
+      (String.contains?(path, "/.longpi/extensions/") or
+         String.starts_with?(path, Path.expand("~/.longpi/extensions")))
+  end
+
+  defp extension_write?(_call, _ctx), do: false
 
   defp invoke(toolbox, call, ctx) do
     case Toolbox.execute(toolbox, call.name, call.args, ctx) do

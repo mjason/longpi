@@ -206,6 +206,7 @@ export type CreateConversationInput = {
   cwd: string;
   model: string;
   systemPrompt?: string | null;
+  reasoningEffort?: string | null;
 };
 
 export type CreateConversationFields = UnifiedFieldSelection<ConversationResourceSchema>[];
@@ -508,6 +509,7 @@ export type UpdateConversationInput = {
   title?: string | null;
   model?: string;
   systemPrompt?: string | null;
+  reasoningEffort?: string | null;
 };
 
 export type UpdateConversationFields = UnifiedFieldSelection<ConversationResourceSchema>[];

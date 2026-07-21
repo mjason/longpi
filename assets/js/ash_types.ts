@@ -9,12 +9,13 @@ export type UtcDateTimeUsec = string;
 // Conversation Schema
 export type ConversationResourceSchema = {
   __type: "Resource";
-  __primitiveFields: "id" | "title" | "cwd" | "model" | "systemPrompt" | "insertedAt" | "updatedAt";
+  __primitiveFields: "id" | "title" | "cwd" | "model" | "systemPrompt" | "reasoningEffort" | "insertedAt" | "updatedAt";
   id: UUID;
   title: string | null;
   cwd: string;
   model: string;
   systemPrompt: string | null;
+  reasoningEffort: string | null;
   insertedAt: UtcDateTimeUsec;
   updatedAt: UtcDateTimeUsec;
 };
@@ -23,12 +24,13 @@ export type ConversationResourceSchema = {
 
 export type ConversationAttributesOnlySchema = {
   __type: "Resource";
-  __primitiveFields: "id" | "title" | "cwd" | "model" | "systemPrompt" | "insertedAt" | "updatedAt";
+  __primitiveFields: "id" | "title" | "cwd" | "model" | "systemPrompt" | "reasoningEffort" | "insertedAt" | "updatedAt";
   id: UUID;
   title: string | null;
   cwd: string;
   model: string;
   systemPrompt: string | null;
+  reasoningEffort: string | null;
   insertedAt: UtcDateTimeUsec;
   updatedAt: UtcDateTimeUsec;
 };
@@ -146,6 +148,13 @@ export type ConversationFilterInput = {
   };
 
   systemPrompt?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
+    isNil?: boolean;
+  };
+
+  reasoningEffort?: {
     eq?: string;
     notEq?: string;
     in?: Array<string>;
@@ -357,7 +366,7 @@ export type SettingFilterInput = {
 };
 
 
-export const conversationFilterFields = ["id", "title", "cwd", "model", "systemPrompt", "insertedAt", "updatedAt"] as const;
+export const conversationFilterFields = ["id", "title", "cwd", "model", "systemPrompt", "reasoningEffort", "insertedAt", "updatedAt"] as const;
 export type ConversationFilterField = (typeof conversationFilterFields)[number];
 
 export const modelFilterFields = ["id", "spec", "label", "enabled", "position", "contextWindow", "insertedAt", "updatedAt"] as const;
@@ -370,7 +379,7 @@ export const settingFilterFields = ["id", "key", "value", "insertedAt", "updated
 export type SettingFilterField = (typeof settingFilterFields)[number];
 
 
-export const conversationSortFields = ["id", "title", "cwd", "model", "systemPrompt", "insertedAt", "updatedAt"] as const;
+export const conversationSortFields = ["id", "title", "cwd", "model", "systemPrompt", "reasoningEffort", "insertedAt", "updatedAt"] as const;
 export type ConversationSortField = (typeof conversationSortFields)[number];
 
 export const modelSortFields = ["id", "spec", "label", "enabled", "position", "contextWindow", "insertedAt", "updatedAt"] as const;

@@ -48,3 +48,6 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Isolate the global extensions dir from the developer's real ~/.longpi/extensions.
+config :longpi, :global_extensions_dir, Path.join(System.tmp_dir!(), "longpi_test_global_extensions_#{System.pid()}")

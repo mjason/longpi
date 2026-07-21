@@ -19,7 +19,8 @@ defmodule Longpi.Agent.SystemPromptTest do
     # The agent is told it can extend itself, and where to read the real docs.
     assert prompt =~ "Extending yourself"
     assert prompt =~ ".longpi/extensions/"
-    assert prompt =~ "/reload"
+    # Writing hot-reloads automatically; the agent must not tell users to /reload.
+    assert prompt =~ "hot-reload"
     # Secrets go in the app UI, not the OS env; built-in tools over system utils.
     assert prompt =~ "Settings"
     assert prompt =~ "apply_patch"

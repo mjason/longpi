@@ -1,10 +1,10 @@
 // Example longpi extension: a `web_search` tool backed by the Tavily API.
 //
 // Copy this to `<cwd>/.longpi/extensions/web-search.ts` (project-local) or
-// `~/.longpi/extensions/web-search.ts` (global), then run `/reload` in the chat
-// to load the new tool. Add a TAVILY_API_KEY secret under Settings → Extensions
-// → Secrets (stored in the app db and injected into the host on every call — no
-// shell `export` and no reload needed for the key itself).
+// `~/.longpi/extensions/web-search.ts` (global) — it hot-reloads automatically,
+// no /reload needed. Add a TAVILY_API_KEY secret under Settings → Extensions →
+// Secrets (stored in the app db and injected into the host on every call — no
+// shell `export` needed).
 //
 // This is the canonical pattern for an extension that calls an external API
 // with a secret key: read the key from `process.env`, fail clearly when it is

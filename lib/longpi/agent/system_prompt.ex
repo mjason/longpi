@@ -53,12 +53,12 @@ defmodule Longpi.Agent.SystemPrompt do
     Write the extension to `<cwd>/.longpi/extensions/<name>.ts` (this workspace)
     or `~/.longpi/extensions/<name>.ts` (every conversation). Use your built-in
     write/edit tools to create the file — do not rely on system utilities like
-    `apply_patch`, `patch`, or `sed`, which may not be present. It loads on the
-    next `/reload`, so after writing the file tell the user to run `/reload` to
-    activate the new tool. Keep secrets out of the code: read API keys from
-    `process.env.<NAME>` and tell the user to add `<NAME>` under Settings →
-    Extensions → Secrets (stored in the app and injected into the extension
-    host — no shell `export` or machine environment needed).
+    `apply_patch`, `patch`, or `sed`, which may not be present. Writing the file
+    hot-reloads it automatically, so the new tool is available on your next
+    turn — do NOT tell the user to run `/reload`. Keep secrets out of the code:
+    read API keys from `process.env.<NAME>` and tell the user to add `<NAME>`
+    under Settings → Extensions → Secrets (stored in the app and injected into
+    the extension host — no shell `export` or machine environment needed).
     """
   end
 
