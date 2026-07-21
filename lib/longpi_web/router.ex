@@ -50,6 +50,9 @@ defmodule LongpiWeb.Router do
     post "/rpc/sessions/stop", ConfigController, :stop_session
     get "/rpc/extensions", ConfigController, :extensions
     post "/rpc/extensions/packages", ConfigController, :save_packages
+    get "/rpc/extensions/secrets", ConfigController, :extension_secrets
+    post "/rpc/extensions/secrets", ConfigController, :save_extension_secret
+    post "/rpc/extensions/secrets/delete", ConfigController, :delete_extension_secret
     get "/rpc/version", ConfigController, :version
     post "/rpc/version/upgrade", ConfigController, :upgrade
     post "/rpc/run", AshTypescriptRpcController, :run

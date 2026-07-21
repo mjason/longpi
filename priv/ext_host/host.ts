@@ -8,7 +8,7 @@
 // (from Elixir) and stdout (to Elixir). stdout is protocol-only — extension
 // console output is redirected to stderr so it can't corrupt a frame.
 //
-//   Elixir -> host  {type:"load", cwd, dirs:[...]}
+//   Elixir -> host  {type:"load", cwd, dirs:[...], env:{NAME:value}}
 //                   {type:"call", id, tool, args}          run a tool
 //                   {type:"command", id, name, args}       run a slash command
 //                   {type:"event", event, payload}         fire a lifecycle hook
@@ -66,6 +66,22 @@ let HANDLERS = new Map<string, EventHandler[]>();
 let CWD = process.cwd();
 let DIRS: string[] = [];
 let reloadCounter = 0;
+// Names of env vars we injected from longpi's secret store last load, so a
+// secret deleted in the UI is also removed from process.env on the next reload.
+let MANAGED_ENV: string[] = [];
+
+// Apply longpi's DB-stored secrets as process.env vars. Extensions read them
+// via process.env.<NAME>; nothing touches the machine's real environment.
+function applyEnv(env: unknown): void {
+  for (const key of MANAGED_ENV) delete process.env[key];
+  MANAGED_ENV = [];
+  if (env && typeof env === "object") {
+    for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
+      process.env[key] = String(value);
+      MANAGED_ENV.push(key);
+    }
+  }
+}
 
 // --- discovery -------------------------------------------------------------
 
@@ -302,6 +318,7 @@ async function handle(msg: { type: string; [k: string]: unknown }): Promise<void
       DIRS = (msg.dirs as string[]) || [];
     // fallthrough: report tools like reload does
     case "reload": {
+      applyEnv(msg.env);
       const { tools, commands, errors } = await loadAll();
       writeFrame({ type: "ready", tools, commands, errors });
       break;

@@ -51,10 +51,14 @@ defmodule Longpi.Agent.SystemPrompt do
     - Examples: {{ext_examples}} (e.g. web-search.ts — a tool with an API key)
 
     Write the extension to `<cwd>/.longpi/extensions/<name>.ts` (this workspace)
-    or `~/.longpi/extensions/<name>.ts` (every conversation). It loads on the
+    or `~/.longpi/extensions/<name>.ts` (every conversation). Use your built-in
+    write/edit tools to create the file — do not rely on system utilities like
+    `apply_patch`, `patch`, or `sed`, which may not be present. It loads on the
     next `/reload`, so after writing the file tell the user to run `/reload` to
     activate the new tool. Keep secrets out of the code: read API keys from
-    `process.env` and have the user set the variable.
+    `process.env.<NAME>` and tell the user to add `<NAME>` under Settings →
+    Extensions → Secrets (stored in the app and injected into the extension
+    host — no shell `export` or machine environment needed).
     """
   end
 

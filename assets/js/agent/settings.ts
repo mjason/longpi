@@ -145,6 +145,34 @@ export async function saveGlobalPackages(packages: Record<string, string>): Prom
   return res.ok;
 }
 
+/** Names of the extension secrets stored in the app (values never leave the server). */
+export async function loadExtensionSecretNames(): Promise<string[]> {
+  const res = await fetch("/rpc/extensions/secrets", { headers: buildCSRFHeaders() });
+  if (!res.ok) return [];
+  return (await res.json()).names ?? [];
+}
+
+/** Store (upsert) an extension secret. Returns an error message, or null on success. */
+export async function saveExtensionSecret(name: string, value: string): Promise<string | null> {
+  const res = await fetch("/rpc/extensions/secrets", {
+    method: "POST",
+    headers: { ...buildCSRFHeaders(), "content-type": "application/json" },
+    body: JSON.stringify({ name, value }),
+  });
+  if (res.ok) return null;
+  const body = await res.json().catch(() => ({}));
+  return body.error || `HTTP ${res.status}`;
+}
+
+export async function deleteExtensionSecret(name: string): Promise<boolean> {
+  const res = await fetch("/rpc/extensions/secrets/delete", {
+    method: "POST",
+    headers: { ...buildCSRFHeaders(), "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  return res.ok;
+}
+
 export type VersionInfo = {
   enabled: boolean;
   current: string;

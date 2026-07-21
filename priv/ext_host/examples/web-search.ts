@@ -1,9 +1,10 @@
 // Example longpi extension: a `web_search` tool backed by the Tavily API.
 //
 // Copy this to `<cwd>/.longpi/extensions/web-search.ts` (project-local) or
-// `~/.longpi/extensions/web-search.ts` (global), set TAVILY_API_KEY in the
-// environment the longpi server runs under, then run `/reload` in the chat.
-// The `web_search` tool then appears in the model's tool list.
+// `~/.longpi/extensions/web-search.ts` (global). Add a TAVILY_API_KEY secret
+// under Settings → Extensions → Secrets (stored in the app db and injected into
+// the extension host — no shell `export` needed), then run `/reload` in the
+// chat. The `web_search` tool then appears in the model's tool list.
 //
 // This is the canonical pattern for an extension that calls an external API
 // with a secret key: read the key from `process.env`, fail clearly when it is
@@ -31,7 +32,7 @@ export default function (longpi) {
     async execute(args, _ctx) {
       const apiKey = process.env.TAVILY_API_KEY;
       if (!apiKey) {
-        return "web_search is not configured: set TAVILY_API_KEY in the environment and /reload.";
+        return "web_search is not configured: add a TAVILY_API_KEY secret in Settings → Extensions, then /reload.";
       }
 
       const res = await fetch("https://api.tavily.com/search", {

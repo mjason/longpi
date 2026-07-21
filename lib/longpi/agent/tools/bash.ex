@@ -19,8 +19,9 @@ defmodule Longpi.Agent.Tools.Bash do
 
   @impl true
   def description do
-    "Run a shell command. Output is a merged terminal stream (stdout+stderr). " <>
-      "State does not persist between calls; cwd is the session working directory."
+    "Run a shell command. Output is a merged terminal stream (stdout+stderr), " <>
+      "capped at 256KB with the middle dropped when longer. State does not " <>
+      "persist between calls; cwd is the session working directory."
   end
 
   @impl true

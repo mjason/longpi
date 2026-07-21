@@ -83,5 +83,11 @@ defmodule Longpi.Agent do
       define :create_compaction, action: :create
       define :latest_compaction, action: :latest_for, args: [:conversation_id]
     end
+
+    resource Longpi.Agent.ExtensionSecret do
+      define :put_extension_secret, action: :put
+      define :list_extension_secrets, action: :read
+      define :destroy_extension_secret, action: :destroy
+    end
   end
 end

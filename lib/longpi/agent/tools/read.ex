@@ -12,7 +12,9 @@ defmodule Longpi.Agent.Tools.Read do
 
   @impl true
   def description do
-    "Read a file. Returns its content; use offset/limit (1-based lines) for large files."
+    "Read a file. Returns its content with a truncation note when clipped: " <>
+      "without offset/limit it returns at most the first 2000 lines. Use " <>
+      "offset/limit (1-based lines) to page through larger files."
   end
 
   @impl true

@@ -90,6 +90,15 @@ A tool appears alongside the built-ins in the model's tool list; when the model
 calls it, `execute` runs in the Bun host and its text is returned to the model.
 An extension tool with the same name as a built-in **overrides** it.
 
+## Secrets (API keys)
+
+Don't hardcode keys and don't ask the user to `export` them into the machine's
+environment. Read them from `process.env.<NAME>`, and have the user add `<NAME>`
+under **Settings → Extensions → Secrets**. Those secrets are stored in the app
+database and injected into this host as environment variables on load and on
+every `/reload` — so `process.env.TAVILY_API_KEY` resolves without touching the
+OS environment. A deleted secret is removed from the host on the next reload.
+
 ## Examples
 
 Runnable, copy-ready extensions live in `examples/` next to this file:

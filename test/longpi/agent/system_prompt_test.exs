@@ -20,6 +20,9 @@ defmodule Longpi.Agent.SystemPromptTest do
     assert prompt =~ "Extending yourself"
     assert prompt =~ ".longpi/extensions/"
     assert prompt =~ "/reload"
+    # Secrets go in the app UI, not the OS env; built-in tools over system utils.
+    assert prompt =~ "Settings"
+    assert prompt =~ "apply_patch"
     assert prompt =~ Path.join([priv, "ext_host", "README.md"])
     assert prompt =~ Path.join([priv, "ext_host", "examples"])
     # No placeholders leak through.

@@ -49,6 +49,37 @@ defmodule LongpiWeb.ConfigController do
     end
   end
 
+  # Extension secrets: names only leave the server; values are write-only.
+  def extension_secrets(conn, _params) do
+    json(conn, %{names: Longpi.Extensions.list_secret_names()})
+  end
+
+  def save_extension_secret(conn, %{"name" => name, "value" => value})
+      when is_binary(name) and is_binary(value) do
+    name = String.trim(name)
+
+    cond do
+      name == "" ->
+        conn |> put_status(422) |> json(%{error: "name is required"})
+
+      not Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_]*$/, name) ->
+        conn
+        |> put_status(422)
+        |> json(%{error: "name must be a valid environment variable name (A-Z, 0-9, _)"})
+
+      true ->
+        case Longpi.Extensions.put_secret(name, value) do
+          :ok -> json(conn, %{ok: true})
+          {:error, reason} -> conn |> put_status(422) |> json(%{error: inspect(reason)})
+        end
+    end
+  end
+
+  def delete_extension_secret(conn, %{"name" => name}) when is_binary(name) do
+    Longpi.Extensions.delete_secret(name)
+    json(conn, %{ok: true})
+  end
+
   # Self-update: check GitHub for a newer release, and apply it on demand.
   def version(conn, _params) do
     case Longpi.Updater.check() do

@@ -84,7 +84,12 @@ defmodule Longpi.Extensions.Host do
         [{:args, [script]}, :binary, {:packet, 4}, :exit_status, {:cd, cwd}]
       )
 
-    send_frame(port, %{type: "load", cwd: cwd, dirs: extension_dirs(cwd)})
+    send_frame(port, %{
+      type: "load",
+      cwd: cwd,
+      dirs: extension_dirs(cwd),
+      env: Longpi.Extensions.secret_env()
+    })
 
     {:ok,
      %{
@@ -110,7 +115,8 @@ defmodule Longpi.Extensions.Host do
   end
 
   def handle_call(:reload, from, state) do
-    send_frame(state.port, %{type: "reload"})
+    # Re-send env so newly-saved secrets take effect on /reload.
+    send_frame(state.port, %{type: "reload", env: Longpi.Extensions.secret_env()})
     {:noreply, %{state | ready?: false, waiters: [{from, :tool_specs} | state.waiters]}}
   end
 
