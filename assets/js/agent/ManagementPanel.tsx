@@ -12,9 +12,10 @@ import { useState } from "react";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { ConversationsSection } from "./sections/ConversationsSection";
+import { ModelsSection } from "./sections/ModelsSection";
 import { ExtensionsSection } from "./sections/ExtensionsSection";
 import { SessionsSection } from "./sections/SessionsSection";
-import { GeneralTab, ModelsTab, ProvidersTab, ToolsTab } from "./SettingsDialog";
+import { GeneralTab, ProvidersTab, ToolsTab } from "./SettingsDialog";
 
 type SectionId =
   | "general"
@@ -57,7 +58,7 @@ const SECTIONS: Section[] = [
     description: "The models available to new conversations.",
     icon: Cpu,
     group: "Agent",
-    render: () => <ModelsTab />,
+    render: () => <ModelsSection />,
   },
   {
     id: "tools",
