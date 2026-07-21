@@ -26,6 +26,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     summary: "Reload extensions (pick up newly written ones)",
   },
   {
+    name: "rename",
+    summary: "Rename this conversation, e.g. /rename 部署调优",
+    takesArgs: true,
+  },
+  {
     name: "help",
     summary: "List the available commands",
   },

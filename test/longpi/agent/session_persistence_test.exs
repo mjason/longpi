@@ -181,4 +181,21 @@ defmodule Longpi.Agent.SessionPersistenceTest do
     session = start_session(conversation)
     assert {:error, :nothing_to_regenerate} = Session.regenerate(session)
   end
+
+  test "/rename persists the title, broadcasts it, and beats auto-title",
+       %{conversation: conversation} do
+    session = start_session(conversation)
+
+    assert {:ok, "部署调优"} = Session.rename(session, "  部署调优  ")
+    assert_receive {:agent_event, {:titled, "部署调优"}}, 1_000
+
+    # Persisted for the sidebar / next load.
+    assert Longpi.Agent.get_conversation!(conversation.id).title == "部署调优"
+
+    # Empty titles are rejected.
+    assert {:error, :empty} = Session.rename(session, "   ")
+
+    GenServer.stop(session)
+  end
+
 end

@@ -94,6 +94,16 @@ defmodule LongpiWeb.ConversationChannel do
     end
   end
 
+  def handle_in("command", %{"name" => "rename"} = payload, socket) do
+    case Session.rename(socket.assigns.session, payload["arg"] || "") do
+      {:ok, title} ->
+        {:reply, {:ok, %{content: "Renamed to “#{title}”."}}, socket}
+
+      {:error, :empty} ->
+        {:reply, {:error, %{reason: "Usage: /rename <new title>"}}, socket}
+    end
+  end
+
   def handle_in("command", %{"name" => "reload"}, socket) do
     case Session.reload_extensions(socket.assigns.session) do
       {:ok, %{tools: tools, commands: commands}} ->

@@ -76,6 +76,9 @@ defmodule Longpi.Agent.Session do
   @doc "Sets the reasoning effort (nil | \"minimal\" | \"low\" | \"medium\" | \"high\")."
   def set_reasoning(session, effort), do: GenServer.call(session, {:set_reasoning, effort})
 
+  @doc "Renames the conversation (the /rename command)."
+  def rename(session, title), do: GenServer.call(session, {:rename, title})
+
   @doc "The conversation's current reasoning effort (nil = model default)."
   def reasoning_effort(session), do: GenServer.call(session, :reasoning_effort)
 
@@ -307,6 +310,19 @@ defmodule Longpi.Agent.Session do
     state = notify(state, {:model_changed, spec})
     # Push the new window immediately so the usage meter reflects it.
     {:reply, {:ok, spec}, notify(state, {:context_usage, context_usage_payload(state)})}
+  end
+
+  def handle_call({:rename, title}, _from, state) do
+    title = title |> to_string() |> String.trim()
+
+    if title == "" do
+      {:reply, {:error, :empty}, state}
+    else
+      persist_title(state.conversation_id, title)
+      # A manual rename wins: don't let the first-turn auto-title overwrite it.
+      state = %{state | needs_title: false}
+      {:reply, {:ok, title}, notify(state, {:titled, title})}
+    end
   end
 
   def handle_call(:reasoning_effort, _from, state),
