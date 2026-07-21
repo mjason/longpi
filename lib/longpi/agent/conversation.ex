@@ -21,7 +21,7 @@ defmodule Longpi.Agent.Conversation do
 
     create :create do
       primary? true
-      accept [:title, :cwd, :model, :system_prompt]
+      accept [:title, :cwd, :model, :system_prompt, :reasoning_effort]
     end
 
     # Delete children first, then the row. Their FKs have no ON DELETE CASCADE
@@ -51,7 +51,7 @@ defmodule Longpi.Agent.Conversation do
 
     update :update do
       primary? true
-      accept [:title, :model, :system_prompt]
+      accept [:title, :model, :system_prompt, :reasoning_effort]
     end
   end
 
@@ -77,6 +77,13 @@ defmodule Longpi.Agent.Conversation do
     attribute :system_prompt, :string do
       public? true
       constraints allow_empty?: true, trim?: false
+    end
+
+    # Reasoning effort passed to the model ("minimal" | "low" | "medium" |
+    # "high"); nil = don't send one (the model's default). req_llm maps it per
+    # provider — OpenAI reasoning_effort, Anthropic thinking budget, etc.
+    attribute :reasoning_effort, :string do
+      public? true
     end
 
     create_timestamp :inserted_at, public?: true

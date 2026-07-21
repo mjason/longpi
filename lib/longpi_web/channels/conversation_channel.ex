@@ -35,6 +35,7 @@ defmodule LongpiWeb.ConversationChannel do
           status: Session.status(session),
           pending_approvals: Session.pending_approvals(session),
           context_usage: Session.context_usage(session),
+          reasoning_effort: Session.reasoning_effort(session),
           commands: ext.commands
         }
 
@@ -77,6 +78,13 @@ defmodule LongpiWeb.ConversationChannel do
       {:ok, model} -> {:reply, {:ok, %{model: model}}, socket}
       {:error, reason} -> {:reply, {:error, %{reason: to_string(reason)}}, socket}
     end
+  end
+
+  def handle_in("set_reasoning", %{"effort" => effort}, socket) do
+    # nil / "" / "auto" all mean "let the model decide".
+    effort = if is_binary(effort), do: String.trim(effort), else: nil
+    {:ok, effort} = Session.set_reasoning(socket.assigns.session, effort)
+    {:reply, {:ok, %{reasoning_effort: effort}}, socket}
   end
 
   def handle_in("command", %{"name" => "compact"}, socket) do
@@ -132,6 +140,7 @@ defmodule LongpiWeb.ConversationChannel do
       status: Session.status(session),
       pending_approvals: Session.pending_approvals(session),
       context_usage: Session.context_usage(session),
+      reasoning_effort: Session.reasoning_effort(session),
       commands: Session.ext_info(session).commands
     }
 
@@ -173,6 +182,9 @@ defmodule LongpiWeb.ConversationChannel do
     do: {"context_usage", %{used: used, window: window}}
 
   defp serialize_event({:model_changed, model}), do: {"model_changed", %{model: model}}
+
+  defp serialize_event({:reasoning_changed, effort}),
+    do: {"reasoning_changed", %{reasoning_effort: effort}}
 
   defp serialize_event({:titled, title}), do: {"titled", %{title: title}}
 

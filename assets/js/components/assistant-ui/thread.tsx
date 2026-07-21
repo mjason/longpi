@@ -24,6 +24,7 @@ import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button
 import { ApprovalLevelChip } from "@/agent/ApprovalLevelChip";
 import { ComposerContextMeter } from "@/agent/ContextMeter";
 import { ComposerModelPicker } from "@/agent/ModelPicker";
+import { ComposerReasoningPicker } from "@/agent/ReasoningPicker";
 import { RegenerateContext } from "@/agent/runtime";
 import { SlashCommandMenu } from "@/agent/SlashCommandMenu";
 import { Button } from "@/components/ui/button";
@@ -231,6 +232,7 @@ const ComposerAction: FC = () => {
       <div className="flex items-center gap-1.5">
         <ComposerAddAttachment />
         <ComposerModelPicker />
+        <ComposerReasoningPicker />
         <ApprovalLevelChip />
       </div>
       <div className="flex items-center gap-1.5">

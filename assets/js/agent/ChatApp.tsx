@@ -36,6 +36,7 @@ import { Thread } from "../components/assistant-ui/thread";
 import { ConversationUsageContext } from "./ContextMeter";
 import { ExtCommandsContext } from "./ExtCommandsContext";
 import { ConversationModelContext } from "./ModelPicker";
+import { ReasoningEffortContext } from "./ReasoningPicker";
 import { RegenerateContext, useChannelRuntime } from "./runtime";
 import { loadSettings, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
@@ -472,12 +473,17 @@ function ConversationPane({
   onModelChanged: (id: string, model: string) => void;
   onTitled: (id: string, title: string) => void;
 }) {
-  const { runtime, compactionCount, notices, usage, currentModel, setModel, title, commands, regenerate } =
+  const { runtime, compactionCount, notices, usage, currentModel, setModel, reasoningEffort, setReasoning, title, commands, regenerate } =
     useChannelRuntime(conversation.id, conversation.model);
 
   const modelCtx = useMemo(
     () => ({ model: currentModel, setModel }),
     [currentModel, setModel],
+  );
+
+  const reasoningCtx = useMemo(
+    () => ({ effort: reasoningEffort, setEffort: setReasoning }),
+    [reasoningEffort, setReasoning],
   );
 
   const usageCtx = useMemo(
@@ -529,6 +535,7 @@ function ConversationPane({
 
         <div className="min-h-0 flex-1">
           <ConversationModelContext.Provider value={modelCtx}>
+            <ReasoningEffortContext.Provider value={reasoningCtx}>
             <ConversationUsageContext.Provider value={usageCtx}>
               <ExtCommandsContext.Provider value={commands}>
                 <RegenerateContext.Provider value={regenerate}>
@@ -536,6 +543,7 @@ function ConversationPane({
                 </RegenerateContext.Provider>
               </ExtCommandsContext.Provider>
             </ConversationUsageContext.Provider>
+            </ReasoningEffortContext.Provider>
           </ConversationModelContext.Provider>
         </div>
 

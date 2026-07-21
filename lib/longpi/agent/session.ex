@@ -73,6 +73,12 @@ defmodule Longpi.Agent.Session do
   """
   def set_model(session, spec), do: GenServer.call(session, {:set_model, spec})
 
+  @doc "Sets the reasoning effort (nil | \"minimal\" | \"low\" | \"medium\" | \"high\")."
+  def set_reasoning(session, effort), do: GenServer.call(session, {:set_reasoning, effort})
+
+  @doc "The conversation's current reasoning effort (nil = model default)."
+  def reasoning_effort(session), do: GenServer.call(session, :reasoning_effort)
+
   # Server
 
   @impl true
@@ -95,6 +101,9 @@ defmodule Longpi.Agent.Session do
        model:
          (conversation && conversation.model) || opts[:model] ||
            Application.fetch_env!(:longpi, :llm_model),
+       # Reasoning effort ("minimal"|"low"|"medium"|"high") or nil for the
+       # model's default; passed to the LLM per turn.
+       reasoning_effort: (conversation && conversation.reasoning_effort) || opts[:reasoning_effort],
        # `base_toolbox` is the built-ins only; `toolbox` merges extensions on
        # top and is rebuilt from the base on reload.
        base_toolbox: Toolbox.new(opts[:tools] || Toolbox.default_modules()),
@@ -298,6 +307,17 @@ defmodule Longpi.Agent.Session do
     {:reply, {:ok, spec}, notify(state, {:context_usage, context_usage_payload(state)})}
   end
 
+  def handle_call(:reasoning_effort, _from, state),
+    do: {:reply, state.reasoning_effort, state}
+
+  def handle_call({:set_reasoning, effort}, _from, state) do
+    # Normalize "" / unknown to nil (= model default); store the string.
+    effort = if effort in ["minimal", "low", "medium", "high", "xhigh"], do: effort, else: nil
+    persist_reasoning(state.conversation_id, effort)
+    state = %{state | reasoning_effort: effort}
+    {:reply, {:ok, effort}, notify(state, {:reasoning_changed, effort})}
+  end
+
   def handle_call(:compact, _from, %{status: status} = state)
       when status in [:running, :compacting] do
     {:reply, {:error, :busy}, state}
@@ -498,6 +518,26 @@ defmodule Longpi.Agent.Session do
     _ -> :ok
   end
 
+  defp persist_reasoning(nil, _effort), do: :ok
+
+  defp persist_reasoning(conversation_id, effort) do
+    with {:ok, conversation} <- Longpi.Agent.get_conversation(conversation_id) do
+      Longpi.Agent.update_conversation(conversation, %{reasoning_effort: effort})
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  # Whitelist string -> atom for the LLM option (never String.to_atom on input).
+  defp reasoning_effort_atom("minimal"), do: :minimal
+  defp reasoning_effort_atom("low"), do: :low
+  defp reasoning_effort_atom("medium"), do: :medium
+  defp reasoning_effort_atom("high"), do: :high
+  defp reasoning_effort_atom("xhigh"), do: :xhigh
+  defp reasoning_effort_atom(_), do: nil
+
   # How full the model's context window is, as of the last turn's usage report.
   defp context_usage_payload(state) do
     %{used: state.last_input_tokens, window: Longpi.Agent.ContextWindow.for_model(state.model)}
@@ -523,6 +563,7 @@ defmodule Longpi.Agent.Session do
     config = %{
       llm: state.llm,
       model: state.model,
+      reasoning_effort: reasoning_effort_atom(state.reasoning_effort),
       toolbox: state.toolbox,
       ctx: state.ctx,
       sink: fn event -> send(session, {:turn_event, event}) end,

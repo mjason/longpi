@@ -37,7 +37,7 @@ defmodule Longpi.Agent.Turn do
     %{llm: llm, model: model, toolbox: toolbox, sink: sink} = config
     conversation = history ++ Enum.reverse(produced)
 
-    case llm.stream(model, conversation, Toolbox.specs(toolbox), [], sink) do
+    case llm.stream(model, conversation, Toolbox.specs(toolbox), stream_opts(config), sink) do
       {:ok, %{tool_calls: []} = completion} ->
         {:ok, Enum.reverse([Message.assistant(completion.text) | produced])}
 
@@ -49,6 +49,19 @@ defmodule Longpi.Agent.Turn do
 
       {:error, reason} ->
         {:error, reason, Enum.reverse(produced)}
+    end
+  end
+
+  # req_llm's unified reasoning control; only sent when the conversation sets a
+  # level, so non-reasoning models are unaffected. Providers translate it
+  # (OpenAI reasoning_effort, Anthropic thinking budget, Google thinking level).
+  defp stream_opts(config) do
+    case config[:reasoning_effort] do
+      effort when effort in [:minimal, :low, :medium, :high, :xhigh] ->
+        [reasoning_effort: effort]
+
+      _ ->
+        []
     end
   end
 

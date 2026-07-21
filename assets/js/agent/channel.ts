@@ -83,6 +83,9 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   channel.on("model_changed", (p: { model: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "model_changed", model: p.model })),
   );
+  channel.on("reasoning_changed", (p: { reasoning_effort: string | null; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "reasoning_changed", effort: p.reasoning_effort })),
+  );
   channel.on("titled", (p: { title: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "titled", title: p.title })),
   );
@@ -100,7 +103,7 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
     channel
       .join()
       .receive("ok", (reply: JoinReply) => {
-        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, commands: reply.commands });
+        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands });
         resolve();
       })
       .receive("error", (reply: { reason: string }) => {
@@ -120,6 +123,7 @@ type JoinReply = {
   status: string;
   pending_approvals?: string[];
   context_usage?: ContextUsage;
+  reasoning_effort?: string | null;
   commands?: ExtCommand[];
 };
 
@@ -129,6 +133,8 @@ type State = {
   usage: ContextUsage | null;
   // Model override from a live /model switch; null = use the conversation's own.
   model: string | null;
+  // Reasoning effort for the model; null = the model's default (no override).
+  reasoningEffort: string | null;
   // Auto-generated title from the first turn; null = use the conversation's own.
   title: string | null;
   // Slash commands contributed by extensions (for the composer's "/" menu).
@@ -136,8 +142,9 @@ type State = {
 };
 
 type Action =
-  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage; commands?: ExtCommand[] }
+  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage; commands?: ExtCommand[]; reasoningEffort?: string | null }
   | { type: "model_changed"; model: string }
+  | { type: "reasoning_changed"; effort: string | null }
   | { type: "titled"; title: string }
   | { type: "commands_updated"; commands: ExtCommand[] }
   | { type: "text_delta"; text: string }
@@ -215,10 +222,13 @@ function settle(items: ThreadItem[]): ThreadItem[] {
 function reduce(state: State, action: Action): State {
   switch (action.type) {
     case "reset":
-      return { items: [], status: "connecting", usage: null, model: null, title: null, commands: [] };
+      return { items: [], status: "connecting", usage: null, model: null, reasoningEffort: null, title: null, commands: [] };
 
     case "model_changed":
       return { ...state, model: action.model };
+
+    case "reasoning_changed":
+      return { ...state, reasoningEffort: action.effort };
 
     case "titled":
       return { ...state, title: action.title };
@@ -232,6 +242,7 @@ function reduce(state: State, action: Action): State {
         items: historyToItems(action.messages, action.pending),
         status: action.status === "running" ? "running" : "idle",
         usage: action.usage ?? state.usage,
+        reasoningEffort: action.reasoningEffort ?? state.reasoningEffort,
         commands: action.commands ?? state.commands,
       };
 
@@ -355,6 +366,7 @@ export function useConversationChannel(conversationId: string | null) {
     status: "connecting",
     usage: null,
     model: null,
+    reasoningEffort: null,
     title: null,
     commands: [],
   });
@@ -376,7 +388,7 @@ export function useConversationChannel(conversationId: string | null) {
         .push("get_state", {})
         .receive("ok", (reply: JoinReply) => {
           if (!cancelled)
-            dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, commands: reply.commands });
+            dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands });
         });
     });
 
@@ -434,6 +446,13 @@ export function useConversationChannel(conversationId: string | null) {
       );
   }
 
+  // effort: "minimal" | "low" | "medium" | "high" | null (null = model default).
+  function setReasoning(effort: string | null) {
+    // Optimistic: the server echoes back the normalized value via reasoning_changed.
+    dispatch({ type: "reasoning_changed", effort });
+    channelRef.current?.push("set_reasoning", { effort });
+  }
+
   function runCommand(name: string, arg = "") {
     channelRef.current
       ?.push("command", { name, arg })
@@ -464,6 +483,7 @@ export function useConversationChannel(conversationId: string | null) {
     respondApproval,
     runCommand,
     setModel,
+    setReasoning,
     showNotice,
     pendingApprovals,
     compactionCount,

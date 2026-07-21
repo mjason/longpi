@@ -36,6 +36,29 @@ defmodule Longpi.Agent.TurnTest do
     assert_received {:ev, {:text_delta, "hi there"}}
   end
 
+  test "reasoning_effort is passed to the LLM only when set", %{config: config} do
+    test_pid = self()
+
+    expect(LLMMock, :stream, fn _model, _messages, _tools, opts, _sink ->
+      send(test_pid, {:opts, opts})
+      {:ok, %{text: "ok", tool_calls: []}}
+    end)
+
+    Turn.run(Map.put(config, :reasoning_effort, :high), [Message.user("hi")])
+    assert_received {:opts, opts}
+    assert opts[:reasoning_effort] == :high
+
+    # nil / absent => no reasoning_effort key at all (model default).
+    expect(LLMMock, :stream, fn _model, _messages, _tools, opts, _sink ->
+      send(test_pid, {:opts2, opts})
+      {:ok, %{text: "ok", tool_calls: []}}
+    end)
+
+    Turn.run(Map.put(config, :reasoning_effort, nil), [Message.user("hi")])
+    assert_received {:opts2, opts2}
+    refute Keyword.has_key?(opts2, :reasoning_effort)
+  end
+
   test "tool call round trip feeds the result back to the LLM", %{config: config, dir: dir} do
     File.write!(Path.join(dir, "data.txt"), "secret-payload")
     call = %{id: "tc_1", name: "read", args: %{"path" => "data.txt"}}
