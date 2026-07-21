@@ -12,6 +12,9 @@ defmodule Longpi.Application do
       Longpi.Repo,
       {Ecto.Migrator,
        repos: Application.fetch_env!(:longpi, :ecto_repos), skip: skip_migrations?()},
+      # Bootstraps accounts from LONGPI_USERS and refuses to boot an
+      # auth-enabled server with zero users. Synchronous, before the endpoint.
+      Longpi.Accounts.Seeder,
       {DNSCluster, query: Application.get_env(:longpi, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Longpi.PubSub},
       {DynamicSupervisor, name: Longpi.Shell.CommandSupervisor, strategy: :one_for_one},

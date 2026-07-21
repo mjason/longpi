@@ -39,4 +39,13 @@
   // is rarely a problem — set this only if you see rate-limit errors. A
   // fine-grained token with public read access is enough.
   // "githubToken": "ghp_...",
+
+  // Optional sign-in protection (recommended when listenIp is 0.0.0.0).
+  // Accounts are bootstrapped from "users" at boot — remove that line after
+  // the first boot; it only creates accounts that don't exist yet. Set
+  // "usersReset": true for one boot to force the listed passwords.
+  // "auth": {
+  //   "enabled": true,
+  //   "users": "admin@example.com:changeme123"
+  // },
 }

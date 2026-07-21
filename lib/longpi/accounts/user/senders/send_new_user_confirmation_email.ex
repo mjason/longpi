@@ -34,7 +34,7 @@ defmodule Longpi.Accounts.User.Senders.SendNewUserConfirmationEmail do
   end
 
   defp body(token, opts) do
-    url = url(~p"/confirm_new_user/#{token}")
+    url = LongpiWeb.Endpoint.url() <> "/confirm_new_user/" <> token
 
     case opts[:confirmation_type] do
       :identity_link ->

@@ -6,7 +6,12 @@ let socket: Socket | null = null;
 
 function getSocket(): Socket {
   if (!socket) {
-    socket = new Socket("/socket", {});
+    // With auth enabled the server embeds the session's bearer token; the
+    // socket is rejected without it (see LongpiWeb.UserSocket).
+    const token = document
+      .querySelector('meta[name="socket-token"]')
+      ?.getAttribute("content");
+    socket = new Socket("/socket", token ? { params: { token } } : {});
     // @ts-expect-error phoenix's inferred JS types mark params as required,
     // but passing params to connect() is deprecated at runtime.
     socket.connect();

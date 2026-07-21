@@ -33,6 +33,7 @@ import { Label } from "../components/ui/label";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { Thread } from "../components/assistant-ui/thread";
+import { AuthStatus } from "./AuthStatus";
 import { ConversationUsageContext } from "./ContextMeter";
 import { ExtCommandsContext } from "./ExtCommandsContext";
 import { ConversationModelContext } from "./ModelPicker";
@@ -43,7 +44,7 @@ import { loadSettings, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
 import { UpdateCheck } from "./UpdateCheck";
 
-const DEFAULT_MODEL = "openai:gpt-5.4";
+export const DEFAULT_MODEL = "openai:gpt-5.4";
 
 export function conversationLabel(conversation: ConversationSummary): string {
   if (conversation.title) return conversation.title;
@@ -360,6 +361,7 @@ function Sidebar(props: {
         </nav>
       </ScrollArea>
 
+      <AuthStatus />
       <UpdateCheck />
 
       {createFor && (
@@ -466,7 +468,7 @@ function NewConversationDialog({
   );
 }
 
-function ConversationPane({
+export function ConversationPane({
   conversation,
   onModelChanged,
   onTitled,

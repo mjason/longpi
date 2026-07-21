@@ -9,12 +9,17 @@ defmodule LongpiWeb.AuthOverrides do
 
   # For a complete reference, see https://hexdocs.pm/ash_authentication_phoenix/ui-overrides.html
 
-  # override AshAuthentication.Phoenix.Components.Banner do
-  #   set :image_url, "https://media.giphy.com/media/g7GKcSzwQfugw/giphy.gif"
-  #   set :text_class, "bg-red-500"
-  # end
+  # Longpi branding instead of the default Ash Framework banner.
+  override AshAuthentication.Phoenix.Components.Banner do
+    set :image_url, nil
+    set :dark_image_url, nil
+    set :text, "π Longpi"
+    set :text_class, "text-3xl font-semibold tracking-wide text-base-content"
+  end
 
-  # override AshAuthentication.Phoenix.Components.SignIn do
-  #  set :show_banner, false
-  # end
+  # Password sign-in is the only visible strategy; the trailing "or" divider
+  # (rendered for the api_key strategy, which has no form) is just noise.
+  override AshAuthentication.Phoenix.Components.HorizontalRule do
+    set :root_class, "hidden"
+  end
 end

@@ -27,21 +27,35 @@ defmodule LongpiWeb.Router do
     plug :set_actor, :user
   end
 
-  scope "/", LongpiWeb do
-    pipe_through :browser
+  # Auth gates — no-ops until auth is enabled (Longpi.Auth.enabled?).
+  pipeline :require_auth_page do
+    plug LongpiWeb.Plugs.RequireAuth, mode: :page
+  end
 
-    ash_authentication_live_session :authenticated_routes do
-      # in each liveview, add one of the following at the top of the module:
-      #
-      # If an authenticated user must be present:
-      # on_mount {LongpiWeb.LiveUserAuth, :live_user_required}
-      #
-      # If an authenticated user *may* be present:
-      # on_mount {LongpiWeb.LiveUserAuth, :live_user_optional}
-      #
-      # If an authenticated user must *not* be present:
-      # on_mount {LongpiWeb.LiveUserAuth, :live_no_user}
-    end
+  pipeline :require_auth_api do
+    plug LongpiWeb.Plugs.RequireAuth, mode: :api
+  end
+
+  # The embed view is meant to be iframed by other apps (e.g. dala's terminal
+  # pane), so drop the SAMEORIGIN frame guard for it. This is a self-hosted
+  # tool; when auth is enabled the page itself still requires sign-in.
+  pipeline :embeddable do
+    plug :allow_embedding
+  end
+
+  # Phoenix 1.8's put_secure_browser_headers guards with CSP
+  # `frame-ancestors 'self'` (ports count as different origins, so a host app
+  # on another port can't iframe us). Relax just that directive here.
+  defp allow_embedding(conn, _opts) do
+    conn
+    |> Plug.Conn.delete_resp_header("x-frame-options")
+    |> Plug.Conn.put_resp_header("content-security-policy", "base-uri 'self'; frame-ancestors *;")
+  end
+
+  # Data plane: everything the SPA fetches. 401s (never redirects) when auth
+  # is enabled and there is no session.
+  scope "/", LongpiWeb do
+    pipe_through [:browser, :require_auth_api]
 
     get "/rpc/tool-catalog", ConfigController, :tool_catalog
     get "/rpc/config-defaults", ConfigController, :defaults
@@ -60,44 +74,41 @@ defmodule LongpiWeb.Router do
     get "/ash-typescript", PageController, :index
   end
 
+  # The SPA pages — sign-in required when auth is enabled.
   scope "/", LongpiWeb do
-    pipe_through :browser
+    pipe_through [:browser, :require_auth_page]
 
     get "/", PageController, :index
     # Client-side routes: serve the SPA so deep links / refresh resolve.
     get "/c/:id", PageController, :index
     get "/manage", PageController, :index
     get "/manage/:section", PageController, :index
+  end
+
+  # Embed mode: the same SPA, iframable by a host app (e.g. dala's terminal
+  # pane). The React side renders a chrome-less conversation for `?cwd=`;
+  # `?theme=` forces light/dark.
+  scope "/", LongpiWeb do
+    pipe_through [:browser, :require_auth_page, :embeddable]
+
+    get "/embed", PageController, :index
+  end
+
+  # Sign-in / sign-out. No self-registration, password reset, confirmation, or
+  # magic link — accounts are seeded at boot from LONGPI_USERS
+  # (Longpi.Accounts.Seeder), mirroring dala's model.
+  scope "/", LongpiWeb do
+    pipe_through :browser
+
     auth_routes AuthController, Longpi.Accounts.User, path: "/auth"
     sign_out_route AuthController
 
-    # Remove these if you'd like to use your own authentication views
-    sign_in_route register_path: "/register",
-                  reset_path: "/reset",
-                  auth_routes_prefix: "/auth",
+    sign_in_route auth_routes_prefix: "/auth",
                   on_mount: [{LongpiWeb.LiveUserAuth, :live_no_user}],
                   overrides: [
                     LongpiWeb.AuthOverrides,
                     Elixir.AshAuthentication.Phoenix.Overrides.Default
                   ]
-
-    # Remove this if you do not want to use the reset password feature
-    reset_route auth_routes_prefix: "/auth",
-                overrides: [
-                  LongpiWeb.AuthOverrides,
-                  Elixir.AshAuthentication.Phoenix.Overrides.Default
-                ]
-
-    # Remove this if you do not use the confirmation strategy
-    confirm_route Longpi.Accounts.User, :confirm_new_user,
-      auth_routes_prefix: "/auth",
-      overrides: [LongpiWeb.AuthOverrides, Elixir.AshAuthentication.Phoenix.Overrides.Default]
-
-    # Remove this if you do not use the magic link strategy.
-    magic_sign_in_route(Longpi.Accounts.User, :magic_link,
-      auth_routes_prefix: "/auth",
-      overrides: [LongpiWeb.AuthOverrides, Elixir.AshAuthentication.Phoenix.Overrides.Default]
-    )
   end
 
   # Other scopes may use custom stacks.
@@ -115,7 +126,7 @@ defmodule LongpiWeb.Router do
     import Phoenix.LiveDashboard.Router
 
     scope "/dev" do
-      pipe_through :browser
+      pipe_through [:browser, :require_auth_page]
 
       live_dashboard "/dashboard", metrics: LongpiWeb.Telemetry
       forward "/mailbox", Plug.Swoosh.MailboxPreview
@@ -126,7 +137,7 @@ defmodule LongpiWeb.Router do
     import AshAdmin.Router
 
     scope "/admin" do
-      pipe_through :browser
+      pipe_through [:browser, :require_auth_page]
 
       ash_admin "/"
     end

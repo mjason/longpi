@@ -13,6 +13,20 @@ if model = System.get_env("LONGPI_LLM_MODEL") do
   config :longpi, llm_model: model
 end
 
+# Optional auth (any env, so a dev preview can flip it on). Off by default —
+# see Longpi.Auth. Prod re-derives these below, adding config.jsonc's "auth".
+if System.get_env("LONGPI_AUTH_ENABLED") in ~w(true 1) do
+  config :longpi, auth_enabled: true
+end
+
+if users = System.get_env("LONGPI_USERS") do
+  config :longpi, bootstrap_users: users
+end
+
+if System.get_env("LONGPI_USERS_RESET") in ~w(true 1) do
+  config :longpi, bootstrap_users_reset: true
+end
+
 # config/runtime.exs runs for all environments, including inside a release.
 # Production is configured from ~/.config/longpi/config.jsonc (Longpi.RuntimeConfig),
 # NOT environment variables — see docs/deploy.md. dev/test keep their in-repo
@@ -125,4 +139,16 @@ if config_env() == :prod do
   # 5000/hour. Unset is fine — the updater caches results and revalidates with an
   # ETag, so unauthenticated checks rarely hit the limit.
   config :longpi, github_token: RC.get(cfg, ["LONGPI_GITHUB_TOKEN", "GITHUB_TOKEN"], "githubToken")
+
+  # Optional username/password auth (dala's model): off by default; accounts
+  # are seeded at boot from "users" ("email:password,..." — remove after first
+  # boot) rather than self-registration.
+  auth_cfg = cfg["auth"] || %{}
+
+  config :longpi,
+    auth_enabled:
+      System.get_env("LONGPI_AUTH_ENABLED", "") in ~w(true 1) or auth_cfg["enabled"] == true,
+    bootstrap_users: System.get_env("LONGPI_USERS") || auth_cfg["users"] || "",
+    bootstrap_users_reset:
+      System.get_env("LONGPI_USERS_RESET") in ~w(true 1) or auth_cfg["usersReset"] == true
 end

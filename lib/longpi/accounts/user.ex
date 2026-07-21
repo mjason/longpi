@@ -23,7 +23,7 @@ defmodule Longpi.Accounts.User do
         confirm_on_update? false
         require_interaction? true
         confirmed_at_field :confirmed_at
-        auto_confirm_actions [:sign_in_with_magic_link, :reset_password_with_token]
+        auto_confirm_actions [:seed_user]
         sender Longpi.Accounts.User.Senders.SendNewUserConfirmationEmail
       end
     end
@@ -40,13 +40,9 @@ defmodule Longpi.Accounts.User do
       password :password do
         identity_field :email
         hash_provider AshAuthentication.BcryptProvider
-
-        resettable do
-          sender Longpi.Accounts.User.Senders.SendPasswordResetEmail
-          # these configurations will be the default in a future release
-          password_reset_action_name :reset_password_with_token
-          request_password_reset_action_name :request_password_reset_token
-        end
+        # Accounts are pre-seeded from LONGPI_USERS (Longpi.Accounts.Seeder);
+        # there is no self-registration and no password reset (no mailer).
+        registration_enabled? false
       end
 
       remember_me :remember_me
@@ -142,95 +138,31 @@ defmodule Longpi.Accounts.User do
       end
     end
 
-    create :register_with_password do
-      description "Register a new user with a email and password."
-
-      argument :email, :ci_string do
-        allow_nil? false
-      end
-
-      argument :password, :string do
-        description "The proposed password for the user, in plain text."
-        allow_nil? false
-        constraints min_length: 8
-        sensitive? true
-      end
-
-      argument :password_confirmation, :string do
-        description "The proposed password for the user (again), in plain text."
-        allow_nil? false
-        sensitive? true
-      end
-
-      # Sets the email from the argument
-      change set_attribute(:email, arg(:email))
-
-      # Hashes the provided password
-      change AshAuthentication.Strategy.Password.HashPasswordChange
-
-      # Generates an authentication token for the user
-      change AshAuthentication.GenerateTokenChange
-
-      # validates that the password matches the confirmation
-      validate AshAuthentication.Strategy.Password.PasswordConfirmationValidation
-
-      metadata :token, :string do
-        description "A JWT that can be used to authenticate the user."
-        allow_nil? false
-      end
-    end
-
-    action :request_password_reset_token do
-      description "Send password reset instructions to a user if they exist."
-
-      argument :email, :ci_string do
-        allow_nil? false
-      end
-
-      # creates a reset token and invokes the relevant senders
-      run {AshAuthentication.Strategy.Password.RequestPasswordReset, action: :get_by_email}
-    end
-
     read :get_by_email do
       description "Looks up a user by their email"
       get_by :email
     end
 
-    update :reset_password_with_token do
-      argument :reset_token, :string do
-        allow_nil? false
-        sensitive? true
-      end
-
-      argument :password, :string do
-        description "The proposed password for the user, in plain text."
-        allow_nil? false
-        constraints min_length: 8
-        sensitive? true
-      end
-
-      argument :password_confirmation, :string do
-        description "The proposed password for the user (again), in plain text."
-        allow_nil? false
-        sensitive? true
-      end
-
-      # validates the provided reset token
-      validate AshAuthentication.Strategy.Password.ResetTokenValidation
-
-      # validates that the password matches the confirmation
-      validate AshAuthentication.Strategy.Password.PasswordConfirmationValidation
-
-      # Hashes the provided password
-      change AshAuthentication.Strategy.Password.HashPasswordChange
-
-      # Generates an authentication token for the user
-      change AshAuthentication.GenerateTokenChange
-    end
-
     read :sign_in_with_api_key do
       argument :api_key, :string, allow_nil?: false
       prepare AshAuthentication.Strategy.ApiKey.SignInPreparation
+    end
+
+    create :seed_user do
+      description "Bootstrap a local account (Longpi.Accounts.Seeder, boot-time only)."
+
+      upsert? true
+      upsert_identity :unique_email
+      upsert_fields [:hashed_password]
+      accept [:email]
+
+      argument :password, :string do
+        allow_nil? false
+        sensitive? true
+        constraints min_length: 8
+      end
+
+      change {AshAuthentication.Strategy.Password.HashPasswordChange, strategy_name: :password}
     end
   end
 

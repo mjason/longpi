@@ -56,6 +56,13 @@ defmodule LongpiWeb.AuthController do
   def sign_out(conn, _params) do
     return_to = get_session(conn, :return_to) || ~p"/"
 
+    # clear_session revokes the token, which blocks NEW socket connects — but
+    # an already-open websocket would survive sign-out. Kick it explicitly
+    # (Phoenix terminates every socket whose id matches the broadcast topic).
+    if user = conn.assigns[:current_user] do
+      LongpiWeb.Endpoint.broadcast("user_socket:#{user.id}", "disconnect", %{})
+    end
+
     conn
     |> clear_session(:longpi)
     |> put_flash(:info, "You are now signed out")

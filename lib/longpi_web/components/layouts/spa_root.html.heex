@@ -9,6 +9,13 @@ SPDX-License-Identifier: MIT
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
     <meta name="longpi-version" content={to_string(Application.spec(:longpi, :vsn))} />
+    <meta name="auth-enabled" content={to_string(Longpi.Auth.enabled?())} />
+    <%= if assigns[:user_email] do %>
+      <meta name="user-email" content={@user_email} />
+    <% end %>
+    <%= if assigns[:socket_token] do %>
+      <meta name="socket-token" content={@socket_token} />
+    <% end %>
     <%!-- Set the theme before first paint (no flash). Priority: a `?theme=`
           query param (embed mode — host-controlled) > the user's saved choice >
           the OS preference. React's ThemeToggle dispatches `longpi:set-theme`. --%>
@@ -22,11 +29,18 @@ SPDX-License-Identifier: MIT
           root.style.colorScheme = t;
           root.setAttribute("data-theme-source", source);
         };
+        // localStorage throws in sandboxed iframes (embed without
+        // allow-same-origin) — degrade to system/forced rather than dying.
+        const store = {
+          get() { try { return localStorage.getItem("longpi:theme"); } catch { return null; } },
+          set(v) { try { localStorage.setItem("longpi:theme", v); } catch {} },
+          del() { try { localStorage.removeItem("longpi:theme"); } catch {} },
+        };
         const forced = new URLSearchParams(location.search).get("theme");
         if (forced === "dark" || forced === "light") {
           apply(forced, "forced");
         } else {
-          const saved = localStorage.getItem("longpi:theme");
+          const saved = store.get();
           apply(saved || "system", saved ? "user" : "system");
         }
         matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
@@ -35,8 +49,8 @@ SPDX-License-Identifier: MIT
         window.addEventListener("longpi:set-theme", (e) => {
           if (root.getAttribute("data-theme-source") === "forced") return; // embed: host owns the theme
           const theme = e.detail;
-          if (theme === "system") localStorage.removeItem("longpi:theme");
-          else localStorage.setItem("longpi:theme", theme);
+          if (theme === "system") store.del();
+          else store.set(theme);
           apply(theme, theme === "system" ? "system" : "user");
         });
       })();
