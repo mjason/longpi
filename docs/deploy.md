@@ -105,8 +105,27 @@ in a reverse proxy (Caddy/nginx) in front and set in `config.jsonc`:
 "host": "your.domain"
 ```
 
-## Upgrading
+## Install / upgrade with the scripts
 
-Build a new tarball, unpack it into a new `versions/<vN>` dir, repoint the
-`current` symlink, and `systemctl --user restart longpi`. The data dir
-(`secrets.json`, database) is outside the versioned tree, so it is preserved.
+`install.sh` and `update.sh` automate steps 2–5 against the published GitHub
+releases (built by `.github/workflows/release.yml` on a `v*` tag).
+
+```sh
+# first install (latest release): downloads, writes config.jsonc, installs the
+# systemd unit, starts the service
+curl -fsSL https://raw.githubusercontent.com/mjason/longpi/main/install.sh | bash
+
+# upgrade to the latest release: downloads, repoints `current`, restarts,
+# prunes to the newest 3 versions
+curl -fsSL https://raw.githubusercontent.com/mjason/longpi/main/update.sh | bash
+
+# or pin a version
+./update.sh v0.1.1
+```
+
+Both keep the data dir (`secrets.json`, database) — it lives outside the
+versioned tree, so upgrades preserve it. `update.sh` swaps the `current` symlink
+and restarts; the unit's `ExecStartPre` migrates the database before the new
+version boots. Override with `LONGPI_PORT`, `LONGPI_SERVICE`, `LONGPI_HOME`,
+`LONGPI_DATA_DIR` env vars (installer only — they do not affect the running
+service, which reads config.jsonc).
