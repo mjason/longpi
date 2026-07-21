@@ -108,7 +108,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-function GeneralTab() {
+export function GeneralTab() {
   const [systemPrompt, setSystemPrompt] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
   const [defaultPrompt, setDefaultPrompt] = useState("");
@@ -243,7 +243,7 @@ function GeneralTab() {
   );
 }
 
-function ProvidersTab() {
+export function ProvidersTab() {
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [presetId, setPresetId] = useState<string>(PROVIDER_PRESETS[0].id);
@@ -416,7 +416,7 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
   );
 }
 
-function ModelsTab() {
+export function ModelsTab() {
   const [models, setModels] = useState<ModelRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [spec, setSpec] = useState("");
@@ -501,7 +501,7 @@ function ModelsTab() {
   );
 }
 
-function ToolsTab() {
+export function ToolsTab() {
   const [tools, setTools] = useState<ToolCatalogEntry[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);

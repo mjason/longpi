@@ -17,7 +17,7 @@ import { ContextDisplay } from "../components/assistant-ui/context-display";
 import { ExtCommandsContext } from "./ExtCommandsContext";
 import { ModelPicker } from "./ModelPicker";
 import { useChannelRuntime } from "./runtime";
-import { SettingsDialog } from "./SettingsDialog";
+import { ManagementPanel } from "./ManagementPanel";
 import { loadSettings, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
 
@@ -159,7 +159,7 @@ function Sidebar(props: {
         </Button>
       </div>
 
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <ManagementPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       <form onSubmit={create} className="space-y-2 border-b border-border p-3">
         <Input
