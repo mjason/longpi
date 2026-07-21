@@ -41,7 +41,9 @@ export function ModelsSection() {
 
   async function setEnabledForMany(rows: ModelRow[], enabled: boolean) {
     setModels((ms) => ms.map((m) => (rows.some((r) => r.id === m.id) ? { ...m, enabled } : m)));
-    await Promise.all(rows.map((m) => setModel(m.id, { enabled })));
+    const results = await Promise.all(rows.map((m) => setModel(m.id, { enabled })));
+    // Re-sync with the server if any write failed (undo the optimistic flips).
+    if (results.some((r) => !r.success)) refresh();
   }
 
   async function removeMany(rows: ModelRow[]) {

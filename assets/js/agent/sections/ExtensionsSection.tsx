@@ -1,5 +1,6 @@
 import { Check, FileCode, Folder, Loader2, Package, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { type GlobalExtensions, loadGlobalExtensions, saveGlobalPackages } from "../settings";
@@ -22,7 +23,11 @@ export function ExtensionsSection() {
 
   async function persist(next: [string, string][]) {
     setPackages(next);
-    await saveGlobalPackages(Object.fromEntries(next));
+    const ok = await saveGlobalPackages(Object.fromEntries(next));
+    if (!ok) {
+      alert("Could not save packages. Please try again.");
+      return;
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   }
@@ -51,7 +56,11 @@ export function ExtensionsSection() {
                   <FileCode className="size-4 text-muted-foreground" />
                 )}
                 <span className="font-mono">{e.name}</span>
-                {e["dir?"] && <span className="text-xs text-muted-foreground">package</span>}
+                {e["dir?"] && (
+                  <Badge variant="secondary" className="font-normal">
+                    package
+                  </Badge>
+                )}
               </div>
             ))}
           </div>

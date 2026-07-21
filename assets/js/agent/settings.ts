@@ -136,12 +136,13 @@ export async function loadGlobalExtensions(): Promise<GlobalExtensions> {
   return await res.json();
 }
 
-export async function saveGlobalPackages(packages: Record<string, string>): Promise<void> {
-  await fetch("/rpc/extensions/packages", {
+export async function saveGlobalPackages(packages: Record<string, string>): Promise<boolean> {
+  const res = await fetch("/rpc/extensions/packages", {
     method: "POST",
     headers: { ...buildCSRFHeaders(), "content-type": "application/json" },
     body: JSON.stringify({ packages }),
   });
+  return res.ok;
 }
 
 export type ProviderRow = {
