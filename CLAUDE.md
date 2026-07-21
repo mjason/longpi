@@ -133,3 +133,34 @@ mix usage_rules.search_docs "Enum.zip" --query-by title
 
 <!-- usage_rules:otp-end -->
 <!-- usage-rules-end -->
+
+<!-- Custom project rules below (outside the usage_rules block so they survive `mix usage_rules` regeneration). -->
+
+## Frontend UI: shadcn/ui + assistant-ui only — do NOT hand-roll
+
+The web UI (`assets/js`, React + TypeScript + Tailwind, bundled by esbuild) is built from **two component libraries and nothing else**. Hand-rolling one-off components is the main cause of visual inconsistency — don't do it. Before building any UI, find the component that already exists.
+
+- **shadcn/ui** — base primitives. Vendored in `assets/js/components/ui/*` (button, dialog, popover, command, tooltip, input, scroll-area, avatar, collapsible, skeleton, textarea, …). These are **Radix-based** (`asChild`, NOT base-ui `render`).
+- **assistant-ui** — everything chat/agent: thread, composer, messages, tool calls, attachments, reasoning, model selector, context display, diff viewer, markdown/streamdown. Vendored in `assets/js/components/assistant-ui/*`.
+
+**Rules**
+- Need a primitive (button, menu, dialog, popover, tabs, …)? Use or add a **shadcn** component. Never build your own.
+- Need chat/agent UI (tool group, attachment tile, reasoning block, model picker, context meter, …)? Use an **assistant-ui** component. If it needs a runtime, feed data via **props/adapters** — do not rebuild the component.
+- If a suitable component doesn't exist, **vendor the official one**, then adapt it — don't write from scratch.
+- **No hard/black 1px borders** on floating surfaces or tiles (they read as stark lines, especially in dark mode). Use a soft `ring-1 ring-black/[0.06] dark:ring-white/[0.08]` + a diffuse shadow, matching `model-selector.tsx`. Structural layout borders (sidebar edge, header bottom, form inputs) are fine.
+- **`render` vs `asChild` gotcha**: this project's `components/ui/*` are Radix. Passing a base-ui `render={<.../>}` prop to a Radix `Trigger` leaks `render="[object Object]"` to the DOM and drops the element's classes (breaks styling/alignment). Vendored assistant-ui components that use base-ui tooltips must be converted to `<Trigger asChild><el …/></Trigger>`.
+
+### Adding / discovering components
+
+**shadcn** (CLI, docs, registry, MCP):
+- Add: `npx shadcn@latest add <component>` (e.g. `button`, `dropdown-menu`, `tabs`).
+- Docs: `https://ui.shadcn.com/docs/components/<name>` ; registry JSON: `https://ui.shadcn.com/r/styles/new-york/<name>.json`.
+- MCP (browse/search/install by prompt): `.mcp.json` server `shadcn` → `npx shadcn@latest mcp` (already configured; run `/mcp` to verify).
+
+**assistant-ui** (AI docs, registry, skills, MCP):
+- Full docs for LLMs: `https://www.assistant-ui.com/llms-full.txt` ; per page: append `.md` to any docs URL.
+- Vendor a component: `curl -s https://r.assistant-ui.com/base/<name>.json` (then place under `components/assistant-ui/`).
+- **Claude Code skills**: `npx skills add assistant-ui/skills` → `/assistant-ui`, `/primitives`, `/runtime`, `/tools`, `/streaming`, `/thread-list`, `/setup`, `/update`.
+- MCP (docs + examples): `.mcp.json` server `assistant-ui` → `npx -y @assistant-ui/mcp-docs-server` (already configured; tools `assistantUIDocs`, `assistantUIExamples`). Or `claude mcp add assistant-ui -- npx -y @assistant-ui/mcp-docs-server`.
+
+Prefer the MCP servers / skills to look up the right component and its API before writing code.

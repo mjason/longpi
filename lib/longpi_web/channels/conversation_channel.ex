@@ -157,6 +157,9 @@ defmodule LongpiWeb.ConversationChannel do
   defp serialize_event({:tool_result, %{call: call, content: content, error?: error?}}),
     do: {"tool_result", %{id: call.id, name: call.name, content: content, error: error?}}
 
+  defp serialize_event({:tool_output, %{id: id, chunk: chunk}}),
+    do: {"tool_output", %{id: id, chunk: chunk}}
+
   defp serialize_event({:approval_request, call}),
     do: {"approval_request", %{id: call.id, name: call.name, args: call.args}}
 

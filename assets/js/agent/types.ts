@@ -27,6 +27,9 @@ export type ThreadItem =
       name: string;
       args?: Record<string, unknown>;
       content?: string;
+      // Live output streamed while the tool runs (e.g. bash stdout/stderr),
+      // shown until the final `content` arrives.
+      output?: string;
       error: boolean;
       running: boolean;
       // Set while the tool is waiting for the user to approve/reject it.

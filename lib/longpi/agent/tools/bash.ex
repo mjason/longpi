@@ -36,15 +36,44 @@ defmodule Longpi.Agent.Tools.Bash do
 
   @impl true
   def run(args, ctx) do
+    ref = make_ref()
+
     opts = [
       cwd: ctx.cwd,
       timeout_ms: args |> Map.get(:timeout_ms, @default_timeout_ms) |> min(@max_timeout_ms),
-      max_output_bytes: Map.get(args, :max_output_bytes, 256 * 1024)
+      max_output_bytes: Map.get(args, :max_output_bytes, 256 * 1024),
+      # Stream output live so long-running commands report progress, and so the
+      # shim dies with this turn task (see Longpi.Shell.Command owner monitor).
+      stream_to: self(),
+      ref: ref
     ]
 
-    case Longpi.Shell.run(args.command, opts) do
-      {:ok, result} -> {:ok, format(result)}
-      {:error, reason} -> {:error, "shell execution failed: #{inspect(reason)}"}
+    case Longpi.Shell.start(args.command, opts) do
+      {:ok, _pid} ->
+        case collect(ref, ctx[:progress]) do
+          {:ok, result} -> {:ok, format(result)}
+          {:error, reason} -> {:error, "shell execution failed: #{inspect(reason)}"}
+        end
+
+      {:error, reason} ->
+        {:error, "shell execution failed: #{inspect(reason)}"}
+    end
+  end
+
+  # Forward each output chunk to the progress callback (live UI), then return
+  # the final result. Running inside the turn task means an interrupt kills this
+  # receive and, via the owner monitor, the shim.
+  defp collect(ref, progress) do
+    receive do
+      {:shell_output, ^ref, chunk} ->
+        if is_function(progress, 1), do: progress.(chunk)
+        collect(ref, progress)
+
+      {:shell_exit, ^ref, result} ->
+        {:ok, result}
+
+      {:shell_error, ^ref, reason} ->
+        {:error, reason}
     end
   end
 

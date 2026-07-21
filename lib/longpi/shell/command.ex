@@ -93,10 +93,18 @@ defmodule Longpi.Shell.Command do
       started_at: System.monotonic_time(:millisecond),
       stream_to: opts[:stream_to],
       ref: opts[:ref],
+      # Monitor the owner (the agent's turn task). If it dies — e.g. the user
+      # interrupts the turn — we stop, and terminate/2 closes the Port, reaping
+      # the whole child process tree. Otherwise a long command would keep
+      # running invisibly after "stop".
+      owner_mon: monitor_owner(opts[:stream_to]),
       awaiting: [],
       result: nil
     }
   end
+
+  defp monitor_owner(pid) when is_pid(pid), do: Process.monitor(pid)
+  defp monitor_owner(_), do: nil
 
   @impl true
   def handle_call(:await, from, state) do
@@ -168,6 +176,12 @@ defmodule Longpi.Shell.Command do
   end
 
   def handle_info(:shutdown, state), do: {:stop, :normal, state}
+
+  # Owner (turn task) went down — interrupt. Stopping closes the Port, which
+  # tears down the command's whole process tree.
+  def handle_info({:DOWN, mon, :process, _pid, _reason}, %{owner_mon: mon} = state) do
+    {:stop, :normal, state}
+  end
 
   def handle_info(:force_close, state) do
     # Shim unresponsive after KILL + grace: close the Port. The stdin

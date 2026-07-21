@@ -212,7 +212,9 @@ export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
           // args originate from JSON, so they are valid JSON values.
           args: (item.args ?? {}) as Record<string, never>,
           argsText: JSON.stringify(item.args ?? {}),
-          result: item.content !== undefined ? item.content : undefined,
+          // Final result once done; while running, show the live streamed output
+          // so long commands report progress instead of a bare spinner.
+          result: item.content !== undefined ? item.content : item.output,
           isError: item.error,
           // While awaiting approval, expose it as a native tool-approval gate so
           // ToolFallback renders inline Allow/Deny (id = the tool-call id, which

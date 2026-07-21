@@ -56,6 +56,10 @@ defmodule Longpi.Agent.Turn do
     %{toolbox: toolbox, ctx: ctx, sink: sink} = config
     sink.({:tool_call, call})
 
+    # Per-call progress channel: tools (e.g. bash) stream output live to the UI.
+    ctx =
+      Map.put(ctx, :progress, fn chunk -> sink.({:tool_output, %{id: call.id, chunk: chunk}}) end)
+
     {content, error?} =
       case authorize(config, call) do
         :allow -> invoke(toolbox, call, ctx)

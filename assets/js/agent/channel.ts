@@ -68,6 +68,9 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   channel.on("tool_result", (p: { id: string; content: string; error: boolean; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "tool_result", id: p.id, content: p.content, error: p.error })),
   );
+  channel.on("tool_output", (p: { id: string; chunk: string; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "tool_output", id: p.id, chunk: p.chunk })),
+  );
   channel.on("approval_request", (p: { id: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "approval_request", id: p.id })),
   );
@@ -141,6 +144,7 @@ type Action =
   | { type: "thinking_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; id: string; content: string; error: boolean }
+  | { type: "tool_output"; id: string; chunk: string }
   | { type: "approval_request"; id: string }
   | { type: "compacted"; coveredThrough: number }
   | { type: "context_usage"; used: number | null; window: number }
@@ -282,6 +286,16 @@ function reduce(state: State, action: Action): State {
         ),
       };
 
+    case "tool_output":
+      return {
+        ...state,
+        items: state.items.map((item) =>
+          item.kind === "tool" && item.id === action.id
+            ? { ...item, output: (item.output ?? "") + action.chunk }
+            : item,
+        ),
+      };
+
     case "tool_result":
       return {
         ...state,
@@ -299,8 +313,15 @@ function reduce(state: State, action: Action): State {
       };
 
     case "turn_ended": {
-      const items = settle(state.items);
-      if (action.reason === "interrupted") {
+      // On interrupt, any tool still running was killed with the turn — mark it
+      // stopped so the user gets clear feedback (not a silent, stuck spinner).
+      const interrupted = action.reason === "interrupted";
+      const items = settle(state.items).map((item) =>
+        interrupted && item.kind === "tool" && item.content === undefined && !item.awaitingApproval
+          ? { ...item, content: "⏹ Stopped by user", error: true }
+          : item,
+      );
+      if (interrupted) {
         items.push({ kind: "notice", tone: "info", text: "Turn interrupted" });
       }
       return { ...state, items, status: "idle" };
