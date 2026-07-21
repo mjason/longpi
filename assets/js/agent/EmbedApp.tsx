@@ -1,40 +1,62 @@
-import { Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import type { ExternalStoreThreadListAdapter } from "@assistant-ui/react";
+import { History, Loader2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { buildCSRFHeaders, createConversation, listConversations } from "../ash_rpc";
+import { ThreadList } from "../components/assistant-ui/thread-list";
+import { Button } from "../components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import { TooltipProvider } from "../components/ui/tooltip";
-import { ConversationPane, DEFAULT_MODEL } from "./ChatApp";
+import { ConversationPane, DEFAULT_MODEL, conversationLabel } from "./ChatApp";
 import { loadSettings, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
 
-/** Newest conversation for `cwd`, or null. Exported for tests. */
-export function pickConversation(
-  conversations: { cwd: string }[],
-  cwd: string,
-): number {
+/** Newest conversation for `cwd`, or -1. Exported for tests. */
+export function pickConversation(conversations: { cwd: string }[], cwd: string): number {
   return conversations.findIndex((c) => c.cwd === cwd);
 }
 
 /**
- * `/embed?cwd=/path[&model=spec][&theme=dark|light]` — a chrome-less agent
- * view for iframing inside a host app (e.g. dala's terminal pane).
+ * `/embed?cwd=/path[&model=spec][&theme=dark|light][&token=...]` — a
+ * chrome-less agent view for iframing inside a host app (e.g. dala's terminal
+ * pane).
  *
  * - `cwd` (required): the workspace to open. The newest conversation for that
- *   cwd is reused; when none exists one is created.
+ *   cwd is opened; when none exists one is created.
+ * - The header's history button manages THIS workspace's conversations
+ *   (assistant-ui ThreadList: switch or start a new one).
  * - `theme` is applied by the layout's pre-paint script (host-controlled).
- * - No sidebar/management chrome — just the conversation.
+ * - `token` authenticates the iframe when auth is enabled (see Longpi.Auth).
  */
 export default function EmbedApp() {
   const [params] = useSearchParams();
   const cwd = (params.get("cwd") ?? "").trim();
   const modelParam = (params.get("model") ?? "").trim();
 
-  const [conversation, setConversation] = useState<ConversationSummary | null>(null);
+  // All conversations for this workspace, newest first; `activeId` selects.
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  async function defaultModel(): Promise<string> {
+    return modelParam || (await loadSettings())[SETTING_KEYS.defaultModel] || DEFAULT_MODEL;
+  }
+
+  async function createForCwd(): Promise<ConversationSummary | null> {
+    const created = await createConversation({
+      input: { cwd, model: await defaultModel() },
+      fields: ["id", "title", "cwd", "model"],
+      headers: buildCSRFHeaders(),
+    });
+    return created.success ? created.data : null;
+  }
 
   useEffect(() => {
     if (!cwd) {
       setError("Missing ?cwd= — the host must say which workspace to open.");
+      setLoading(false);
       return;
     }
 
@@ -50,31 +72,27 @@ export default function EmbedApp() {
       if (cancelled) return;
       if (!listed.success) {
         setError("Could not load conversations.");
+        setLoading(false);
         return;
       }
 
-      const index = pickConversation(listed.data, cwd);
-      if (index >= 0) {
-        setConversation(listed.data[index]);
-        return;
+      const mine = listed.data.filter((c) => c.cwd === cwd);
+      if (mine.length > 0) {
+        setConversations(mine);
+        setActiveId(mine[0].id);
+      } else {
+        const created = await createForCwd();
+        if (cancelled) return;
+        if (!created) {
+          setError("Could not create a conversation for this workspace.");
+          setLoading(false);
+          return;
+        }
+        setConversations([created]);
+        setActiveId(created.id);
       }
 
-      // No conversation for this workspace yet — create one.
-      const model =
-        modelParam ||
-        (await loadSettings())[SETTING_KEYS.defaultModel] ||
-        DEFAULT_MODEL;
-      if (cancelled) return;
-
-      const created = await createConversation({
-        input: { cwd, model },
-        fields: ["id", "title", "cwd", "model"],
-        headers: buildCSRFHeaders(),
-      });
-
-      if (cancelled) return;
-      if (created.success) setConversation(created.data);
-      else setError("Could not create a conversation for this workspace.");
+      setLoading(false);
     })();
 
     return () => {
@@ -82,6 +100,31 @@ export default function EmbedApp() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, modelParam]);
+
+  const active = conversations.find((c) => c.id === activeId) ?? null;
+
+  // assistant-ui's ThreadList reads this via the runtime (ExternalStore
+  // threadList adapter): this workspace's conversations, switch, and new.
+  const threadList = useMemo<ExternalStoreThreadListAdapter>(
+    () => ({
+      threadId: activeId ?? undefined,
+      threads: conversations.map((c) => ({
+        id: c.id,
+        status: "regular" as const,
+        title: conversationLabel(c),
+      })),
+      onSwitchToThread: (id) => setActiveId(id),
+      onSwitchToNewThread: async () => {
+        const created = await createForCwd();
+        if (created) {
+          setConversations((prev) => [created, ...prev]);
+          setActiveId(created.id);
+        }
+      },
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeId, conversations, cwd, modelParam],
+  );
 
   if (error) {
     return (
@@ -91,7 +134,7 @@ export default function EmbedApp() {
     );
   }
 
-  if (!conversation) {
+  if (loading || !active) {
     return (
       <div className="grid h-dvh place-items-center bg-background text-foreground">
         <Loader2 className="size-5 animate-spin text-muted-foreground" />
@@ -103,12 +146,43 @@ export default function EmbedApp() {
     <TooltipProvider delayDuration={300}>
       <div className="flex h-dvh bg-background text-foreground">
         <ConversationPane
-          key={conversation.id}
-          conversation={conversation}
-          onModelChanged={() => {}}
-          onTitled={() => {}}
+          key={active.id}
+          conversation={active}
+          threadList={threadList}
+          headerExtra={<EmbedThreadSwitcher count={conversations.length} />}
+          onModelChanged={(id, model) =>
+            setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, model } : c)))
+          }
+          onTitled={(id, title) =>
+            setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, title } : c)))
+          }
         />
       </div>
     </TooltipProvider>
+  );
+}
+
+/**
+ * Header popover managing this workspace's conversations — assistant-ui's
+ * ThreadList (new / switch) scoped to the embed's cwd.
+ */
+function EmbedThreadSwitcher({ count }: { count: number }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+          aria-label="Conversations in this workspace"
+        >
+          <History className="size-4" />
+          {count > 1 ? count : null}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 p-2">
+        <ThreadList />
+      </PopoverContent>
+    </Popover>
   );
 }

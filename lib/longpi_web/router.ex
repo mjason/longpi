@@ -37,10 +37,13 @@ defmodule LongpiWeb.Router do
   end
 
   # The embed view is meant to be iframed by other apps (e.g. dala's terminal
-  # pane), so drop the SAMEORIGIN frame guard for it. This is a self-hosted
-  # tool; when auth is enabled the page itself still requires sign-in.
+  # pane), so drop the SAMEORIGIN frame guard for it. With auth enabled the
+  # host authenticates the iframe with `?token=<embedToken>` (dala-style
+  # bearer): a valid token marks the session authorized, so the page, its RPC
+  # calls, and the websocket all work without a browser sign-in.
   pipeline :embeddable do
     plug :allow_embedding
+    plug :embed_token_session
   end
 
   # Phoenix 1.8's put_secure_browser_headers guards with CSP
@@ -50,6 +53,16 @@ defmodule LongpiWeb.Router do
     conn
     |> Plug.Conn.delete_resp_header("x-frame-options")
     |> Plug.Conn.put_resp_header("content-security-policy", "base-uri 'self'; frame-ancestors *;")
+  end
+
+  # A valid ?token= authorizes this browser session (RequireAuth honors the
+  # flag), so the embed's follow-up fetches ride the session cookie.
+  defp embed_token_session(conn, _opts) do
+    if Longpi.Auth.verify_embed_token(conn.params["token"]) do
+      Plug.Conn.put_session(conn, :embed_authorized, true)
+    else
+      conn
+    end
   end
 
   # Data plane: everything the SPA fetches. 401s (never redirects) when auth
@@ -89,7 +102,9 @@ defmodule LongpiWeb.Router do
   # pane). The React side renders a chrome-less conversation for `?cwd=`;
   # `?theme=` forces light/dark.
   scope "/", LongpiWeb do
-    pipe_through [:browser, :require_auth_page, :embeddable]
+    # :embeddable must run before the auth gate: a valid ?token= authorizes
+    # the session, which RequireAuth then honors.
+    pipe_through [:browser, :embeddable, :require_auth_page]
 
     get "/embed", PageController, :index
   end

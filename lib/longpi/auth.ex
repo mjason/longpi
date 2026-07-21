@@ -47,4 +47,28 @@ defmodule Longpi.Auth do
   end
 
   def verify_bearer_token(_token), do: :error
+
+  @doc """
+  The embed token — a static secret a HOST app (e.g. dala) appends to its
+  iframe URL (`/embed?token=...`) so the embedded agent works without a browser
+  sign-in. Auto-generated into `<data_dir>/secrets.json` ("embedToken") on
+  first prod boot; overridable via config.jsonc `auth.embedToken` or
+  `LONGPI_EMBED_TOKEN`. Treat it like a password.
+  """
+  def embed_token do
+    case Application.get_env(:longpi, :embed_token) do
+      token when is_binary(token) and token != "" -> token
+      _ -> nil
+    end
+  end
+
+  @doc "Constant-time check of a presented embed token."
+  def verify_embed_token(presented) when is_binary(presented) and presented != "" do
+    case embed_token() do
+      nil -> false
+      token -> Plug.Crypto.secure_compare(presented, token)
+    end
+  end
+
+  def verify_embed_token(_presented), do: false
 end

@@ -27,6 +27,10 @@ if System.get_env("LONGPI_USERS_RESET") in ~w(true 1) do
   config :longpi, bootstrap_users_reset: true
 end
 
+if embed_token = System.get_env("LONGPI_EMBED_TOKEN") do
+  config :longpi, embed_token: embed_token
+end
+
 # config/runtime.exs runs for all environments, including inside a release.
 # Production is configured from ~/.config/longpi/config.jsonc (Longpi.RuntimeConfig),
 # NOT environment variables — see docs/deploy.md. dev/test keep their in-repo
@@ -149,6 +153,20 @@ if config_env() == :prod do
     auth_enabled:
       System.get_env("LONGPI_AUTH_ENABLED", "") in ~w(true 1) or auth_cfg["enabled"] == true,
     bootstrap_users: System.get_env("LONGPI_USERS") || auth_cfg["users"] || "",
+    # Where the bootstrap credentials came from: the seeder warns when a
+    # password is left sitting in config.jsonc (env vars don't persist).
+    bootstrap_users_source:
+      (cond do
+         System.get_env("LONGPI_USERS") not in [nil, ""] -> :env
+         auth_cfg["users"] not in [nil, ""] -> :config
+         true -> :none
+       end),
     bootstrap_users_reset:
-      System.get_env("LONGPI_USERS_RESET") in ~w(true 1) or auth_cfg["usersReset"] == true
+      System.get_env("LONGPI_USERS_RESET") in ~w(true 1) or auth_cfg["usersReset"] == true,
+    # Static token a host app (dala) uses to iframe /embed without a browser
+    # sign-in. Auto-generated into <data_dir>/secrets.json on first boot;
+    # override via auth.embedToken / LONGPI_EMBED_TOKEN.
+    embed_token:
+      System.get_env("LONGPI_EMBED_TOKEN") || auth_cfg["embedToken"] ||
+        RC.secret(cfg, [], "embedToken")
 end

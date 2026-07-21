@@ -7,10 +7,12 @@ let socket: Socket | null = null;
 function getSocket(): Socket {
   if (!socket) {
     // With auth enabled the server embeds the session's bearer token; the
-    // socket is rejected without it (see LongpiWeb.UserSocket).
-    const token = document
-      .querySelector('meta[name="socket-token"]')
-      ?.getAttribute("content");
+    // socket is rejected without it (see LongpiWeb.UserSocket). The embed view
+    // has no signed-in session — its host passes ?token=<embedToken> instead,
+    // which the socket accepts too.
+    const token =
+      document.querySelector('meta[name="socket-token"]')?.getAttribute("content") ||
+      new URLSearchParams(location.search).get("token");
     socket = new Socket("/socket", token ? { params: { token } } : {});
     // @ts-expect-error phoenix's inferred JS types mark params as required,
     // but passing params to connect() is deprecated at runtime.

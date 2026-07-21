@@ -15,7 +15,8 @@ defmodule LongpiWeb.Plugs.RequireAuth do
   def init(opts), do: opts
 
   def call(conn, opts) do
-    if not Longpi.Auth.enabled?() or conn.assigns[:current_user] do
+    if not Longpi.Auth.enabled?() || conn.assigns[:current_user] ||
+         get_session(conn, :embed_authorized) do
       conn
     else
       case Keyword.get(opts, :mode, :page) do

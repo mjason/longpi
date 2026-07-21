@@ -41,11 +41,19 @@
   // "githubToken": "ghp_...",
 
   // Optional sign-in protection (recommended when listenIp is 0.0.0.0).
-  // Accounts are bootstrapped from "users" at boot — remove that line after
-  // the first boot; it only creates accounts that don't exist yet. Set
-  // "usersReset": true for one boot to force the listed passwords.
+  //
+  // Prefer creating accounts WITHOUT a password in this file:
+  //   ~/.local/longpi/current/bin/longpi eval 'Longpi.Release.add_user("a@b.c", "pw")'
+  // (or LONGPI_AUTH="a@b.c:pw" during install.sh). The "users" key also works
+  // as a one-boot bootstrap, but a password left here is a standing leak — the
+  // server warns until you remove it. "usersReset": true forces the listed
+  // passwords for one boot.
+  //
+  // Embedding (iframe in another app, e.g. dala): the host appends
+  // ?token=<embedToken> to /embed URLs. The token is auto-generated into
+  // <dataDir>/secrets.json ("embedToken") on first boot; set it here only to
+  // override. Treat it like a password.
   // "auth": {
-  //   "enabled": true,
-  //   "users": "admin@example.com:changeme123"
+  //   "enabled": true
   // },
 }

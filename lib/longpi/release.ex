@@ -28,6 +28,31 @@ defmodule Longpi.Release do
     Application.fetch_env!(@app, :ecto_repos)
   end
 
+  @doc """
+  Creates (or resets the password of) a local account, straight into the
+  database — the password never touches a config file:
+
+      bin/longpi eval 'Longpi.Release.add_user("admin@example.com", "changeme123")'
+
+  Used by install.sh's first-run auth setup and for later account management.
+  """
+  def add_user(email, password) when is_binary(email) and is_binary(password) do
+    load_app()
+    # Bcrypt hashing needs its NIF started; the repo needs to be running.
+    {:ok, _} = Application.ensure_all_started(:bcrypt_elixir)
+
+    {:ok, _, _} =
+      Ecto.Migrator.with_repo(Longpi.Repo, fn _repo ->
+        Longpi.Accounts.User
+        |> Ash.Changeset.for_create(:seed_user, %{email: email, password: password})
+        |> Ash.create!(authorize?: false)
+
+        IO.puts("account ready: #{email}")
+      end)
+
+    :ok
+  end
+
   defp load_app do
     Application.load(@app)
   end

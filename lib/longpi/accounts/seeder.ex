@@ -30,9 +30,20 @@ defmodule Longpi.Accounts.Seeder do
   @doc "Seeds accounts from the configured `bootstrap_users` string."
   def run do
     reset? = Application.get_env(:longpi, :bootstrap_users_reset, false)
+    pairs = parse(Application.get_env(:longpi, :bootstrap_users) || "")
 
-    for {email, password} <- parse(Application.get_env(:longpi, :bootstrap_users) || "") do
+    for {email, password} <- pairs do
       seed(email, password, reset?)
+    end
+
+    # A password sitting in config.jsonc is a standing leak — it has done its
+    # job once the account exists. (Env vars don't persist, so no nag there.)
+    if pairs != [] and Application.get_env(:longpi, :bootstrap_users_source) == :config do
+      Logger.warning(
+        "accounts: remove \"users\" from config.jsonc's auth block — the account(s) are stored " <>
+          "now, and the plaintext password should not stay on disk. " <>
+          "Use bin/longpi eval 'Longpi.Release.add_user(...)' for future changes."
+      )
     end
 
     :ok

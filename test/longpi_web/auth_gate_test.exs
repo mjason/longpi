@@ -88,6 +88,54 @@ defmodule LongpiWeb.AuthGateTest do
     end
   end
 
+  describe "embed token (host-authenticated iframe)" do
+    setup do
+      Application.put_env(:longpi, :embed_token, "embed-secret-123")
+      on_exit(fn -> Application.delete_env(:longpi, :embed_token) end)
+      :ok
+    end
+
+    test "a valid ?token= opens /embed without a sign-in", %{conn: conn} do
+      enable_auth()
+      conn = get(conn, ~p"/embed?token=embed-secret-123&cwd=/tmp/x")
+      assert html_response(conn, 200)
+      # ...and the session is now authorized for the SPA's follow-up fetches.
+      assert get_session(conn, :embed_authorized) == true
+    end
+
+    test "a wrong token still redirects to sign-in", %{conn: conn} do
+      enable_auth()
+      conn = get(conn, ~p"/embed?token=wrong&cwd=/tmp/x")
+      assert redirected_to(conn) == "/sign-in"
+      refute get_session(conn, :embed_authorized)
+    end
+
+    test "the RPC gate honors the embed-authorized session", %{conn: conn} do
+      enable_auth()
+
+      conn =
+        conn
+        |> Phoenix.ConnTest.init_test_session(%{embed_authorized: true})
+        |> get(~p"/rpc/version")
+
+      assert json_response(conn, 200)
+    end
+
+    test "the websocket accepts the embed token when auth is on" do
+      enable_auth()
+
+      assert {:ok, _socket} =
+               LongpiWeb.UserSocket.connect(
+                 %{"token" => "embed-secret-123"},
+                 %Phoenix.Socket{},
+                 %{}
+               )
+
+      assert :error =
+               LongpiWeb.UserSocket.connect(%{"token" => "nope"}, %Phoenix.Socket{}, %{})
+    end
+  end
+
   describe "embed frame headers" do
     test "/embed can be iframed (frame-ancestors relaxed)", %{conn: conn} do
       conn = get(conn, ~p"/embed")

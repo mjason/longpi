@@ -63,7 +63,17 @@ else
 fi
 
 # --- configuration (first install only) --------------------------------------
+# LONGPI_AUTH="email:password" enables sign-in on first install: the account is
+# written straight to the database (never to a config file) and config.jsonc
+# only carries "auth": {"enabled": true}.
 mkdir -p "$DATA_DIR" "$CONFIG_DIR" "$SERVICE_DIR"
+AUTH_BLOCK=""
+if [ -n "${LONGPI_AUTH:-}" ]; then
+  AUTH_BLOCK='
+  // Sign-in required. Accounts live in the database — manage them with:
+  //   ~/.local/longpi/current/bin/longpi eval '"'"'Longpi.Release.add_user("a@b.c", "pw")'"'"'
+  "auth": { "enabled": true },'
+fi
 if [ ! -f "$CONFIG_FILE" ]; then
   say "writing $CONFIG_FILE"
   cat > "$CONFIG_FILE" <<CFGEOF
@@ -76,7 +86,8 @@ if [ ! -f "$CONFIG_FILE" ]; then
   "host": "localhost",
   "scheme": "http",
   // Enable when behind a reverse proxy reached by a real hostname.
-  "checkOrigin": false
+  "checkOrigin": false,$AUTH_BLOCK
+  "poolSize": 10
 }
 CFGEOF
   chmod 600 "$CONFIG_FILE"
@@ -106,6 +117,16 @@ KillMode=process
 [Install]
 WantedBy=default.target
 EOF
+
+# First-run account, BEFORE the service starts (an auth-enabled boot with zero
+# accounts refuses to start). Password goes straight to the database.
+if [ -n "${LONGPI_AUTH:-}" ]; then
+  AUTH_EMAIL="${LONGPI_AUTH%%:*}"
+  AUTH_PASS="${LONGPI_AUTH#*:}"
+  say "creating account $AUTH_EMAIL"
+  "$ROOT/current/bin/longpi" eval "Longpi.Release.add_user(~s($AUTH_EMAIL), ~s($AUTH_PASS))" ||
+    die "could not create the account (password must be at least 8 characters)"
+fi
 
 systemctl --user daemon-reload
 systemctl --user enable "$SERVICE_NAME" >/dev/null 2>&1 || true

@@ -472,13 +472,19 @@ export function ConversationPane({
   conversation,
   onModelChanged,
   onTitled,
+  threadList,
+  headerExtra,
 }: {
   conversation: ConversationSummary;
   onModelChanged: (id: string, model: string) => void;
   onTitled: (id: string, title: string) => void;
+  /** Embed mode: per-workspace conversation list for assistant-ui's ThreadList. */
+  threadList?: import("@assistant-ui/react").ExternalStoreThreadListAdapter;
+  /** Embed mode: extra controls rendered at the right edge of the header. */
+  headerExtra?: React.ReactNode;
 }) {
   const { runtime, compactionCount, notices, usage, currentModel, setModel, reasoningEffort, setReasoning, title, commands, regenerate } =
-    useChannelRuntime(conversation.id, conversation.model);
+    useChannelRuntime(conversation.id, conversation.model, threadList);
 
   const modelCtx = useMemo(
     () => ({ model: currentModel, setModel }),
@@ -535,6 +541,7 @@ export function ConversationPane({
               context compacted{compactionCount > 1 ? ` ×${compactionCount}` : ""}
             </span>
           )}
+          {headerExtra}
         </header>
 
         <div className="min-h-0 flex-1">

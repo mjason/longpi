@@ -1,6 +1,7 @@
 import {
   type AppendMessage,
   CompositeAttachmentAdapter,
+  type ExternalStoreThreadListAdapter,
   SimpleImageAttachmentAdapter,
   SimpleTextAttachmentAdapter,
   type ThreadMessageLike,
@@ -82,7 +83,13 @@ export function toUiAttachments(attachments: MessageAttachment[]) {
  * to assistant-ui's message shape and forwards new user messages to the
  * channel.
  */
-export function useChannelRuntime(conversationId: string, defaultModel: string) {
+export function useChannelRuntime(
+  conversationId: string,
+  defaultModel: string,
+  // Optional thread list (assistant-ui's ThreadList component reads it) — the
+  // embed view uses this for per-workspace conversation switching.
+  threadList?: ExternalStoreThreadListAdapter,
+) {
   const {
     items,
     status,
@@ -111,7 +118,7 @@ export function useChannelRuntime(conversationId: string, defaultModel: string) 
   const runtime = useExternalStoreRuntime({
     messages,
     isRunning: status === "running",
-    adapters: { attachments: attachmentAdapter },
+    adapters: { attachments: attachmentAdapter, ...(threadList ? { threadList } : {}) },
     onNew: async (message: AppendMessage) => {
       const text = message.content
         .filter((part): part is { type: "text"; text: string } => part.type === "text")
