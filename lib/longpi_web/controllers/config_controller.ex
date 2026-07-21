@@ -24,4 +24,13 @@ defmodule LongpiWeb.ConfigController do
       {:error, message} -> conn |> put_status(422) |> json(%{error: message})
     end
   end
+
+  def sessions(conn, _params) do
+    json(conn, %{sessions: Longpi.Agent.Sessions.list_active()})
+  end
+
+  def stop_session(conn, %{"conversation_id" => id}) do
+    Longpi.Agent.Sessions.stop(id)
+    json(conn, %{ok: true})
+  end
 end

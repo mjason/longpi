@@ -99,6 +99,30 @@ export async function loadDefaults(): Promise<{ systemPrompt: string }> {
   return { systemPrompt: body.system_prompt ?? "" };
 }
 
+export type SessionRow = {
+  conversation_id: string;
+  status: string;
+  model: string;
+  cwd: string;
+  tools: number;
+  commands: number;
+  "extensions?": boolean;
+};
+
+export async function loadSessions(): Promise<SessionRow[]> {
+  const res = await fetch("/rpc/sessions", { headers: buildCSRFHeaders() });
+  if (!res.ok) return [];
+  return (await res.json()).sessions ?? [];
+}
+
+export async function stopSession(conversationId: string): Promise<void> {
+  await fetch("/rpc/sessions/stop", {
+    method: "POST",
+    headers: { ...buildCSRFHeaders(), "content-type": "application/json" },
+    body: JSON.stringify({ conversation_id: conversationId }),
+  });
+}
+
 export type ProviderRow = {
   id: string;
   name: string;

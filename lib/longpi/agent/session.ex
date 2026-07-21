@@ -122,6 +122,9 @@ defmodule Longpi.Agent.Session do
   @doc "Extension slash commands + host pid, for the channel to route `/commands`."
   def ext_info(session), do: GenServer.call(session, :ext_info)
 
+  @doc "A snapshot of this session for the management dashboard."
+  def summary(session), do: GenServer.call(session, :summary)
+
   @doc """
   Hot-reloads the extension host: re-discovers extension files/packages and
   rebuilds the toolbox and command list. Returns `{:ok, %{tools, commands}}`.
@@ -250,6 +253,18 @@ defmodule Longpi.Agent.Session do
 
   def handle_call(:ext_info, _from, state),
     do: {:reply, %{commands: state.ext_commands, host: state.ext_host}, state}
+
+  def handle_call(:summary, _from, state) do
+    {:reply,
+     %{
+       status: state.status,
+       model: state.model,
+       cwd: state.ctx.cwd,
+       tools: map_size(state.toolbox),
+       extensions?: not is_nil(state.ext_host),
+       commands: length(state.ext_commands)
+     }, state}
+  end
 
   def handle_call(:reload_extensions, _from, %{ext_host: nil} = state),
     do: {:reply, {:error, :no_extensions}, state}

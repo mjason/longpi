@@ -20,6 +20,17 @@ defmodule Longpi.Agent.Sessions do
     end
   end
 
+  @doc "Snapshots of every running session, for the management dashboard."
+  @spec list_active() :: [map()]
+  def list_active do
+    Registry.select(@registry, [{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+    |> Enum.map(fn {conversation_id, pid} ->
+      pid |> Session.summary() |> Map.put(:conversation_id, conversation_id)
+    end)
+  rescue
+    _ -> []
+  end
+
   @spec whereis(String.t()) :: pid() | nil
   def whereis(conversation_id) do
     case Registry.lookup(@registry, conversation_id) do

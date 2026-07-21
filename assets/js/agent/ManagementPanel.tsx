@@ -12,6 +12,7 @@ import { useState } from "react";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { ConversationsSection } from "./sections/ConversationsSection";
+import { SessionsSection } from "./sections/SessionsSection";
 import { GeneralTab, ModelsTab, ProvidersTab, ToolsTab } from "./SettingsDialog";
 
 type SectionId =
@@ -91,7 +92,7 @@ const SECTIONS: Section[] = [
     description: "Live agent processes running right now.",
     icon: Boxes,
     group: "Data",
-    render: () => <Placeholder what="Active sessions" />,
+    render: () => <SessionsSection />,
   },
 ];
 

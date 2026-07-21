@@ -46,6 +46,8 @@ defmodule LongpiWeb.Router do
     get "/rpc/tool-catalog", ConfigController, :tool_catalog
     get "/rpc/config-defaults", ConfigController, :defaults
     post "/rpc/discover-models", ConfigController, :discover_models
+    get "/rpc/sessions", ConfigController, :sessions
+    post "/rpc/sessions/stop", ConfigController, :stop_session
     post "/rpc/run", AshTypescriptRpcController, :run
     post "/rpc/validate", AshTypescriptRpcController, :validate
     get "/ash-typescript", PageController, :index
