@@ -123,13 +123,15 @@ export function ConversationsSection() {
                     {new Date(row.insertedAt).toLocaleDateString()}
                   </TableCell>
                   <TableCell>
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       onClick={() => remove([row.id])}
                       aria-label="Delete conversation"
-                      className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-destructive"
+                      className="size-7 text-muted-foreground hover:text-destructive"
                     >
                       <Trash2 className="size-4" />
-                    </button>
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}

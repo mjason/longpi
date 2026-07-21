@@ -144,12 +144,14 @@ export function GeneralTab() {
             {isDefault ? "Using the built-in default." : "Customized."}
           </span>
           {!isDefault && (
-            <button
-              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
               onClick={() => setSystemPrompt(defaultPrompt)}
             >
               <RotateCcw className="size-3" /> reset to default
-            </button>
+            </Button>
           )}
         </div>
         <Textarea
@@ -321,13 +323,15 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
           <KeyRound className="size-3" />
           {provider.configured ? "key set" : "no key"}
         </span>
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           onClick={remove}
           aria-label="Remove provider"
-          className="rounded-md p-1 text-muted-foreground hover:bg-background hover:text-destructive"
+          className="size-7 text-muted-foreground hover:text-destructive"
         >
           <Trash2 className="size-4" />
-        </button>
+        </Button>
       </div>
       <Input
         placeholder="display name (e.g. listenai)"
@@ -422,12 +426,14 @@ export function ToolsTab() {
             <div className="flex items-center gap-2">
               <span className="font-mono text-sm font-semibold">{tool.name}</span>
               {!isDefault && (
-                <button
-                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 px-1.5 text-xs text-muted-foreground hover:text-foreground"
                   onClick={() => setDrafts((d) => ({ ...d, [tool.name]: tool.default_description }))}
                 >
                   <RotateCcw className="size-3" /> reset
-                </button>
+                </Button>
               )}
             </div>
             <Textarea

@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
+import { Button } from "../components/ui/button";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { ConversationsSection } from "./sections/ConversationsSection";
@@ -138,19 +139,20 @@ function ManagementPanel({
                 </div>
                 <div className="space-y-0.5">
                   {SECTIONS.filter((s) => s.group === group).map((s) => (
-                    <button
+                    <Button
                       key={s.id}
+                      variant={s.id === active ? "secondary" : "ghost"}
                       onClick={() => onSelect(s.id)}
                       className={cn(
-                        "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
+                        "w-full justify-start gap-2.5 px-2.5 font-normal",
                         s.id === active
-                          ? "bg-accent font-medium text-foreground"
-                          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                          ? "font-medium"
+                          : "text-muted-foreground hover:text-foreground",
                       )}
                     >
                       <s.icon className="size-4 shrink-0" />
                       {s.label}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
@@ -166,12 +168,14 @@ function ManagementPanel({
             <p className="mt-0.5 text-sm text-muted-foreground">{section.description}</p>
           </div>
           <div className="flex-1" />
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={onClose}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="text-muted-foreground hover:text-foreground"
           >
             <X className="size-4" /> Close
-          </button>
+          </Button>
         </header>
 
         <ScrollArea className="flex-1">

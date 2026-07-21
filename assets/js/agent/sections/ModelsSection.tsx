@@ -91,19 +91,22 @@ export function ModelsSection() {
                 {enabledCount}/{rows.length} enabled
               </span>
               <div className="flex-1" />
-              <button
-                className="text-xs text-muted-foreground hover:text-foreground"
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
                 onClick={() => setEnabledForMany(rows, !allOn)}
               >
                 {allOn ? "Disable all" : "Enable all"}
-              </button>
-              <span className="text-border">·</span>
-              <button
-                className="text-xs text-muted-foreground hover:text-destructive"
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
                 onClick={() => removeMany(rows)}
               >
                 Remove all
-              </button>
+              </Button>
             </div>
             <div className="divide-y divide-border">
               {rows.map((m) => (
@@ -127,13 +130,15 @@ export function ModelsSection() {
                   <span className={cn("flex-1 truncate font-mono", !m.enabled && "text-muted-foreground")}>
                     {modelOf(m.spec)}
                   </span>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => removeMany([m])}
                     aria-label="Remove model"
-                    className="rounded p-1 text-muted-foreground hover:text-destructive"
+                    className="size-7 text-muted-foreground hover:text-destructive"
                   >
                     <Trash2 className="size-3.5" />
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>

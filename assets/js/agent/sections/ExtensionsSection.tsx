@@ -98,13 +98,15 @@ export function ExtensionsSection() {
                 <Package className="size-4 text-muted-foreground" />
                 <span className="font-mono font-medium">{n}</span>
                 <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{s}</span>
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => persist(packages.filter(([k]) => k !== n))}
                   aria-label="Remove package"
-                  className="rounded-md p-1 text-muted-foreground hover:text-destructive"
+                  className="size-7 text-muted-foreground hover:text-destructive"
                 >
                   <Trash2 className="size-4" />
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -204,13 +206,15 @@ function SecretsSection() {
               <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
                 ••••••••
               </span>
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => remove(n)}
                 aria-label="Remove secret"
-                className="rounded-md p-1 text-muted-foreground hover:text-destructive"
+                className="size-7 text-muted-foreground hover:text-destructive"
               >
                 <Trash2 className="size-4" />
-              </button>
+              </Button>
             </div>
           ))}
         </div>
