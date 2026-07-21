@@ -11,6 +11,7 @@ import {
 import { useState } from "react";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
+import { ConversationsSection } from "./sections/ConversationsSection";
 import { GeneralTab, ModelsTab, ProvidersTab, ToolsTab } from "./SettingsDialog";
 
 type SectionId =
@@ -82,7 +83,7 @@ const SECTIONS: Section[] = [
     description: "Every conversation, with usage and cleanup.",
     icon: MessagesSquare,
     group: "Data",
-    render: () => <Placeholder what="Conversation management" />,
+    render: () => <ConversationsSection />,
   },
   {
     id: "sessions",
