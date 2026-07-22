@@ -23,9 +23,11 @@ defmodule Longpi.Agent.SystemPromptTest do
     # never mentions /reload (a negative "don't say /reload" would just prime it).
     assert prompt =~ "automatically"
     refute prompt =~ "/reload"
-    # Secrets go in the app UI, not the OS env; built-in tools over system utils.
+    # Secrets go in the app UI; the prompt states what to use (built-in
+    # write/edit) rather than listing counter-examples to shun.
     assert prompt =~ "Settings"
-    assert prompt =~ "apply_patch"
+    assert prompt =~ "built-in write/edit tools"
+    refute prompt =~ "apply_patch"
     assert prompt =~ Path.join([priv, "ext_host", "README.md"])
     assert prompt =~ Path.join([priv, "ext_host", "examples"])
     # No placeholders leak through.

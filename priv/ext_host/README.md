@@ -16,8 +16,7 @@ Discovered per session, project-local winning over global on name conflicts
 
 One level deep in an `extensions/` dir: a `*.js` / `*.mjs` file, or a
 subdirectory with an `index.js`. Newly written or edited files are picked up
-automatically — the system reloads the host for you; never ask the user to
-run /reload.
+automatically — the system handles reloading for you.
 
 ## The runtime (read this before writing code)
 
@@ -30,16 +29,19 @@ fine). What you have:
   `body`. The response has `ok`, `status`, `headers.get(name)`,
   `await res.text()`, `await res.json()`.
 - `process.env.<NAME>` — secrets stored under Settings → Extensions →
-  Secrets, injected fresh on every call. Never hard-code keys.
+  Secrets, injected fresh on every call; keys belong there, code reads them
+  from the environment.
 - `longpi.run(cmd, args, opts)` — run a program installed on the machine
   (python3, a Go binary, git, …) and get `{ status, stdout, stderr }`.
   This is the escape hatch when JavaScript alone is not enough.
 - `console.log(...)` — goes to the server log (stderr), for debugging.
 
-What you do NOT have: Node APIs (`fs`, `path`, `Buffer`, `require`), npm
-packages, TypeScript type annotations (a `.ts` file loads only if its content
-is plain JavaScript), timers, or direct filesystem/network access. If a task
-needs those, use `longpi.run` to delegate to a real program on the system.
+That list is the complete runtime: plain QuickJS plus those four host
+capabilities. Anything from the Node/npm world (`fs`, `Buffer`, `require`,
+package imports), TypeScript type annotations, and timers live outside the
+sandbox — when a task calls for them, delegate to a real program on the
+system with `longpi.run`. A `.ts` filename loads as long as its content is
+plain JavaScript.
 
 ## Writing an extension
 

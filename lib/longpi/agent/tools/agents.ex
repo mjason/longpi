@@ -86,7 +86,7 @@ defmodule Longpi.Agent.Tools.SpawnAgent do
     Delegate when work is parallelizable (e.g. several independent scouts) or a
     self-contained implementation task; do the work yourself when it needs your
     conversation context or back-and-forth decisions. Spawn all subagents first,
-    then call wait_agent once — don't wait after each spawn.
+    then collect everything with a single wait_agent call.
     """
   end
 
@@ -257,7 +257,8 @@ defmodule Longpi.Agent.Tools.SendAgent do
     """
     Send a follow-up message to a subagent. If it already finished, this starts
     a new turn with your message; if it is still working, pass interrupt: true
-    to redirect it (otherwise this fails so you don't derail it mid-task).
+    to redirect it (a plain send to a busy agent is rejected, protecting the
+    work in progress).
     """
   end
 

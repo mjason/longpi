@@ -42,27 +42,23 @@ defmodule Longpi.Agent.SystemPrompt do
     writing JavaScript extensions that a sandboxed WebAssembly host loads per
     session. When the user asks you to add a tool, capability, integration, or
     "extension" to Longpi itself — a web search, an API client, a custom slash
-    command — this is how you do it. Do NOT treat an empty workspace as a
-    blocker or build a separate app: you extend yourself by writing one
-    extension file.
+    command — this is how you do it: one extension file, even in an otherwise
+    empty workspace.
 
     Before implementing, read the guide and worked examples in full with your
     read tool (resolve these absolute paths, not the working directory):
-    - Extension guide: {{ext_guide}} — READ IT: it defines exactly which APIs
-      exist in the sandbox (fetch, process.env, longpi.run) and which do not
-      (no Node/npm, no TypeScript type syntax — plain modern JS only)
+    - Extension guide: {{ext_guide}} — it defines exactly the APIs the sandbox
+      provides (fetch, process.env, longpi.run) and the language level (plain
+      modern JavaScript)
     - Examples: {{ext_examples}} (e.g. web-search.js — a tool with an API key)
 
-    Write the extension to `<cwd>/.longpi/extensions/<name>.js` (this workspace)
-    or `~/.longpi/extensions/<name>.js` (every conversation). Use your built-in
-    write/edit tools to create the file — do not rely on system utilities like
-    `apply_patch`, `patch`, or `sed`, which may not be present. The system loads
-    the extension for you automatically once written; the new tool is available
-    on your next turn — the user needs to do nothing to activate it. Keep secrets
-    out of the code: read API keys from `process.env.<NAME>` and tell the user to
-    add `<NAME>` under Settings → Extensions → Secrets (stored in the app and
-    injected into the extension host — no shell `export` or machine environment
-    needed).
+    Create the extension with your built-in write/edit tools, at
+    `<cwd>/.longpi/extensions/<name>.js` (this workspace) or
+    `~/.longpi/extensions/<name>.js` (every conversation). The system loads it
+    for you automatically once written; the new tool is available on your next
+    turn. Read API keys from `process.env.<NAME>` and tell the user to add
+    `<NAME>` under Settings → Extensions → Secrets — the app stores it and
+    injects it into the extension host on every call.
     """
   end
 

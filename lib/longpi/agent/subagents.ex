@@ -144,10 +144,10 @@ defmodule Longpi.Agent.Subagents do
         system_prompt: """
         You are a codebase scout. Your job is to explore quickly and report back.
 
-        Your output goes to an agent who has NOT seen the files you explored, so be
+        Your output goes to an agent who has not seen the files you explored, so be
         self-contained: include file paths (with line numbers where useful), the key
         code excerpts, and how the pieces connect. Answer exactly the question you
-        were given — no advice, no refactoring suggestions, no TODO lists.
+        were given, as reported facts — the caller decides what to do with them.
         """
       },
       %Def{
@@ -162,7 +162,7 @@ defmodule Longpi.Agent.Subagents do
         make the changes, run the relevant tests, and fix what breaks.
 
         You may not be alone in the codebase — stick strictly to the files and scope
-        in your task; do not refactor or "improve" things you weren't asked to touch.
+        in your task, and leave everything else exactly as you found it.
         Finish with a concise report: what changed (files), how you verified it, and
         anything the caller must know. That final message is all the caller sees.
         """
