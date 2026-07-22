@@ -48,13 +48,14 @@ defmodule Longpi.Agent.SystemPrompt do
     Before implementing, read the guide and worked examples in full with your
     read tool (resolve these absolute paths, not the working directory):
     - Extension guide: {{ext_guide}} — it defines exactly the APIs the sandbox
-      provides (fetch, process.env, longpi.run) and the language level (plain
-      modern JavaScript)
+      provides (fetch, process.env, longpi.run); the code runs in QuickJS, and
+      JavaScript or TypeScript both work (TS type annotations are stripped
+      automatically before running)
     - Examples: {{ext_examples}} (e.g. web-search.js — a tool with an API key)
 
     Create the extension with your built-in write/edit tools, at
-    `<cwd>/.longpi/extensions/<name>.js` (this workspace) or
-    `~/.longpi/extensions/<name>.js` (every conversation). The system loads it
+    `<cwd>/.longpi/extensions/<name>.{js,ts}` (this workspace) or
+    `~/.longpi/extensions/<name>.{js,ts}` (every conversation). The system loads it
     for you automatically once written; the new tool is available on your next
     turn. Read API keys from `process.env.<NAME>` and tell the user to add
     `<NAME>` under Settings → Extensions → Secrets — the app stores it and

@@ -20,9 +20,10 @@ automatically — the system handles reloading for you.
 
 ## The runtime (read this before writing code)
 
-Extensions run in **QuickJS**, not Node or a browser. Write plain modern
-JavaScript (ES2020+ syntax: modules, async/await, optional chaining are all
-fine). What you have:
+Extensions run in **QuickJS**, not Node or a browser. Write modern JavaScript
+or TypeScript (ES2020+ syntax: modules, async/await, optional chaining are all
+fine). TypeScript type annotations are stripped automatically before the code
+runs — types are erased, never checked. What you have:
 
 - `fetch(url, options)` — HTTP(S), brokered by the app (timeouts and size
   limits enforced outside the sandbox). `options`: `method`, `headers`,
@@ -38,10 +39,10 @@ fine). What you have:
 
 That list is the complete runtime: plain QuickJS plus those four host
 capabilities. Anything from the Node/npm world (`fs`, `Buffer`, `require`,
-package imports), TypeScript type annotations, and timers live outside the
-sandbox — when a task calls for them, delegate to a real program on the
-system with `longpi.run`. A `.ts` filename loads as long as its content is
-plain JavaScript.
+package imports) and timers live outside the sandbox — when a task calls for
+them, delegate to a real program on the system with `longpi.run`. TypeScript
+is fine (annotations are stripped), but the *runtime* is still QuickJS: TS
+types buy you nothing at run time and Node/npm APIs remain unavailable.
 
 ## Writing an extension
 
