@@ -1,7 +1,7 @@
 defmodule Longpi.Agent.ToolSpec do
   @moduledoc """
   A uniform tool the agent can call — whether a built-in Elixir module or a
-  tool contributed by an extension (wasm host).
+  tool contributed by an extension (native QuickJS host).
 
   `schema` is either a NimbleOptions keyword list (built-ins, validated before
   `run`) or a raw JSON Schema map (extension tools, whose own handler validates

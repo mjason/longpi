@@ -85,8 +85,8 @@ defmodule Longpi.Extensions.HostTest do
         name: "shell_echo",
         description: "Echoes via the system echo.",
         parameters: { type: "object", properties: { text: { type: "string" } } },
-        execute(args) {
-          const res = longpi.run("echo", [args.text]);
+        async execute(args) {
+          const res = await longpi.run("echo", [args.text]);
           return `status=${res.status} out=${res.stdout.trim()}`;
         },
       });

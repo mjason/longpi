@@ -1,0 +1,26 @@
+[package]
+name = "longpi_js"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "longpi_js"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.36"
+rquickjs = { version = "0.12", features = ["full-async"] }
+tokio = { version = "1", features = ["rt", "macros", "time", "process", "sync", "io-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2"] }
+getrandom = "0.2"
+
+# TypeScript type-stripping (extensions are authored in TS; QuickJS runs JS).
+oxc_allocator = "0.90"
+oxc_parser = "0.90"
+oxc_span = "0.90"
+oxc_semantic = "0.90"
+oxc_codegen = "0.90"
+oxc_transformer = "0.90"
+
+[profile.release]
+lto = "thin"

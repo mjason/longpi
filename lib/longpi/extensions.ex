@@ -18,7 +18,7 @@ defmodule Longpi.Extensions do
   @doc """
   Whether an extension host is needed for this workspace at all: true only
   when some extension entry exists (global or project `*.ts`/`*.js`/`*.mjs`
-  file, or a `subdir/index.ts|js`). Sessions skip booting the wasm guest
+  file, or a `subdir/index.ts|js`). Sessions skip booting the QuickJS host
   otherwise — the common no-extensions case costs nothing.
   """
   @spec any_for?(String.t()) :: boolean()

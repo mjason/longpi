@@ -23,7 +23,7 @@ defmodule Longpi.MixProject do
   # toolchain on the target. Runtime configuration is NOT baked in — the release
   # reads ~/.config/longpi/config.jsonc at boot (config/runtime.exs +
   # Longpi.RuntimeConfig), so no environment variables are needed to deploy.
-  # Extensions run in an embedded WebAssembly host — no runtime needed on the target.
+  # Extensions run in an embedded native QuickJS (rquickjs) host — no runtime needed on the target.
   defp releases do
     [
       longpi: [

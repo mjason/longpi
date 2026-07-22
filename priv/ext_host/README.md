@@ -32,9 +32,9 @@ runs — types are erased, never checked. What you have:
 - `process.env.<NAME>` — secrets stored under Settings → Extensions →
   Secrets, injected fresh on every call; keys belong there, code reads them
   from the environment.
-- `longpi.run(cmd, args, opts)` — run a program installed on the machine
-  (python3, a Go binary, git, …) and get `{ status, stdout, stderr }`.
-  This is the escape hatch when JavaScript alone is not enough.
+- `await longpi.run(cmd, args, opts)` — run a program installed on the machine
+  (python3, a Go binary, git, …) and get `{ status, stdout, stderr }`. It's
+  async, so `await` it. This is the escape hatch when JS alone is not enough.
 - `console.log(...)` — goes to the server log (stderr), for debugging.
 
 That list is the complete runtime: plain QuickJS plus those four host
