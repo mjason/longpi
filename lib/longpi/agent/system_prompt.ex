@@ -39,7 +39,7 @@ defmodule Longpi.Agent.SystemPrompt do
     ## Extending yourself (self-evolution)
 
     Your agent loop runs in Elixir, but you can give yourself new tools by
-    writing JavaScript extensions that a sandboxed WebAssembly host loads per
+    writing JavaScript or TypeScript extensions that an embedded QuickJS host runs per
     session. When the user asks you to add a tool, capability, integration, or
     "extension" to Longpi itself — a web search, an API client, a custom slash
     command — this is how you do it: one extension file, even in an otherwise

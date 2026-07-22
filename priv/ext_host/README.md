@@ -1,10 +1,10 @@
 # longpi extensions
 
 longpi's agent loop runs in Elixir, but its capabilities can be extended with
-JavaScript. Each conversation gets a **sandboxed WebAssembly extension host**
-(QuickJS running under wasmtime, embedded in the app — nothing to install on
-the machine); it loads your extensions and executes their tools, with the
-Elixir brain driving the agent loop over a frame protocol.
+JavaScript or TypeScript. Each conversation gets an **embedded QuickJS host**
+(native, via rquickjs — nothing to install on the machine); it loads your
+extensions and runs their tools, with capabilities (`fetch`, `crypto`,
+`console`, and `longpi.run`) provided as host functions.
 
 ## Where extensions live
 

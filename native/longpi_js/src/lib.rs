@@ -30,7 +30,7 @@ use rustler::{Binary, Encoder, Env, LocalPid, NifResult, OwnedBinary, OwnedEnv, 
 use tokio::sync::{mpsc, oneshot};
 
 mod atoms {
-    rustler::atoms! { ok, error, js_loaded, js_result, js_capability }
+    rustler::atoms! { ok, error, js_loaded, js_result, js_capability, js_down }
 }
 
 const MEMORY_LIMIT: usize = 64 * 1024 * 1024;
@@ -91,12 +91,15 @@ enum Command {
         call_id: u64,
         name: String,
         args_json: String,
+        cwd: String,
         env: Vec<(String, String)>,
     },
     CallCommand {
         call_id: u64,
         name: String,
-        arg: String,
+        args_json: String,
+        cwd: String,
+        env: Vec<(String, String)>,
     },
     FireEvent {
         event: String,
@@ -179,6 +182,9 @@ fn start(env: Env, id: u64) -> NifResult<ResourceArc<Instance>> {
             if result.is_err() {
                 eprintln!("[longpi-js:{id}] runtime thread panicked and stopped");
             }
+            // Tell the owner the instance is gone so it can fail pending calls
+            // and restart, instead of hanging every future call to its timeout.
+            send_to(&owner, move |e| (atoms::js_down(), id).encode(e));
         })
         .map_err(|e| rustler::Error::Term(Box::new(e.to_string())))?;
 
@@ -217,12 +223,14 @@ fn call_tool(
     call_id: u64,
     name: String,
     args_json: String,
+    cwd: String,
     env: Vec<(String, String)>,
 ) -> rustler::Atom {
     let _ = instance.tx.send(Command::CallTool {
         call_id,
         name,
         args_json,
+        cwd,
         env,
     });
     atoms::ok()
@@ -233,12 +241,16 @@ fn call_command(
     instance: ResourceArc<Instance>,
     call_id: u64,
     name: String,
-    arg: String,
+    args_json: String,
+    cwd: String,
+    env: Vec<(String, String)>,
 ) -> rustler::Atom {
     let _ = instance.tx.send(Command::CallCommand {
         call_id,
         name,
-        arg,
+        args_json,
+        cwd,
+        env,
     });
     atoms::ok()
 }
@@ -318,9 +330,9 @@ async fn run_instance(
             break;
         }
 
-        // A call that must be answered, so a panic mid-command doesn't leave
-        // the caller hanging until its timeout.
-        let reply_id = cmd.reply_id();
+        // What to answer if this command panics, so a panic never leaves a
+        // caller (or the host's load wait) hanging until its timeout.
+        let reply_id = cmd.reply_kind();
 
         // Isolate each command: a panic (a resumed rquickjs callback panic, or
         // a bug in ours) is caught here so it kills only this call, never the
@@ -331,11 +343,20 @@ async fn run_instance(
 
         if outcome.is_err() {
             eprintln!("[longpi-js:{id}] command panicked; instance kept alive");
-            if let Some(call_id) = reply_id {
-                send_to(&owner, move |e| {
+            match reply_id {
+                Reply::Call(call_id) => send_to(&owner, move |e| {
                     let content = binary_term(e, b"extension runtime error (panic)");
                     (atoms::js_result(), id, call_id, false, content).encode(e)
-                });
+                }),
+                // A panicked load still needs a reply, else the host waits
+                // ready?:false to its timeout.
+                Reply::Load => send_to(&owner, move |e| {
+                    let tools: Vec<(String, String, String)> = vec![];
+                    let commands: Vec<(String, String)> = vec![];
+                    let errors = vec![("<load>".to_string(), "load panicked".to_string())];
+                    (atoms::js_loaded(), id, tools, commands, errors).encode(e)
+                }),
+                Reply::None => {}
             }
         }
 
@@ -349,13 +370,20 @@ async fn run_instance(
     rt.idle().await;
 }
 
+enum Reply {
+    Call(u64),
+    Load,
+    None,
+}
+
 impl Command {
-    fn reply_id(&self) -> Option<u64> {
+    fn reply_kind(&self) -> Reply {
         match self {
             Command::CallTool { call_id, .. } | Command::CallCommand { call_id, .. } => {
-                Some(*call_id)
+                Reply::Call(*call_id)
             }
-            _ => None,
+            Command::Load { .. } => Reply::Load,
+            _ => Reply::None,
         }
     }
 }
@@ -381,10 +409,12 @@ async fn handle_command(
             call_id,
             name,
             args_json,
+            cwd,
             env,
         } => {
             apply_env(ctx, &env).await;
-            let (ok, content) = call_registered(ctx, registry, Kind::Tool, &name, &args_json).await;
+            let (ok, content) =
+                call_registered(ctx, registry, Kind::Tool, &name, &args_json, &cwd).await;
             send_to(&owner, move |e| {
                 let content = binary_term(e, content.as_bytes());
                 (atoms::js_result(), id, call_id, ok, content).encode(e)
@@ -393,11 +423,13 @@ async fn handle_command(
         Command::CallCommand {
             call_id,
             name,
-            arg,
+            args_json,
+            cwd,
+            env,
         } => {
-            let arg_json = serde_arg(&arg);
+            apply_env(ctx, &env).await;
             let (ok, content) =
-                call_registered(ctx, registry, Kind::Command, &name, &arg_json).await;
+                call_registered(ctx, registry, Kind::Command, &name, &args_json, &cwd).await;
             send_to(&owner, move |e| {
                 let content = binary_term(e, content.as_bytes());
                 (atoms::js_result(), id, call_id, ok, content).encode(e)
@@ -421,13 +453,6 @@ impl Registry {
         self.tool_order.clear();
         self.command_order.clear();
     }
-}
-
-// Wrap a raw command argument (a plain string) as a JSON string literal so the
-// JS side receives it as the first execute() argument.
-fn serde_arg(arg: &str) -> String {
-    let escaped = arg.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n");
-    format!("\"{escaped}\"")
 }
 
 fn registry_summary(
@@ -468,6 +493,40 @@ globalThis.crypto.randomUUID = () => __uuid();
 
 globalThis.process = globalThis.process || {};
 globalThis.process.env = globalThis.process.env || {};
+
+if (typeof globalThis.TextEncoder === "undefined") {
+  globalThis.TextEncoder = class {
+    encode(str) {
+      const out = [];
+      for (const ch of String(str)) {
+        let cp = ch.codePointAt(0);
+        if (cp < 0x80) out.push(cp);
+        else if (cp < 0x800) out.push(0xc0 | (cp >> 6), 0x80 | (cp & 63));
+        else if (cp < 0x10000) out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));
+        else out.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));
+      }
+      return new Uint8Array(out);
+    }
+  };
+  globalThis.TextDecoder = class {
+    decode(bytes) {
+      const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+      let out = "";
+      for (let i = 0; i < b.length; ) {
+        const c = b[i];
+        let cp, n;
+        if (c < 0x80) { cp = c; n = 0; }
+        else if (c < 0xe0) { cp = c & 31; n = 1; }
+        else if (c < 0xf0) { cp = c & 15; n = 2; }
+        else { cp = c & 7; n = 3; }
+        for (let j = 1; j <= n; j++) cp = (cp << 6) | (b[i + j] & 63);
+        out += String.fromCodePoint(cp);
+        i += n + 1;
+      }
+      return out;
+    }
+  };
+}
 
 globalThis.fetch = async (url, options = {}) => {
   const res = JSON.parse(await __http(JSON.stringify({
@@ -655,6 +714,7 @@ async fn call_registered(
     kind: Kind,
     name: &str,
     args_json: &str,
+    cwd: &str,
 ) -> (bool, String) {
     let execute = {
         let reg = registry.borrow();
@@ -673,11 +733,13 @@ async fn call_registered(
     };
 
     let args_json = args_json.to_string();
+    let cwd = cwd.to_string();
     rquickjs::async_with!(ctx => |ctx| {
         let run = async {
             let execute = execute.clone().restore(&ctx)?;
             let args: Value = ctx.json_parse(args_json)?;
             let ctx_obj = Object::new(ctx.clone())?;
+            ctx_obj.set("cwd", cwd.as_str())?;
             let result: Value = execute.call((args, ctx_obj))?;
             let text = if let Some(promise) = result.as_promise() {
                 promise.clone().into_future::<Value>().await?
@@ -966,9 +1028,10 @@ impl JsonObjExt for Vec<(String, Json)> {
 fn json_parse(s: &str) -> Option<Json> {
     let mut chars: Vec<char> = s.chars().collect();
     let mut pos = 0;
-    let v = parse_value(&mut chars, &mut pos)?;
-    Some(v)
+    parse_value(&mut chars, &mut pos, 0)
 }
+
+const JSON_MAX_DEPTH: usize = 256;
 
 fn skip_ws(c: &[char], p: &mut usize) {
     while *p < c.len() && c[*p].is_whitespace() {
@@ -976,11 +1039,14 @@ fn skip_ws(c: &[char], p: &mut usize) {
     }
 }
 
-fn parse_value(c: &mut Vec<char>, p: &mut usize) -> Option<Json> {
+fn parse_value(c: &mut Vec<char>, p: &mut usize, depth: usize) -> Option<Json> {
+    if depth > JSON_MAX_DEPTH {
+        return None;
+    }
     skip_ws(c, p);
     match c.get(*p)? {
-        '{' => parse_obj(c, p),
-        '[' => parse_arr(c, p),
+        '{' => parse_obj(c, p, depth),
+        '[' => parse_arr(c, p, depth),
         '"' => parse_str(c, p).map(Json::Str),
         't' => {
             *p += 4;
@@ -1042,7 +1108,7 @@ fn parse_num(c: &mut Vec<char>, p: &mut usize) -> Option<Json> {
     s.parse::<f64>().ok().map(Json::Num)
 }
 
-fn parse_arr(c: &mut Vec<char>, p: &mut usize) -> Option<Json> {
+fn parse_arr(c: &mut Vec<char>, p: &mut usize, depth: usize) -> Option<Json> {
     *p += 1; // [
     let mut out = Vec::new();
     loop {
@@ -1051,7 +1117,7 @@ fn parse_arr(c: &mut Vec<char>, p: &mut usize) -> Option<Json> {
             *p += 1;
             return Some(Json::Arr(out));
         }
-        out.push(parse_value(c, p)?);
+        out.push(parse_value(c, p, depth + 1)?);
         skip_ws(c, p);
         match c.get(*p)? {
             ',' => *p += 1,
@@ -1064,7 +1130,7 @@ fn parse_arr(c: &mut Vec<char>, p: &mut usize) -> Option<Json> {
     }
 }
 
-fn parse_obj(c: &mut Vec<char>, p: &mut usize) -> Option<Json> {
+fn parse_obj(c: &mut Vec<char>, p: &mut usize, depth: usize) -> Option<Json> {
     *p += 1; // {
     let mut out = Vec::new();
     loop {
@@ -1083,7 +1149,7 @@ fn parse_obj(c: &mut Vec<char>, p: &mut usize) -> Option<Json> {
             return None;
         }
         *p += 1;
-        let val = parse_value(c, p)?;
+        let val = parse_value(c, p, depth + 1)?;
         out.push((key, val));
         skip_ws(c, p);
         match c.get(*p)? {

@@ -20,8 +20,11 @@ defmodule Longpi.Extensions.Host do
   alias Longpi.Agent.ToolSpec
 
   @call_timeout 120_000
-  # A tool call stuck past this gets the runtime interrupted (runaway guard).
-  @watchdog_timeout 150_000
+  # A tool call stuck past this gets the runtime interrupted — comfortably
+  # BELOW @call_timeout so the interrupt turns the hang into an error result
+  # that reaches the still-waiting caller (rather than the caller timing out
+  # first and the reply landing on a dead process).
+  @watchdog_timeout 110_000
 
   # Client
 
@@ -163,14 +166,13 @@ defmodule Longpi.Extensions.Host do
   def handle_call({:call, kind, name, args}, from, state) do
     id = state.next_id
 
-    case kind do
-      :tool ->
-        # Secrets ride along on every call — a key added/changed in the UI
-        # takes effect on the next tool call with no reload.
-        Longpi.Js.call_tool(state.instance, id, name, args, Longpi.Extensions.secret_env())
+    # Secrets ride along on every call — a key added/changed in the UI takes
+    # effect on the next call with no reload; cwd is exposed as `ctx.cwd`.
+    env = Longpi.Extensions.secret_env()
 
-      :command ->
-        Longpi.Js.call_command(state.instance, id, name, command_arg(args))
+    case kind do
+      :tool -> Longpi.Js.call_tool(state.instance, id, name, args, state.cwd, env)
+      :command -> Longpi.Js.call_command(state.instance, id, name, command_arg(args), state.cwd, env)
     end
 
     watchdog = state.watchdog || Process.send_after(self(), :watchdog, @watchdog_timeout)
@@ -208,7 +210,8 @@ defmodule Longpi.Extensions.Host do
   end
 
   # `longpi.run` brokered from the runtime: run the program and reply. Done in a
-  # task so a slow command doesn't block the host's mailbox.
+  # task so a slow command doesn't block the host's mailbox. `service_run` never
+  # raises (it always replies), so the task can't die before answering.
   def handle_info({:js_capability, id, req_id, "run", payload}, %{id: id} = state) do
     instance = state.instance
     cwd = state.cwd
@@ -216,9 +219,43 @@ defmodule Longpi.Extensions.Host do
     {:noreply, state}
   end
 
-  # Stale-id messages from a previous runtime (after a crash/restart): ignore.
+  # The runtime thread died (a panic outside per-command isolation). Fail every
+  # pending caller and restart the instance in place so the host recovers
+  # instead of hanging all future calls to their timeouts.
+  def handle_info({:js_down, id}, %{id: id} = state) do
+    Logger.warning("extension runtime died — restarting")
+    Enum.each(Map.values(state.pending), &GenServer.reply(&1, {:error, "extension runtime restarted"}))
+    Enum.each(state.waiters, fn {from, _kind} -> GenServer.reply(from, []) end)
+
+    new_id = System.unique_integer([:positive])
+
+    case Longpi.Js.start(new_id) do
+      {:ok, instance} ->
+        Longpi.Js.load(instance, collect_extensions(state.cwd), Longpi.Extensions.secret_env())
+
+        {:noreply,
+         %{
+           state
+           | instance: instance,
+             id: new_id,
+             ready?: false,
+             tools: [],
+             commands: [],
+             waiters: [],
+             pending: %{},
+             watchdog: cancel_timer(state.watchdog)
+         }}
+
+      {:error, reason} ->
+        {:stop, reason, state}
+    end
+  end
+
+  # Stale messages from a previous runtime (after a restart): ignore.
   def handle_info({tag, _id, _, _, _}, state) when tag in [:js_loaded, :js_result, :js_capability],
     do: {:noreply, state}
+
+  def handle_info({:js_down, _stale}, state), do: {:noreply, state}
 
   # A tool call outran the watchdog — likely a hot loop. Interrupt the runtime.
   def handle_info(:watchdog, %{pending: pending} = state) when map_size(pending) > 0 do
@@ -232,6 +269,13 @@ defmodule Longpi.Extensions.Host do
   def handle_info(_msg, state), do: {:noreply, state}
 
   # ── Helpers ──────────────────────────────────────────────────────────
+
+  defp cancel_timer(nil), do: nil
+
+  defp cancel_timer(ref) do
+    Process.cancel_timer(ref)
+    nil
+  end
 
   defp cancel_watchdog(%{watchdog: nil} = state), do: state
 

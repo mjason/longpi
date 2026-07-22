@@ -10,7 +10,8 @@
 # at runtime (Longpi.RuntimeConfig). No environment variables are needed to
 # deploy — see docs/deploy.md.
 #
-# The target host still needs `bun` on PATH for the extension host.
+# Extensions run in an embedded QuickJS (rquickjs) host in the release — no
+# Bun or other JS runtime is needed on the target.
 #
 # Usage:  scripts/build-linux.sh
 set -euo pipefail

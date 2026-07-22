@@ -1,5 +1,5 @@
 defmodule Longpi.Extensions.HostTest do
-  # Exercises the real wasm (QuickJS) extension host — fully self-contained,
+  # Exercises the real native QuickJS (rquickjs) extension host — self-contained,
   # no external runtime needed, so it runs in the default suite.
   use ExUnit.Case, async: false
 
@@ -34,7 +34,8 @@ defmodule Longpi.Extensions.HostTest do
 
     assert Enum.map(specs, & &1.name) == ["hello"]
     assert %Longpi.Agent.ToolSpec{source: :extension} = hd(specs)
-    assert {:ok, "Hi Ada from " <> _} = Host.call_tool(host, "hello", %{"name" => "Ada"})
+    # ctx.cwd must be the real workspace, not undefined (asserted in full).
+    assert {:ok, "Hi Ada from #{cwd}"} == Host.call_tool(host, "hello", %{"name" => "Ada"})
   end
 
   test "extension tools merge into a toolbox and run through Toolbox.execute", %{cwd: cwd} do

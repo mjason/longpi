@@ -8,9 +8,9 @@ Configuration is a **file, not environment variables**: the release reads
 `~/.config/longpi/config.jsonc` at boot (`Longpi.RuntimeConfig`). Secrets are
 generated automatically on first boot — you never set `SECRET_KEY_BASE` etc.
 
-> The target host still needs **`bun`** on `PATH` for the extension host, and
-> the runtime working directory the agent operates in needs whatever tools the
-> agent will use.
+> Extensions run in an embedded native QuickJS (rquickjs) host compiled into
+> the release — no runtime like Bun is needed. The working directory the agent
+> operates in still needs whatever tools the agent will use.
 
 ## 1. Build (on a Linux x86_64 box with the toolchain)
 

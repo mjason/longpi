@@ -173,7 +173,7 @@ defmodule Longpi.Agent.Session do
        needs_title:
          not is_nil(opts[:conversation_id]) and is_nil(conversation && conversation.title),
        title_task: nil,
-       # Bun extension host for this cwd (nil until loaded / if unavailable),
+       # Extension host (QuickJS/rquickjs) for this cwd (nil until loaded),
        # and the slash commands its extensions registered.
        ext_host: nil,
        ext_commands: [],
@@ -186,8 +186,8 @@ defmodule Longpi.Agent.Session do
        subagent_counter: 0,
        agent_def: agent_def,
        parent_session: opts[:parent_session],
-       # Subagent sessions skip the Bun extension host unless the role opts in
-       # (extensions: true) — one Bun process per child is too heavy a default.
+       # Subagent sessions skip the extension host unless the role opts in
+       # (extensions: true) — starting one per child is wasteful by default.
        ext_enabled: is_nil(agent_def) or agent_def.extensions
      }, {:continue, :load_extensions}}
   end
@@ -337,6 +337,7 @@ defmodule Longpi.Agent.Session do
 
   def handle_call(:interrupt, _from, %{status: :running} = state) do
     Task.shutdown(state.task, :brutal_kill)
+    interrupt_running_subagents(state)
 
     state =
       state
@@ -782,6 +783,17 @@ defmodule Longpi.Agent.Session do
       spawns_subagents?: state.spawns_subagents?,
       ctx: state.ctx
     })
+  end
+
+  # Stopping the parent stops its running children — otherwise they'd keep
+  # working (and spending tokens) after the user hit interrupt.
+  defp interrupt_running_subagents(state) do
+    for {_handle, %{status: :running, conversation_id: cid}} <- state.subagents do
+      case Longpi.Agent.Sessions.whereis(cid) do
+        nil -> :ok
+        pid -> __MODULE__.interrupt(pid)
+      end
+    end
   end
 
   defp check_subagent_limit(state) do

@@ -26,7 +26,7 @@ config :longpi,
   llm_model: "test:model",
   # Auto-titling adds an extra LLM call per session; opt in per test.
   auto_title: false,
-  # Don't boot a wasm extension host per session in tests.
+  # Don't boot an extension host per session in tests.
   extensions_enabled: false
 
 # In test we don't send emails

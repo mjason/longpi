@@ -10,7 +10,7 @@ import {
   Settings,
   Trash2,
 } from "lucide-react";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   buildCSRFHeaders,
@@ -44,7 +44,7 @@ import {
   ConversationStoreProvider,
   selectCompactionCount,
   selectCurrentModel,
-  selectNotices,
+  selectLastNotice,
 } from "./store";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/shallow";
@@ -541,17 +541,22 @@ export function ConversationPane({
   const { runtime } = useChannelRuntime(store, conversation.model, threadList);
 
   const compactionCount = useStore(store, selectCompactionCount);
-  // selectNotices/subagents build new references; useShallow compares contents
-  // so an unchanged list doesn't spin the render loop.
-  const notices = useStore(store, useShallow(selectNotices));
+  // The toast only needs the LAST notice. Subscribing to the whole notices
+  // array (rebuilt every call) would re-render on every stream delta;
+  // subscribing to just the last notice via useShallow (compares tone+text)
+  // stays stable until a new notice actually arrives.
+  const lastNotice = useStore(store, useShallow(selectLastNotice));
   const currentModel = useStore(store, selectCurrentModel);
   const title = useStore(store, (s) => s.title);
+  // s.subagents is a stable ref (replaced only on subagents_updated); useShallow
+  // guards against an accidental identity change.
   const subagents = useStore(store, useShallow((s) => s.subagents));
 
   // Feed the host-owned bits into the store: the conversation's default model,
   // its workspace files (for "@" mentions), and the fork handler (navigate vs
   // switch-in-place is the host's call).
-  useEffect(() => {
+  // Layout effect: seed the model before paint so the picker never flashes empty.
+  useLayoutEffect(() => {
     store.getState().setDefaultModel(conversation.model);
   }, [store, conversation.model]);
 
@@ -604,13 +609,12 @@ export function ConversationPane({
   const { t } = useI18n();
   // Show the most recent notice briefly (command echoes, errors, interrupts).
   const [toast, setToast] = useState<{ tone: "error" | "info"; text: string } | null>(null);
-  const lastNotice = notices[notices.length - 1];
   useEffect(() => {
     if (!lastNotice) return;
     setToast(lastNotice);
     const t = setTimeout(() => setToast(null), 3500);
     return () => clearTimeout(t);
-  }, [notices.length]);
+  }, [lastNotice]);
 
   return (
     <ConversationStoreProvider value={store}>

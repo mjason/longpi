@@ -169,13 +169,6 @@ export function createConversationStore() {
 
 // ── Selectors for values derived from `items` (kept out of stored state) ──
 
-export const selectPendingApprovals = (s: ConversationState) =>
-  s.items.flatMap((item) =>
-    item.kind === "tool" && item.awaitingApproval
-      ? [{ id: item.id, name: item.name, args: item.args }]
-      : [],
-  );
-
 export const selectCompactionCount = (s: ConversationState) =>
   s.items.filter((item) => item.kind === "compaction").length;
 
@@ -186,6 +179,15 @@ export const selectNotices = (s: ConversationState) =>
   s.items.flatMap((item) =>
     item.kind === "notice" ? [{ tone: item.tone, text: item.text }] : [],
   );
+
+/** Just the most recent notice (for the toast) — stable under useShallow. */
+export const selectLastNotice = (s: ConversationState): { tone: "error" | "info"; text: string } | null => {
+  for (let i = s.items.length - 1; i >= 0; i--) {
+    const item = s.items[i];
+    if (item.kind === "notice") return { tone: item.tone, text: item.text };
+  }
+  return null;
+};
 
 // ── React glue: one provider per conversation, slice-selecting hook ──
 
@@ -198,15 +200,6 @@ export function useConversationStore<T>(selector: (state: ConversationState) => 
     throw new Error("useConversationStore must be used within ConversationStoreProvider");
   }
   return useStore(store, selector);
-}
-
-/** The raw store instance (for imperative reads/subscriptions, e.g. the runtime). */
-export function useConversationStoreApi(): ConversationStore {
-  const store = useContext(StoreContext);
-  if (!store) {
-    throw new Error("useConversationStoreApi must be used within ConversationStoreProvider");
-  }
-  return store;
 }
 
 export type { ContextUsage, ExtCommand, SubagentInfo };

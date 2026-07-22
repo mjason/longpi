@@ -4,8 +4,12 @@ defmodule Longpi.Js.Native do
 
   def start(_id), do: :erlang.nif_error(:nif_not_loaded)
   def load(_instance, _extensions, _env), do: :erlang.nif_error(:nif_not_loaded)
-  def call_tool(_instance, _call_id, _name, _args_json, _env), do: :erlang.nif_error(:nif_not_loaded)
-  def call_command(_instance, _call_id, _name, _arg), do: :erlang.nif_error(:nif_not_loaded)
+
+  def call_tool(_instance, _call_id, _name, _args_json, _cwd, _env),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def call_command(_instance, _call_id, _name, _args_json, _cwd, _env),
+    do: :erlang.nif_error(:nif_not_loaded)
   def fire_event(_instance, _event, _payload_json), do: :erlang.nif_error(:nif_not_loaded)
   def interrupt(_instance), do: :erlang.nif_error(:nif_not_loaded)
   def stop(_instance), do: :erlang.nif_error(:nif_not_loaded)
@@ -41,13 +45,27 @@ defmodule Longpi.Js do
   end
 
   @doc "Runs a registered tool; result arrives as `{:js_result, id, call_id, ...}`."
-  def call_tool(instance, call_id, name, args, env) do
-    Longpi.Js.Native.call_tool(instance, call_id, name, Jason.encode!(args), Map.to_list(Map.new(env)))
+  def call_tool(instance, call_id, name, args, cwd, env) do
+    Longpi.Js.Native.call_tool(
+      instance,
+      call_id,
+      name,
+      Jason.encode!(args),
+      cwd,
+      Map.to_list(Map.new(env))
+    )
   end
 
-  @doc "Runs a registered slash command."
-  def call_command(instance, call_id, name, arg) do
-    Longpi.Js.Native.call_command(instance, call_id, name, arg)
+  @doc "Runs a registered slash command; `arg` is the bare text after the name."
+  def call_command(instance, call_id, name, arg, cwd, env) do
+    Longpi.Js.Native.call_command(
+      instance,
+      call_id,
+      name,
+      Jason.encode!(arg),
+      cwd,
+      Map.to_list(Map.new(env))
+    )
   end
 
   @doc "Fires a lifecycle event to `on(...)` handlers (fire-and-forget)."
@@ -61,13 +79,21 @@ defmodule Longpi.Js do
   here) and replies. `payload` is `{"cmd", "args", "opts"}` JSON.
   """
   def service_run(instance, req_id, payload, cwd) do
+    # Always reply, even on a crash — otherwise the JS `await longpi.run(...)`
+    # hangs the whole instance until the Rust broker timeout (~120s).
     result =
-      case Jason.decode(payload) do
-        {:ok, %{"cmd" => cmd} = req} when is_binary(cmd) ->
-          run_program(cmd, req["args"] || [], (req["opts"] || %{})["cwd"] || cwd)
+      try do
+        case Jason.decode(payload) do
+          {:ok, %{"cmd" => cmd} = req} when is_binary(cmd) ->
+            run_program(cmd, req["args"] || [], (req["opts"] || %{})["cwd"] || cwd)
 
-        _ ->
-          %{status: 1, stdout: "", stderr: "invalid run request"}
+          _ ->
+            %{status: 1, stdout: "", stderr: "invalid run request"}
+        end
+      rescue
+        e -> %{status: 1, stdout: "", stderr: "run failed: #{Exception.message(e)}"}
+      catch
+        kind, reason -> %{status: 1, stdout: "", stderr: "run failed: #{inspect({kind, reason})}"}
       end
 
     Longpi.Js.Native.capability_reply(instance, req_id, Jason.encode!(result))
@@ -75,16 +101,23 @@ defmodule Longpi.Js do
 
   @run_timeout 60_000
 
+  # stderr is merged into stdout (System.cmd can't split it without a Port);
+  # the child inherits the server's environment so PATH/HOME resolve.
   defp run_program(cmd, args, dir) do
     args = Enum.map(args, &to_string/1)
 
-    case System.find_executable(cmd) do
-      nil ->
+    cond do
+      not (is_binary(dir) and File.dir?(dir)) ->
+        %{status: 1, stdout: "", stderr: "working directory does not exist: #{inspect(dir)}"}
+
+      is_nil(System.find_executable(cmd)) ->
         %{status: 127, stdout: "", stderr: "#{cmd}: not found"}
 
-      path ->
+      true ->
+        path = System.find_executable(cmd)
+
         task =
-          Task.async(fn -> System.cmd(path, args, cd: dir, stderr_to_stdout: false, env: []) end)
+          Task.async(fn -> System.cmd(path, args, cd: dir, stderr_to_stdout: true) end)
 
         case Task.yield(task, @run_timeout) || Task.shutdown(task, :brutal_kill) do
           {:ok, {output, status}} -> %{status: status, stdout: output, stderr: ""}

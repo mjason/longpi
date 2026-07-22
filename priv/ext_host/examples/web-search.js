@@ -6,7 +6,7 @@
 // Secrets (stored in the app db and injected into the host on every call — no
 // shell `export` needed).
 //
-// Extensions run in a sandboxed WebAssembly (QuickJS) host: plain modern
+// Extensions run in an embedded QuickJS host: plain modern
 // JavaScript, no Node/npm APIs. `fetch`, `process.env`, and `longpi.run` are
 // provided by the host.
 //
