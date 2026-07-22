@@ -238,24 +238,42 @@ const ForkButton: FC = () => {
 };
 
 // Edit pencil, offered ONLY on the last user message (in-place edit → re-run).
+// Hover actions on EVERY user message: fork ("new conversation from here",
+// history up to and including this message) — plus the edit pencil on the
+// last one, whose submit swaps the message in place and re-runs.
 const UserActionBar: FC = () => {
   const { t } = useI18n();
-  const isLastUser = useAuiState(
-    (s) => (s.message.metadata?.custom as { isLastUser?: boolean } | undefined)?.isLastUser === true,
+  const fork = useContext(ForkContext);
+  const custom = useAuiState(
+    (s) =>
+      s.message.metadata?.custom as
+        | { isLastUser?: boolean; lastItemIndex?: number }
+        | undefined,
   );
-  if (!isLastUser) return null;
+  const isLastUser = custom?.isLastUser === true;
+  const position = custom?.lastItemIndex;
+  const canFork = fork != null && position != null && position >= 0;
+  if (!isLastUser && !canFork) return null;
+
   return (
+    // Visibility is pure CSS (group-hover on the wrapper) — assistant-ui's
+    // autohide hover tracking proved unreliable here.
     <ActionBarPrimitive.Root
       hideWhenRunning
-      // Hover-only: the pencil shows when the pointer is over the message.
-      autohide="always"
-      className="aui-user-action-bar-root flex flex-col items-end"
+      className="aui-user-action-bar-root flex items-center gap-0.5"
     >
-      <ActionBarPrimitive.Edit asChild>
-        <TooltipIconButton tooltip={t("msg.edit")} className="aui-user-action-edit">
-          <PencilIcon />
+      {canFork && (
+        <TooltipIconButton tooltip={t("msg.fork")} onClick={() => fork(position)}>
+          <GitBranchIcon />
         </TooltipIconButton>
-      </ActionBarPrimitive.Edit>
+      )}
+      {isLastUser && (
+        <ActionBarPrimitive.Edit asChild>
+          <TooltipIconButton tooltip={t("msg.edit")} className="aui-user-action-edit">
+            <PencilIcon />
+          </TooltipIconButton>
+        </ActionBarPrimitive.Edit>
+      )}
     </ActionBarPrimitive.Root>
   );
 };
@@ -435,7 +453,7 @@ const AssistantMessage: FC = () => {
     <MessagePrimitive.Root
       data-slot="aui_assistant-message-root"
       data-role="assistant"
-      className="fade-in slide-in-from-bottom-1 animate-in relative -mb-7.5 pb-7.5 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
+      className="group/aimsg fade-in slide-in-from-bottom-1 animate-in relative -mb-7.5 pb-7.5 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
     >
       <div
         data-slot="aui_assistant-message-content"
@@ -542,10 +560,11 @@ const RegenerateButton: FC = () => {
 const AssistantActionBar: FC = () => {
   const { t } = useI18n();
   return (
+    // Visibility is pure CSS (group-hover on the message root) — assistant-ui's
+    // autohide hover tracking proved unreliable in our layout.
     <ActionBarPrimitive.Root
       hideWhenRunning
-      autohide="not-last"
-      className="aui-assistant-action-bar-root text-muted-foreground animate-in fade-in col-start-3 row-start-2 -ms-1 flex gap-1 duration-200"
+      className="aui-assistant-action-bar-root text-muted-foreground col-start-3 row-start-2 -ms-1 flex gap-1 opacity-0 transition-opacity duration-150 group-hover/aimsg:opacity-100 focus-within:opacity-100"
     >
       <ActionBarPrimitive.Copy asChild>
         <TooltipIconButton tooltip={t("msg.copy")}>
@@ -596,7 +615,7 @@ const UserMessage: FC = () => {
   return (
     <MessagePrimitive.Root
       data-slot="aui_user-message-root"
-      className="fade-in slide-in-from-bottom-1 animate-in grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-2"
+      className="group/usermsg fade-in slide-in-from-bottom-1 animate-in grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 duration-150 [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-2"
       data-role="user"
     >
       <UserMessageAttachments />
@@ -605,7 +624,7 @@ const UserMessage: FC = () => {
         <div className="aui-user-message-content peer bg-muted text-foreground rounded-xl px-4 py-2 wrap-break-word empty:hidden">
           <MessagePrimitive.Parts components={{ Text: FileDirectiveText }} />
         </div>
-        <div className="aui-user-action-bar-wrapper absolute start-0 top-1/2 -translate-x-full -translate-y-1/2 pe-2 peer-empty:hidden rtl:translate-x-full">
+        <div className="aui-user-action-bar-wrapper absolute start-0 top-1/2 -translate-x-full -translate-y-1/2 pe-2 opacity-0 transition-opacity duration-150 group-hover/usermsg:opacity-100 focus-within:opacity-100 peer-empty:hidden rtl:translate-x-full">
           <UserActionBar />
         </div>
       </div>
