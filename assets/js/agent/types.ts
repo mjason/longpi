@@ -18,11 +18,13 @@ export type HistoryMessage = {
 };
 
 export type ThreadItem =
-  | { kind: "user"; text: string; attachments?: MessageAttachment[] }
-  | { kind: "assistant"; text: string; streaming: boolean }
+  | { kind: "user"; text: string; attachments?: MessageAttachment[]; dbPos?: number }
+  | { kind: "assistant"; text: string; streaming: boolean; dbPos?: number }
   | { kind: "reasoning"; text: string; streaming: boolean }
   | {
       kind: "tool";
+      /** DB position of this tool's RESULT row (fork boundary). */
+      dbPos?: number;
       id: string;
       name: string;
       args?: Record<string, unknown>;

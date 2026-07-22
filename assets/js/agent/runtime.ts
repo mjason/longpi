@@ -206,9 +206,11 @@ type AssistantPart = Extract<ThreadMessageLike["content"], readonly unknown[]>[n
 export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
   const messages: ThreadMessageLike[] = [];
   let assistantParts: AssistantPart[] | null = null;
-  // The DB position of the last item folded into the current/most recent
-  // message — powers "fork from here" and the last-user-message edit gate.
-  let currentItemIndex = -1;
+  // The DB position of the last row folded into the current message — the
+  // fork boundary ("new conversation up to here"). Items carry their real
+  // dbPos (see historyToItems); streamed items without one simply don't
+  // offer fork until the history reloads.
+  let currentDbPos: number | undefined;
   const lastUserItemIndex = items.reduce(
     (acc, item, index) => (item.kind === "user" ? index : acc),
     -1,
@@ -229,13 +231,14 @@ export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
         id: `m-${messages.length}`,
         role: "assistant",
         content: assistantParts,
-        metadata: { custom: { lastItemIndex: currentItemIndex } },
+        metadata: { custom: { lastItemIndex: currentDbPos ?? -1 } },
         ...(awaitingApproval
           ? { status: { type: "requires-action" as const, reason: "tool-calls" as const } }
           : {}),
       });
     }
     assistantParts = null;
+    currentDbPos = undefined;
   };
 
   let index = -1;
@@ -251,7 +254,10 @@ export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
           role: "user",
           content: [{ type: "text", text: item.text }],
           metadata: {
-            custom: { lastItemIndex: index, isLastUser: index === lastUserItemIndex },
+            custom: {
+              lastItemIndex: item.dbPos ?? -1,
+              isLastUser: index === lastUserItemIndex,
+            },
           },
           ...(item.attachments?.length
             ? { attachments: toUiAttachments(item.attachments) }
@@ -260,19 +266,18 @@ export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
         break;
 
       case "reasoning":
-        currentItemIndex = index;
         assistantParts ??= [];
         if (item.text) assistantParts.push({ type: "reasoning", text: item.text });
         break;
 
       case "assistant":
-        currentItemIndex = index;
+        if (item.dbPos != null) currentDbPos = item.dbPos;
         assistantParts ??= [];
         if (item.text) assistantParts.push({ type: "text", text: item.text });
         break;
 
       case "tool":
-        currentItemIndex = index;
+        if (item.dbPos != null) currentDbPos = item.dbPos;
         assistantParts ??= [];
         assistantParts.push({
           type: "tool-call",

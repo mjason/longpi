@@ -176,20 +176,27 @@ function capTail(text: string): string {
   return text.length > MAX_TOOL_OUTPUT ? "…\n" + text.slice(-MAX_TOOL_OUTPUT) : text;
 }
 
-function historyToItems(messages: HistoryMessage[], pending: string[] = []): ThreadItem[] {
+// Items are a RENDER view of the DB rows: one row can yield 0..N items (an
+// empty-text assistant row with tool calls yields only tool items; a tool
+// RESULT row yields none — it fills the matching call item). Every item
+// therefore carries `dbPos`, the DB position that "contains" it, which is
+// what fork ("new conversation up to here") truncates at. Index-as-position
+// was wrong and cut AI replies out of forks.
+export function historyToItems(messages: HistoryMessage[], pending: string[] = []): ThreadItem[] {
   const items: ThreadItem[] = [];
   const pendingSet = new Set(pending);
 
-  for (const message of messages) {
+  messages.forEach((message, dbPos) => {
     if (message.role === "user") {
       items.push({
         kind: "user",
         text: message.content,
+        dbPos,
         ...(message.attachments?.length ? { attachments: message.attachments } : {}),
       });
     } else if (message.role === "assistant") {
       if (message.content.trim() !== "") {
-        items.push({ kind: "assistant", text: message.content, streaming: false });
+        items.push({ kind: "assistant", text: message.content, streaming: false, dbPos });
       }
       for (const call of message.tool_calls ?? []) {
         const awaiting = pendingSet.has(call.id);
@@ -201,6 +208,9 @@ function historyToItems(messages: HistoryMessage[], pending: string[] = []): Thr
           error: false,
           running: awaiting,
           awaitingApproval: awaiting,
+          // Provisional: the call lives in the assistant row; the RESULT row
+          // (the real fork boundary) overwrites this below when it arrives.
+          dbPos,
         });
       }
     } else if (message.role === "tool" && message.tool_call_id) {
@@ -210,9 +220,10 @@ function historyToItems(messages: HistoryMessage[], pending: string[] = []): Thr
       if (tool && tool.kind === "tool") {
         tool.content = message.content;
         tool.error = message.error;
+        tool.dbPos = dbPos;
       }
     }
-  }
+  });
 
   return items;
 }
