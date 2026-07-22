@@ -214,6 +214,18 @@ defmodule LongpiWeb.ConversationChannel do
   defp serialize_event({:subagents, snapshot}),
     do: {"subagents", %{agents: serialize_subagents(snapshot)}}
 
+  defp serialize_event({:commands, commands}), do: {"commands", %{commands: commands}}
+
+  defp serialize_event({:history, messages}),
+    do: {"history", %{messages: Enum.map(messages, &serialize_message/1)}}
+
+  defp serialize_event({:turn_ended, reason}), do: {"turn_ended", %{reason: to_string(reason)}}
+
+  defp serialize_event({:turn_failed, reason}),
+    do: {"turn_failed", %{reason: inspect(reason)}}
+
+  defp serialize_event(_event), do: nil
+
   defp serialize_subagents(snapshot) do
     Map.new(snapshot, fn {handle, info} ->
       {handle,
@@ -226,18 +238,6 @@ defmodule LongpiWeb.ConversationChannel do
        }}
     end)
   end
-
-  defp serialize_event({:commands, commands}), do: {"commands", %{commands: commands}}
-
-  defp serialize_event({:history, messages}),
-    do: {"history", %{messages: Enum.map(messages, &serialize_message/1)}}
-
-  defp serialize_event({:turn_ended, reason}), do: {"turn_ended", %{reason: to_string(reason)}}
-
-  defp serialize_event({:turn_failed, reason}),
-    do: {"turn_failed", %{reason: inspect(reason)}}
-
-  defp serialize_event(_event), do: nil
 
   defp serialize_message(message) do
     %{
