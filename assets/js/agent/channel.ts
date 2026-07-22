@@ -99,6 +99,9 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   channel.on("commands", (p: { commands: ExtCommand[]; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "commands_updated", commands: p.commands })),
   );
+  channel.on("subagents", (p: { agents: Record<string, SubagentInfo>; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "subagents_updated", agents: p.agents })),
+  );
   channel.on("turn_ended", (p: { reason: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "turn_ended", reason: p.reason })),
   );
@@ -110,7 +113,7 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
     channel
       .join()
       .receive("ok", (reply: JoinReply) => {
-        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands });
+        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands, subagents: reply.subagents });
         resolve();
       })
       .receive("error", (reply: { reason: string }) => {
@@ -125,6 +128,14 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
 export type ContextUsage = { used: number | null; window: number };
 export type ExtCommand = { name: string; description: string };
 
+export type SubagentInfo = {
+  conversationId: string;
+  role: string;
+  status: "running" | "done" | "failed" | "closed";
+  task: string;
+  startedAt: number;
+};
+
 type JoinReply = {
   messages: HistoryMessage[];
   status: string;
@@ -132,6 +143,7 @@ type JoinReply = {
   context_usage?: ContextUsage;
   reasoning_effort?: string | null;
   commands?: ExtCommand[];
+  subagents?: Record<string, SubagentInfo>;
 };
 
 type State = {
@@ -146,14 +158,17 @@ type State = {
   title: string | null;
   // Slash commands contributed by extensions (for the composer's "/" menu).
   commands: ExtCommand[];
+  // Subagents this conversation has spawned, keyed by handle ("scout-1").
+  subagents: Record<string, SubagentInfo>;
 };
 
 type Action =
-  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage; commands?: ExtCommand[]; reasoningEffort?: string | null }
+  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage; commands?: ExtCommand[]; reasoningEffort?: string | null; subagents?: Record<string, SubagentInfo> }
   | { type: "model_changed"; model: string }
   | { type: "reasoning_changed"; effort: string | null }
   | { type: "titled"; title: string }
   | { type: "commands_updated"; commands: ExtCommand[] }
+  | { type: "subagents_updated"; agents: Record<string, SubagentInfo> }
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; text: string }
   | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
@@ -240,7 +255,7 @@ function settle(items: ThreadItem[]): ThreadItem[] {
 function reduce(state: State, action: Action): State {
   switch (action.type) {
     case "reset":
-      return { items: [], status: "connecting", usage: null, model: null, reasoningEffort: null, title: null, commands: [] };
+      return { items: [], status: "connecting", usage: null, model: null, reasoningEffort: null, title: null, commands: [], subagents: {} };
 
     case "model_changed":
       return { ...state, model: action.model };
@@ -262,7 +277,11 @@ function reduce(state: State, action: Action): State {
         usage: action.usage ?? state.usage,
         reasoningEffort: action.reasoningEffort ?? state.reasoningEffort,
         commands: action.commands ?? state.commands,
+        subagents: action.subagents ?? state.subagents,
       };
+
+    case "subagents_updated":
+      return { ...state, subagents: action.agents };
 
     case "context_usage":
       return { ...state, usage: { used: action.used, window: action.window } };
@@ -387,6 +406,7 @@ export function useConversationChannel(conversationId: string | null) {
     reasoningEffort: null,
     title: null,
     commands: [],
+    subagents: {},
   });
   const channelRef = useRef<Channel | null>(null);
 
@@ -406,7 +426,7 @@ export function useConversationChannel(conversationId: string | null) {
         .push("get_state", {})
         .receive("ok", (reply: JoinReply) => {
           if (!cancelled)
-            dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands });
+            dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands, subagents: reply.subagents });
         });
     });
 

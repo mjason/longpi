@@ -47,4 +47,8 @@ export type ConversationSummary = {
   title: string | null;
   cwd: string;
   model: string;
+  /** Set on subagent conversations: the spawning conversation's id. */
+  parentId?: string | null;
+  /** Set on subagent conversations: the role it was spawned as ("scout"). */
+  agentRole?: string | null;
 };

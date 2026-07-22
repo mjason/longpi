@@ -122,6 +122,7 @@ export function useChannelRuntime(
     reasoningEffort,
     title,
     commands,
+    subagents,
   } = useConversationChannel(conversationId);
 
   const { t } = useI18n();
@@ -199,6 +200,7 @@ export function useChannelRuntime(
     title,
     commands,
     regenerate,
+    subagents,
   };
 }
 

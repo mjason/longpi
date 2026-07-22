@@ -211,4 +211,31 @@ defmodule LongpiWeb.ConversationChannelTest do
     assert Process.alive?(session)
     assert Sessions.whereis(conversation.id) == session
   end
+
+  test "subagent lifecycle is pushed to the channel and included on join", %{
+    conversation: conversation
+  } do
+    stub(LLMMock, :stream, fn _, _, _, _, _ ->
+      {:ok, %{text: "child done", tool_calls: []}}
+    end)
+
+    session = Sessions.whereis(conversation.id)
+
+    {:ok, handle} =
+      GenServer.call(session, {:spawn_subagent, %{agent: "scout", task: "look around"}})
+
+    # Spawn pushes a snapshot with the running child...
+    assert_push "subagents", %{agents: %{^handle => %{role: "scout", status: :running}}}
+
+    # ...and completion pushes another with status done.
+    assert_push "subagents", %{agents: %{^handle => %{status: :done}}}, 5_000
+
+    # A fresh join sees the current snapshot straight away.
+    {:ok, reply, _socket} =
+      LongpiWeb.UserSocket
+      |> socket("user2", %{})
+      |> subscribe_and_join(LongpiWeb.ConversationChannel, "conversation:#{conversation.id}")
+
+    assert %{^handle => %{role: "scout"}} = reply.subagents
+  end
 end

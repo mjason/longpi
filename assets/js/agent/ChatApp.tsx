@@ -43,6 +43,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { useI18n } from "./i18n";
 import { LanguageToggle } from "./LanguageToggle";
 import { ForkContext, RegenerateContext, useChannelRuntime } from "./runtime";
+import { SubagentsBar } from "./SubagentsBar";
 import { forkConversation, loadSettings, loadWorkspaceFiles, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
 import { UpdateCheck } from "./UpdateCheck";
@@ -95,7 +96,8 @@ type ProjectGroup = { cwd: string; conversations: ConversationSummary[] };
  */
 export function groupByProject(conversations: ConversationSummary[]): ProjectGroup[] {
   const groups = new Map<string, ConversationSummary[]>();
-  for (const c of conversations) {
+  // Subagent children live under their parent's SubagentsBar, not the sidebar.
+  for (const c of conversations.filter((c) => !c.parentId)) {
     const existing = groups.get(c.cwd);
     if (existing) existing.push(c);
     else groups.set(c.cwd, [c]);
@@ -112,7 +114,7 @@ export default function ChatApp() {
   useEffect(() => {
     (async () => {
       const result = await listConversations({
-        fields: ["id", "title", "cwd", "model"],
+        fields: ["id", "title", "cwd", "model", "parentId", "agentRole"],
         sort: "-insertedAt",
         headers: buildCSRFHeaders(),
       });
@@ -196,6 +198,18 @@ export default function ChatApp() {
                 prev.map((c) => (c.id === id ? { ...c, title } : c)),
               )
             }
+            onOpenConversation={async (id) => {
+              // A brand-new subagent conversation may not be in our list yet.
+              if (!conversations.some((c) => c.id === id)) {
+                const result = await listConversations({
+                  fields: ["id", "title", "cwd", "model", "parentId", "agentRole"],
+                  sort: "-insertedAt",
+                  headers: buildCSRFHeaders(),
+                });
+                if (result.success) setConversations(result.data);
+              }
+              navigate(`/c/${id}`);
+            }}
           />
         ) : (
           <main className="grid flex-1 place-items-center">
@@ -438,7 +452,7 @@ function NewConversationDialog({
 
     const result = await createConversation({
       input: { cwd: cwd.trim(), model: model.trim() || DEFAULT_MODEL },
-      fields: ["id", "title", "cwd", "model"],
+      fields: ["id", "title", "cwd", "model", "parentId", "agentRole"],
       headers: buildCSRFHeaders(),
     });
 
@@ -504,6 +518,7 @@ export function ConversationPane({
   threadList,
   headerExtra,
   onForked,
+  onOpenConversation,
 }: {
   conversation: ConversationSummary;
   onModelChanged: (id: string, model: string) => void;
@@ -514,8 +529,10 @@ export function ConversationPane({
   headerExtra?: React.ReactNode;
   /** Where to go after a fork; default reloads onto the new conversation. */
   onForked?: (fork: { id: string; cwd: string; model: string; title: string | null }) => void;
+  /** Open another conversation (subagent chips); default opens a new tab. */
+  onOpenConversation?: (id: string) => void;
 }) {
-  const { runtime, compactionCount, notices, usage, currentModel, setModel, reasoningEffort, setReasoning, title, commands, regenerate } =
+  const { runtime, compactionCount, notices, usage, currentModel, setModel, reasoningEffort, setReasoning, title, commands, regenerate, subagents } =
     useChannelRuntime(conversation.id, conversation.model, threadList);
 
   const modelCtx = useMemo(
@@ -612,6 +629,32 @@ export function ConversationPane({
           )}
           {headerExtra}
         </header>
+
+        {conversation.parentId && (
+          <div className="flex items-center gap-2 border-b border-border bg-blue-500/5 px-4 py-1.5 text-xs">
+            <span className="rounded-full bg-blue-100 px-2 py-0.5 font-medium text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
+              {t("subagents.childBadge", { role: conversation.agentRole ?? "agent" })}
+            </span>
+            <button
+              type="button"
+              className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              onClick={() =>
+                onOpenConversation
+                  ? onOpenConversation(conversation.parentId!)
+                  : window.open(`/c/${conversation.parentId}`, "_blank")
+              }
+            >
+              {t("subagents.backToParent")}
+            </button>
+          </div>
+        )}
+
+        <SubagentsBar
+          agents={subagents}
+          onOpen={(id) =>
+            onOpenConversation ? onOpenConversation(id) : window.open(`/c/${id}`, "_blank")
+          }
+        />
 
         <div className="min-h-0 flex-1">
           <ConversationModelContext.Provider value={modelCtx}>

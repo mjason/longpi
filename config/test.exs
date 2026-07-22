@@ -51,3 +51,8 @@ config :phoenix,
 
 # Isolate the global extensions dir from the developer's real ~/.longpi/extensions.
 config :longpi, :global_extensions_dir, Path.join(System.tmp_dir!(), "longpi_test_global_extensions_#{System.pid()}")
+
+# Subagent role discovery must not read the developer's real ~/.longpi/agents.
+config :longpi,
+       :subagents_global_dir,
+       Path.join(System.tmp_dir!(), "longpi_test_global_agents_#{System.pid()}")

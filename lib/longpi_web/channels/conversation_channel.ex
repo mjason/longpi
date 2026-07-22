@@ -36,7 +36,8 @@ defmodule LongpiWeb.ConversationChannel do
           pending_approvals: Session.pending_approvals(session),
           context_usage: Session.context_usage(session),
           reasoning_effort: Session.reasoning_effort(session),
-          commands: ext.commands
+          commands: ext.commands,
+          subagents: serialize_subagents(Session.subagents(session))
         }
 
         {:ok, reply, socket}
@@ -161,7 +162,8 @@ defmodule LongpiWeb.ConversationChannel do
       pending_approvals: Session.pending_approvals(session),
       context_usage: Session.context_usage(session),
       reasoning_effort: Session.reasoning_effort(session),
-      commands: Session.ext_info(session).commands
+      commands: Session.ext_info(session).commands,
+      subagents: serialize_subagents(Session.subagents(session))
     }
 
     {:reply, {:ok, reply}, socket}
@@ -207,6 +209,23 @@ defmodule LongpiWeb.ConversationChannel do
     do: {"reasoning_changed", %{reasoning_effort: effort}}
 
   defp serialize_event({:titled, title}), do: {"titled", %{title: title}}
+
+  # Subagent snapshot: %{handle => %{conversation_id, role, status, task, started_at}}
+  defp serialize_event({:subagents, snapshot}),
+    do: {"subagents", %{agents: serialize_subagents(snapshot)}}
+
+  defp serialize_subagents(snapshot) do
+    Map.new(snapshot, fn {handle, info} ->
+      {handle,
+       %{
+         conversationId: info.conversation_id,
+         role: info.role,
+         status: info.status,
+         task: info.task |> String.split("\n") |> hd() |> String.slice(0, 120),
+         startedAt: info.started_at
+       }}
+    end)
+  end
 
   defp serialize_event({:commands, commands}), do: {"commands", %{commands: commands}}
 

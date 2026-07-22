@@ -20,7 +20,16 @@ defmodule Longpi.Agent.Session do
 
   use GenServer, restart: :temporary
 
-  alias Longpi.Agent.{Compactor, ConversationMessage, Message, SystemPrompt, Toolbox, Turn}
+  alias Longpi.Agent.{
+    Compactor,
+    ConversationMessage,
+    Message,
+    Subagents,
+    SystemPrompt,
+    Toolbox,
+    ToolSpec,
+    Turn
+  }
 
   # Client
 
@@ -90,16 +99,38 @@ defmodule Longpi.Agent.Session do
   @doc "The conversation's current reasoning effort (nil = model default)."
   def reasoning_effort(session), do: GenServer.call(session, :reasoning_effort)
 
+  @doc "Children this session has spawned: %{handle => info}."
+  def subagents(session), do: GenServer.call(session, :subagent_snapshot)
+
   # Server
 
   @impl true
   def init(opts) do
     {conversation, history} = load_conversation(opts[:conversation_id])
-    ctx = %{cwd: (conversation && conversation.cwd) || opts[:cwd] || File.cwd!()}
+    agent_def = opts[:agent_def]
+    depth = opts[:subagent_depth] || 0
+
+    ctx = %{
+      cwd: (conversation && conversation.cwd) || opts[:cwd] || File.cwd!(),
+      session: self(),
+      conversation_id: opts[:conversation_id],
+      subagent_depth: depth
+    }
 
     system_prompt =
       opts[:system_prompt] ||
         SystemPrompt.resolve(ctx, conversation && conversation.system_prompt)
+
+    # A subagent role appends its own instructions to the base prompt (pi's
+    # --append-system-prompt model: extend, don't replace).
+    system_prompt =
+      case agent_def do
+        %Subagents.Def{system_prompt: extra} when extra != "" ->
+          system_prompt <> "\n\n# Your role\n\n" <> extra
+
+        _ ->
+          system_prompt
+      end
 
     {:ok,
      %{
@@ -117,8 +148,8 @@ defmodule Longpi.Agent.Session do
        reasoning_effort: (conversation && conversation.reasoning_effort) || opts[:reasoning_effort],
        # `base_toolbox` is the built-ins only; `toolbox` merges extensions on
        # top and is rebuilt from the base on reload.
-       base_toolbox: Toolbox.new(opts[:tools] || Toolbox.default_modules()),
-       toolbox: Toolbox.new(opts[:tools] || Toolbox.default_modules()),
+       base_toolbox: build_toolbox(opts, agent_def, depth, ctx.cwd),
+       toolbox: build_toolbox(opts, agent_def, depth, ctx.cwd),
        stream_to: opts[:stream_to],
        conversation_id: opts[:conversation_id],
        persisted_count: length(history),
@@ -138,7 +169,17 @@ defmodule Longpi.Agent.Session do
        ext_host: nil,
        ext_commands: [],
        # Debounce timer for auto-reloading extensions after a file change.
-       ext_reload_timer: nil
+       ext_reload_timer: nil,
+       # Subagents: children this session spawned (%{handle => info}), the
+       # counter feeding handle names, and — when this session IS a subagent —
+       # who to notify on completion.
+       subagents: %{},
+       subagent_counter: 0,
+       agent_def: agent_def,
+       parent_session: opts[:parent_session],
+       # Subagent sessions skip the Bun extension host unless the role opts in
+       # (extensions: true) — one Bun process per child is too heavy a default.
+       ext_enabled: is_nil(agent_def) or agent_def.extensions
      }, {:continue, :load_extensions}}
   end
 
@@ -156,7 +197,7 @@ defmodule Longpi.Agent.Session do
 
   @impl true
   def handle_continue(:load_extensions, state) do
-    if Application.get_env(:longpi, :extensions_enabled, true) do
+    if state.ext_enabled and Application.get_env(:longpi, :extensions_enabled, true) do
       case Longpi.Extensions.Host.start_for(state.ctx.cwd) do
         {:ok, host} ->
           # `start_for` returns as soon as the host is spawned; waiting for it to
@@ -388,6 +429,114 @@ defmodule Longpi.Agent.Session do
     end
   end
 
+  # ── Subagents (parent side) ─────────────────────────────────────────
+  # Called by the agent-tool family from within the Turn task (ctx.session).
+
+  def handle_call(:subagent_snapshot, _from, state), do: {:reply, state.subagents, state}
+
+  def handle_call({:spawn_subagent, args}, _from, state) do
+    with :ok <- check_subagent_limit(state),
+         {:ok, agent_def} <- lookup_subagent_role(state, args[:agent]),
+         {:ok, child} <- create_child_conversation(state, agent_def, args),
+         {:ok, pid} <-
+           Longpi.Agent.Sessions.ensure_started(child.id,
+             agent_def: agent_def,
+             parent_session: self(),
+             subagent_depth: state.ctx.subagent_depth + 1
+           ),
+         :ok <- __MODULE__.send_message(pid, args[:task]) do
+      Process.monitor(pid)
+      counter = state.subagent_counter + 1
+      handle = "#{agent_def.name}-#{counter}"
+
+      info = %{
+        conversation_id: child.id,
+        role: agent_def.name,
+        status: :running,
+        task: args[:task],
+        started_at: System.system_time(:second),
+        pid: pid,
+        collected: false,
+        detail: nil
+      }
+
+      state = %{
+        state
+        | subagent_counter: counter,
+          subagents: Map.put(state.subagents, handle, info)
+      }
+
+      {:reply, {:ok, handle}, notify_subagents(state)}
+    else
+      {:error, %Ash.Error.Invalid{} = error} ->
+        {:reply, {:error, "could not create subagent conversation: #{Exception.message(error)}"},
+         state}
+
+      {:error, reason} when is_binary(reason) ->
+        {:reply, {:error, reason}, state}
+
+      {:error, reason} ->
+        {:reply, {:error, "could not start subagent: #{inspect(reason)}"}, state}
+    end
+  end
+
+  def handle_call({:subagent_send, args}, _from, state) do
+    handle = args[:agent]
+
+    with {:ok, info} <- fetch_subagent(state, handle),
+         {:ok, pid} <- live_subagent_pid(info) do
+      busy? = __MODULE__.status(pid) == :running
+
+      cond do
+        busy? and not args[:interrupt] ->
+          {:reply,
+           {:error,
+            "#{handle} is still working. Pass interrupt: true to redirect it, " <>
+              "or wait_agent for it to finish."}, state}
+
+        busy? ->
+          :ok = __MODULE__.interrupt(pid)
+          :ok = __MODULE__.send_message(pid, args[:message])
+          {:reply, {:ok, handle}, mark_subagent(state, handle, :running)}
+
+        true ->
+          :ok = __MODULE__.send_message(pid, args[:message])
+          {:reply, {:ok, handle}, mark_subagent(state, handle, :running)}
+      end
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:subagent_close, handle}, _from, state) do
+    case fetch_subagent(state, handle) do
+      {:ok, info} ->
+        Longpi.Agent.Sessions.stop(info.conversation_id)
+
+        state =
+          if info.status in [:done, :failed],
+            do: mark_subagent(state, handle, info.status),
+            else: mark_subagent(state, handle, :closed)
+
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:subagent_collect, handles}, _from, state) do
+    subagents =
+      Enum.reduce(handles, state.subagents, fn handle, acc ->
+        case acc do
+          %{^handle => info} -> Map.put(acc, handle, %{info | collected: true})
+          _ -> acc
+        end
+      end)
+
+    {:reply, :ok, %{state | subagents: subagents}}
+  end
+
   @impl true
   def handle_info({:extensions_loaded, host, specs, commands}, %{ext_host: host} = state) do
     state = %{
@@ -463,6 +612,7 @@ defmodule Longpi.Agent.Session do
         state = %{state | messages: state.messages ++ new_messages}
         state = notify(state, {:turn_ended, :complete})
         fire_ext_event(state, "turn_end", %{reason: "complete"})
+        notify_parent_done(state, :done)
         state = maybe_start_titling(state)
         {:noreply, maybe_start_compaction(state)}
 
@@ -471,6 +621,7 @@ defmodule Longpi.Agent.Session do
         state = %{state | messages: state.messages ++ new_messages}
         state = notify(state, {:turn_failed, reason})
         fire_ext_event(state, "turn_end", %{reason: "failed"})
+        notify_parent_done(state, {:failed, reason})
         {:noreply, state}
     end
   end
@@ -506,6 +657,7 @@ defmodule Longpi.Agent.Session do
     state = keep_partial_text(state)
     state = %{state | status: :idle, task: nil, partial: []}
     state = notify(state, {:turn_failed, {:crashed, reason}})
+    notify_parent_done(state, {:failed, {:crashed, reason}})
     {:noreply, state}
   end
 
@@ -518,7 +670,211 @@ defmodule Longpi.Agent.Session do
     {:noreply, apply_compaction(%{state | compaction_task: nil, status: :idle}, :fallback)}
   end
 
+  # A subagent finished a turn (child sessions send this to parent_session).
+  def handle_info({:subagent_update, conversation_id, status}, state) do
+    case Enum.find(state.subagents, fn {_h, info} -> info.conversation_id == conversation_id end) do
+      nil ->
+        {:noreply, state}
+
+      {handle, info} ->
+        {new_status, detail} =
+          case status do
+            :done -> {:done, nil}
+            {:failed, reason} -> {:failed, inspect(reason)}
+          end
+
+        info = %{info | status: new_status, detail: detail}
+        state = %{state | subagents: Map.put(state.subagents, handle, info)}
+        state = notify_subagents(state)
+        {:noreply, maybe_inject_subagent_notice(state, handle, info)}
+    end
+  end
+
+  # A subagent session died. Normal completion keeps the child alive (idle),
+  # so an unexpected DOWN on a non-terminal child means it crashed.
+  def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
+    case Enum.find(state.subagents, fn {_h, info} -> info.pid == pid end) do
+      {handle, %{status: :running} = info} ->
+        info = %{info | status: :failed, detail: "session down: #{inspect(reason)}"}
+        state = %{state | subagents: Map.put(state.subagents, handle, info)}
+        state = notify_subagents(state)
+        {:noreply, maybe_inject_subagent_notice(state, handle, info)}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
+
+  # ── Subagent helpers ────────────────────────────────────────────────
+
+  @subagent_max_children 6
+
+  defp subagent_max_depth, do: Application.get_env(:longpi, :subagent_max_depth, 1)
+
+  # Base toolbox for this session: default (or opt-supplied) built-ins,
+  # narrowed to the role's allowlist for subagents, plus the agent tool family
+  # when this session is still allowed to spawn (depth below the limit).
+  defp build_toolbox(opts, agent_def, depth, cwd) do
+    toolbox = Toolbox.new(opts[:tools] || Toolbox.default_modules())
+
+    toolbox =
+      case agent_def do
+        %Subagents.Def{tools: allow} when is_list(allow) -> Map.take(toolbox, allow)
+        _ -> toolbox
+      end
+
+    if depth < subagent_max_depth() do
+      Toolbox.with_extensions(toolbox, agent_tool_specs(cwd))
+    else
+      toolbox
+    end
+  end
+
+  # spawn_agent's description embeds the roles discovered at session start so
+  # the model knows what it can delegate to.
+  defp agent_tool_specs(cwd) do
+    roles =
+      cwd
+      |> Subagents.discover()
+      |> Enum.map_join("\n", &"- #{&1.name}: #{&1.description}")
+
+    spawn_spec = ToolSpec.from_module(Longpi.Agent.Tools.SpawnAgent)
+
+    spawn_spec = %{
+      spawn_spec
+      | description: spawn_spec.description <> "\nAvailable agent roles:\n" <> roles
+    }
+
+    [
+      spawn_spec
+      | Enum.map(
+          [
+            Longpi.Agent.Tools.WaitAgent,
+            Longpi.Agent.Tools.ListAgents,
+            Longpi.Agent.Tools.SendAgent,
+            Longpi.Agent.Tools.CloseAgent
+          ],
+          &ToolSpec.from_module/1
+        )
+    ]
+  end
+
+  defp check_subagent_limit(state) do
+    running = Enum.count(state.subagents, fn {_h, info} -> info.status == :running end)
+
+    if running < @subagent_max_children do
+      :ok
+    else
+      {:error,
+       "Subagent limit reached (#{@subagent_max_children} running). " <>
+         "wait_agent for some to finish, or close_agent ones you no longer need."}
+    end
+  end
+
+  defp lookup_subagent_role(state, name) do
+    case Subagents.get(state.ctx.cwd, name) do
+      {:ok, agent_def} ->
+        {:ok, agent_def}
+
+      :error ->
+        available =
+          state.ctx.cwd |> Subagents.discover() |> Enum.map_join(", ", & &1.name)
+
+        {:error, "Unknown agent role \"#{name}\". Available: #{available}"}
+    end
+  end
+
+  defp create_child_conversation(state, agent_def, args) do
+    title = args[:task] |> String.split("\n") |> hd() |> String.slice(0, 80)
+
+    Longpi.Agent.create_conversation(%{
+      cwd: args[:cwd] || state.ctx.cwd,
+      model: args[:model] || agent_def.model || state.model,
+      reasoning_effort: agent_def.reasoning_effort || state.reasoning_effort,
+      agent_role: agent_def.name,
+      parent_id: state.conversation_id,
+      title: title
+    })
+  end
+
+  defp fetch_subagent(state, handle) do
+    case state.subagents do
+      %{^handle => info} ->
+        {:ok, info}
+
+      _ ->
+        known = state.subagents |> Map.keys() |> Enum.join(", ")
+        {:error, "Unknown agent handle \"#{handle}\". Known: #{known}"}
+    end
+  end
+
+  defp live_subagent_pid(info) do
+    case Longpi.Agent.Sessions.whereis(info.conversation_id) do
+      nil -> {:error, "#{info.role} session is no longer running (closed or crashed)."}
+      pid -> {:ok, pid}
+    end
+  end
+
+  defp mark_subagent(state, handle, status) do
+    subagents =
+      Map.update!(state.subagents, handle, &%{&1 | status: status, collected: false})
+
+    notify_subagents(%{state | subagents: subagents})
+  end
+
+  # UI event: the current children snapshot, serializable for the channel.
+  defp notify_subagents(state) do
+    snapshot =
+      Map.new(state.subagents, fn {handle, info} ->
+        {handle,
+         %{
+           conversation_id: info.conversation_id,
+           role: info.role,
+           status: info.status,
+           task: info.task |> String.split("\n") |> hd() |> String.slice(0, 120),
+           started_at: info.started_at
+         }}
+      end)
+
+    notify(state, {:subagents, snapshot})
+  end
+
+  # Child sessions tell their parent when a turn ends.
+  defp notify_parent_done(%{parent_session: nil}, _status), do: :ok
+
+  defp notify_parent_done(state, status) do
+    send(state.parent_session, {:subagent_update, state.conversation_id, status})
+    :ok
+  end
+
+  # Codex V1's pattern: when a child finishes while the parent is idle (its
+  # turn already ended), inject a notification message so the user sees it and
+  # the model learns of it next turn. Skipped when wait_agent already returned
+  # this child's output (collected) or the parent is mid-turn (wait/list will
+  # pick it up live).
+  defp maybe_inject_subagent_notice(%{status: :running} = state, _handle, _info), do: state
+  defp maybe_inject_subagent_notice(state, _handle, %{collected: true}), do: state
+
+  defp maybe_inject_subagent_notice(state, handle, info) do
+    verb =
+      case info.status do
+        :done -> "finished"
+        :failed -> "failed (#{info.detail})"
+        other -> to_string(other)
+      end
+
+    message =
+      Message.user(
+        "[subagent] #{handle} (#{info.role}) #{verb}. " <>
+          "Ask me to collect its result if you want it."
+      )
+
+    state = persist(state, [message])
+    state = %{state | messages: state.messages ++ [message]}
+    notify(state, {:history, broadcast_history(state)})
+  end
 
   defp input_tokens(usage) when is_map(usage) do
     usage[:input_tokens] || usage["input_tokens"] || usage[:total_tokens] || usage["total_tokens"]

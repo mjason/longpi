@@ -64,6 +64,16 @@ const en = {
   "msg.update": "Update",
   "msg.fork": "New conversation from here",
 
+  // Subagents
+  "subagents.title": "Agents",
+  "subagents.status.running": "Running",
+  "subagents.status.done": "Done",
+  "subagents.status.failed": "Failed",
+  "subagents.status.closed": "Closed",
+  "subagents.clickToOpen": "Click to open its conversation",
+  "subagents.childBadge": "Subagent · {role}",
+  "subagents.backToParent": "Back to parent conversation",
+
   // File / link preview dialogs
   "file.notFound": "File not found.",
   "file.binary": "This file can't be previewed — download it to view.",
@@ -219,6 +229,16 @@ const zh: Record<I18nKey, string> = {
   "msg.cancel": "取消",
   "msg.update": "更新",
   "msg.fork": "从这里开新会话",
+
+  // Subagents
+  "subagents.title": "子 Agent",
+  "subagents.status.running": "运行中",
+  "subagents.status.done": "已完成",
+  "subagents.status.failed": "失败",
+  "subagents.status.closed": "已关闭",
+  "subagents.clickToOpen": "点击查看它的会话",
+  "subagents.childBadge": "子 Agent · {role}",
+  "subagents.backToParent": "返回父会话",
 
   // File / link preview dialogs
   "file.notFound": "文件不存在。",

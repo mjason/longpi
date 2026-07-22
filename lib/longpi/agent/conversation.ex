@@ -21,7 +21,7 @@ defmodule Longpi.Agent.Conversation do
 
     create :create do
       primary? true
-      accept [:title, :cwd, :model, :system_prompt, :reasoning_effort]
+      accept [:title, :cwd, :model, :system_prompt, :reasoning_effort, :agent_role, :parent_id]
     end
 
     # Delete children first, then the row. Their FKs have no ON DELETE CASCADE
@@ -30,6 +30,9 @@ defmodule Longpi.Agent.Conversation do
     # refresh. after_action?: false ⇒ children go BEFORE the parent.
     destroy :destroy do
       primary? true
+      # Subagent children go first (recursively cleaning their own messages),
+      # then this conversation's own dependents.
+      change cascade_destroy(:children, return_notifications?: false, after_action?: false)
       change cascade_destroy(:messages, return_notifications?: false, after_action?: false)
       change cascade_destroy(:compactions, return_notifications?: false, after_action?: false)
 
@@ -86,6 +89,13 @@ defmodule Longpi.Agent.Conversation do
       public? true
     end
 
+    # Set on subagent conversations: the agent-definition name ("scout",
+    # "worker", …) this child was spawned as. nil = a normal top-level
+    # conversation.
+    attribute :agent_role, :string do
+      public? true
+    end
+
     create_timestamp :inserted_at, public?: true
     update_timestamp :updated_at, public?: true
   end
@@ -93,5 +103,13 @@ defmodule Longpi.Agent.Conversation do
   relationships do
     has_many :messages, Longpi.Agent.ConversationMessage
     has_many :compactions, Longpi.Agent.Compaction
+
+    # Subagent tree: children are conversations spawned by this one's agent.
+    belongs_to :parent, __MODULE__ do
+      public? true
+      attribute_writable? true
+    end
+
+    has_many :children, __MODULE__, destination_attribute: :parent_id
   end
 end

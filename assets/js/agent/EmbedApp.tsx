@@ -49,7 +49,7 @@ export default function EmbedApp() {
   async function createForCwd(): Promise<ConversationSummary | null> {
     const created = await createConversation({
       input: { cwd, model: await defaultModel() },
-      fields: ["id", "title", "cwd", "model"],
+      fields: ["id", "title", "cwd", "model", "parentId", "agentRole"],
       headers: buildCSRFHeaders(),
     });
     return created.success ? created.data : null;
@@ -66,7 +66,7 @@ export default function EmbedApp() {
 
     (async () => {
       const listed = await listConversations({
-        fields: ["id", "title", "cwd", "model"],
+        fields: ["id", "title", "cwd", "model", "parentId", "agentRole"],
         sort: "-insertedAt",
         headers: buildCSRFHeaders(),
       });

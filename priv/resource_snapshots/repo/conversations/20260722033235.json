@@ -1,0 +1,133 @@
+{
+  "attributes": [
+    {
+      "default": "nil",
+      "size": null,
+      "type": "uuid",
+      "source": "id",
+      "references": null,
+      "allow_nil?": false,
+      "primary_key?": true,
+      "generated?": false
+    },
+    {
+      "default": "nil",
+      "size": null,
+      "type": "text",
+      "source": "title",
+      "references": null,
+      "allow_nil?": true,
+      "primary_key?": false,
+      "generated?": false
+    },
+    {
+      "default": "nil",
+      "size": null,
+      "type": "text",
+      "source": "cwd",
+      "references": null,
+      "allow_nil?": false,
+      "primary_key?": false,
+      "generated?": false
+    },
+    {
+      "default": "nil",
+      "size": null,
+      "type": "text",
+      "source": "model",
+      "references": null,
+      "allow_nil?": false,
+      "primary_key?": false,
+      "generated?": false
+    },
+    {
+      "default": "nil",
+      "size": null,
+      "type": "text",
+      "source": "system_prompt",
+      "references": null,
+      "allow_nil?": true,
+      "primary_key?": false,
+      "generated?": false
+    },
+    {
+      "default": "nil",
+      "size": null,
+      "type": "text",
+      "source": "reasoning_effort",
+      "references": null,
+      "allow_nil?": true,
+      "primary_key?": false,
+      "generated?": false
+    },
+    {
+      "default": "nil",
+      "size": null,
+      "type": "text",
+      "source": "agent_role",
+      "references": null,
+      "allow_nil?": true,
+      "primary_key?": false,
+      "generated?": false
+    },
+    {
+      "default": "nil",
+      "size": null,
+      "type": "utc_datetime_usec",
+      "source": "inserted_at",
+      "references": null,
+      "allow_nil?": false,
+      "primary_key?": false,
+      "generated?": false
+    },
+    {
+      "default": "nil",
+      "size": null,
+      "type": "utc_datetime_usec",
+      "source": "updated_at",
+      "references": null,
+      "allow_nil?": false,
+      "primary_key?": false,
+      "generated?": false
+    },
+    {
+      "default": "nil",
+      "size": null,
+      "type": "uuid",
+      "source": "parent_id",
+      "references": {
+        "name": "conversations_parent_id_fkey",
+        "table": "conversations",
+        "multitenancy": {
+          "global": null,
+          "strategy": null,
+          "attribute": null
+        },
+        "destination_attribute": "id",
+        "primary_key?": true,
+        "on_delete": null,
+        "on_update": null,
+        "deferrable": false,
+        "destination_attribute_generated": null,
+        "destination_attribute_default": null
+      },
+      "allow_nil?": true,
+      "primary_key?": false,
+      "generated?": false
+    }
+  ],
+  "table": "conversations",
+  "hash": "6CC92C6165AF40BC705AF6E14C39FFE9798BD875B4FC80B871EF65CECEBD5228",
+  "multitenancy": {
+    "global": null,
+    "strategy": null,
+    "attribute": null
+  },
+  "identities": [],
+  "repo": "Elixir.Longpi.Repo",
+  "strict?": false,
+  "custom_indexes": [],
+  "base_filter": null,
+  "custom_statements": [],
+  "has_create_action": true
+}

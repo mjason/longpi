@@ -207,6 +207,8 @@ export type CreateConversationInput = {
   model: string;
   systemPrompt?: string | null;
   reasoningEffort?: string | null;
+  agentRole?: string | null;
+  parentId?: UUID | null;
 };
 
 export type CreateConversationFields = UnifiedFieldSelection<ConversationResourceSchema>[];
