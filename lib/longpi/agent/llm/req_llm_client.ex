@@ -157,10 +157,33 @@ defmodule Longpi.Agent.LLM.ReqLLMClient do
 
   defp to_req_llm_message(%{role: :user, attachments: [_ | _] = attachments} = message) do
     text = normalize_directives(message[:content] || "")
-    parts = Enum.reject(Enum.map(attachments, &attachment_part/1), &is_nil/1)
+
+    # Images are numbered to match the composer's inline "[Image #N]" markers
+    # (pi-style): each image part is preceded by a text label so the model can
+    # tie "[Image #2]" in the prose to the actual second image.
+    {parts, _n} =
+      Enum.reduce(attachments, {[], 0}, fn attachment, {acc, n} ->
+        case attachment_part(attachment) do
+          nil ->
+            {acc, n}
+
+          part ->
+            if attachment["type"] == "image" do
+              label = ContentPart.text(image_label(n + 1, attachment["name"]))
+              {[part, label | acc], n + 1}
+            else
+              {[part | acc], n}
+            end
+        end
+      end)
+
+    parts = Enum.reverse(parts)
     parts = if text == "", do: parts, else: [ContentPart.text(text) | parts]
     Context.user(parts)
   end
+
+  defp image_label(n, name) when is_binary(name) and name != "", do: "[Image ##{n}: #{name}]"
+  defp image_label(n, _name), do: "[Image ##{n}]"
 
   defp to_req_llm_message(%{role: :user, content: content}),
     do: Context.user(normalize_directives(content))

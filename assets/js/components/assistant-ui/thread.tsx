@@ -48,6 +48,7 @@ import {
   ThreadPrimitive,
   type ToolCallMessagePartComponent,
   useAuiState,
+  useComposerRuntime,
 } from "@assistant-ui/react";
 import {
   ArrowDownIcon,
@@ -66,7 +67,9 @@ import {
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   type ComponentType,
   type FC,
   type PropsWithChildren,
@@ -314,6 +317,52 @@ const ThreadWelcome: FC = () => {
   );
 };
 
+/**
+ * pi-style inline image markers: adding an image attachment appends
+ * "[Image #N]" to the composer text (so the message carries the image's
+ * position and ordinal — extra signal for the model); removing the
+ * attachment removes its marker. Numbers are per-message and stable.
+ */
+const ComposerImageMarkers: FC = () => {
+  const composer = useComposerRuntime();
+  const attachments = useAuiState((s) => s.composer.attachments);
+  // attachment id -> assigned marker number (stable; never renumbered).
+  const assigned = useRef(new Map<string, number>());
+
+  useEffect(() => {
+    const images = attachments.filter(
+      (attachment) => attachment.type === "image",
+    );
+    const map = assigned.current;
+    let text = composer.getState().text;
+    let changed = false;
+
+    // New image attachments: assign the next number, append the marker.
+    for (const attachment of images) {
+      if (map.has(attachment.id)) continue;
+      const n = map.size === 0 ? 1 : Math.max(...map.values()) + 1;
+      map.set(attachment.id, n);
+      const marker = `[Image #${n}]`;
+      text = text.length === 0 || text.endsWith(" ") ? text + marker : `${text} ${marker}`;
+      changed = true;
+    }
+
+    // Removed attachments: strip their marker (numbers stay stable, like pi).
+    const liveIds = new Set(images.map((attachment) => attachment.id));
+    for (const [id, n] of [...map]) {
+      if (liveIds.has(id)) continue;
+      map.delete(id);
+      text = text.replace(new RegExp(`\\s?\\[Image #${n}\\]`), "");
+      changed = true;
+    }
+
+    if (changed) composer.setText(text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachments]);
+
+  return null;
+};
+
 const Composer: FC = () => {
   const { t } = useI18n();
   // "@" file mentions (pi-style): workspace paths from the conversation's cwd.
@@ -339,6 +388,7 @@ const Composer: FC = () => {
     <ComposerPrimitive.Unstable_TriggerPopoverRoot>
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
       <SlashCommandMenu />
+      <ComposerImageMarkers />
       <ComposerTriggerPopover char="@" {...mention} fallbackIcon={FileIcon} />
       <ComposerPrimitive.AttachmentDropzone asChild>
         <div

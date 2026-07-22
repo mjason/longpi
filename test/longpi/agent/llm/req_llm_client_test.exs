@@ -58,10 +58,12 @@ defmodule Longpi.Agent.LLM.ReqLLMClientTest do
     assert hd(images).data == Base.decode64!(@png_base64)
   end
 
-  test "an image-only message (no text) yields just the image part" do
+  test "an image-only message yields its numbered label plus the image part" do
     context = ReqLLMClient.build_context([Message.user("", [image_attachment()])])
 
     assert [%ReqLLM.Message{content: parts}] = context.messages
-    assert [%ContentPart{type: :image}] = parts
+    # pi-style: every image is preceded by its "[Image #N…]" text label.
+    assert [%ContentPart{type: :text, text: "[Image #1" <> _}, %ContentPart{type: :image}] =
+             parts
   end
 end
