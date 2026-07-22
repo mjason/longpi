@@ -218,6 +218,13 @@ defmodule Longpi.Agent.SessionPersistenceTest do
     end)
 
     :ok = Session.edit_last(session, "second wording")
+
+    # The history broadcast must ALREADY include the replacement message —
+    # the edit flow has no optimistic client add, so broadcasting the
+    # truncated list would make the message vanish from the UI.
+    assert_receive {:agent_event, {:history, history}}, 1_000
+    assert Enum.any?(history, &(&1.content == "second wording"))
+
     assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
 
     # Persisted history holds exactly the edited turn.

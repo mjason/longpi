@@ -244,13 +244,15 @@ defmodule Longpi.Agent.Session do
   def handle_call({:edit_last, text, attachments}, _from, state) do
     case truncate_before_last_user(state) do
       {:ok, state} ->
-        # Clients rebuild from the truncated history, then the replacement
-        # user message streams in like a normal send.
-        state = notify(state, {:history, broadcast_history(state)})
+        # Append the replacement FIRST, then broadcast: unlike send (where the
+        # client adds the message optimistically), the edit flow's only source
+        # of truth is this history push — broadcasting the truncated list
+        # would make the new message vanish until a reload.
         user_message = Message.user(text, attachments)
         state = persist(state, [user_message])
-        messages = state.messages ++ [user_message]
-        {:reply, :ok, run_turn(%{state | messages: messages}, messages)}
+        state = %{state | messages: state.messages ++ [user_message]}
+        state = notify(state, {:history, broadcast_history(state)})
+        {:reply, :ok, run_turn(state, state.messages)}
 
       :error ->
         {:reply, {:error, :nothing_to_edit}, state}

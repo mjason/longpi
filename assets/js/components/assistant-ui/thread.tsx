@@ -221,7 +221,9 @@ const EditComposer: FC = () => {
 };
 
 // Fork: start a NEW conversation seeded with history up to this message.
-const ForkMenuItem: FC = () => {
+// A first-class action-bar button — burying it in the ⋯ menu made it
+// undiscoverable.
+const ForkButton: FC = () => {
   const { t } = useI18n();
   const fork = useContext(ForkContext);
   const position = useAuiState(
@@ -229,12 +231,9 @@ const ForkMenuItem: FC = () => {
   );
   if (!fork || position == null || position < 0) return null;
   return (
-    <ActionBarMorePrimitive.Item
-      className="aui-action-bar-more-item hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none"
-      onClick={() => fork(position)}
-    >
-      <GitBranchIcon className="size-4" /> {t("msg.fork")}
-    </ActionBarMorePrimitive.Item>
+    <TooltipIconButton tooltip={t("msg.fork")} onClick={() => fork(position)}>
+      <GitBranchIcon />
+    </TooltipIconButton>
   );
 };
 
@@ -248,7 +247,8 @@ const UserActionBar: FC = () => {
   return (
     <ActionBarPrimitive.Root
       hideWhenRunning
-      autohide="never"
+      // Hover-only: the pencil shows when the pointer is over the message.
+      autohide="always"
       className="aui-user-action-bar-root flex flex-col items-end"
     >
       <ActionBarPrimitive.Edit asChild>
@@ -558,6 +558,7 @@ const AssistantActionBar: FC = () => {
         </TooltipIconButton>
       </ActionBarPrimitive.Copy>
       <RegenerateButton />
+      <ForkButton />
       <ActionBarMorePrimitive.Root>
         <ActionBarMorePrimitive.Trigger asChild>
           <TooltipIconButton
@@ -573,7 +574,6 @@ const AssistantActionBar: FC = () => {
           sideOffset={6}
           className="aui-action-bar-more-content bg-popover/95 text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[8rem] overflow-hidden rounded-xl border-0 p-1.5 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18),0_2px_10px_-2px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] backdrop-blur-sm dark:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.5)] dark:ring-white/[0.08]"
         >
-          <ForkMenuItem />
           <ActionBarPrimitive.ExportMarkdown asChild>
             <ActionBarMorePrimitive.Item className="aui-action-bar-more-item hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none">
               <DownloadIcon className="size-4" />
