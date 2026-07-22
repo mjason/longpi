@@ -137,7 +137,7 @@ export function ModelsSection() {
                     aria-label="Remove model"
                     className="size-7 text-muted-foreground hover:text-destructive"
                   >
-                    <Trash2 className="size-3.5" />
+                    <Trash2 className="size-4" />
                   </Button>
                 </div>
               ))}

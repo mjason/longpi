@@ -34,6 +34,7 @@ import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { Thread } from "../components/assistant-ui/thread";
 import { WorkspaceCwdContext } from "../components/assistant-ui/file-link-modal";
+import { Badge } from "../components/assistant-ui/badge";
 import { AuthStatus } from "./AuthStatus";
 import { ConversationUsageContext } from "./ContextMeter";
 import { ExtCommandsContext } from "./ExtCommandsContext";
@@ -619,22 +620,24 @@ export function ConversationPane({
           </div>
           <div className="flex-1" />
           {compactionCount > 0 && (
-            <span
-              className="flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs text-muted-foreground"
+            <Badge
+              variant="secondary"
+              size="sm"
+              className="gap-1.5 rounded-full"
               title="Older messages have been summarized to fit the model's context window. The full history is still stored."
             >
               <Layers className="size-3.5" />
               {t("pane.contextCompacted")}{compactionCount > 1 ? ` ×${compactionCount}` : ""}
-            </span>
+            </Badge>
           )}
           {headerExtra}
         </header>
 
         {conversation.parentId && (
-          <div className="flex items-center gap-2 border-b border-border bg-blue-500/5 px-4 py-1.5 text-xs">
-            <span className="rounded-full bg-blue-100 px-2 py-0.5 font-medium text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
+          <div className="flex items-center gap-2 border-b border-border bg-primary/5 px-4 py-1.5 text-xs">
+            <Badge variant="info" size="sm">
               {t("subagents.childBadge", { role: conversation.agentRole ?? "agent" })}
-            </span>
+            </Badge>
             <button
               type="button"
               className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"

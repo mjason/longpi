@@ -245,7 +245,9 @@ function ContextDisplayContent({
       sideOffset={8}
       data-slot="context-display-popover"
       className={cn(
-        "bg-popover text-popover-foreground w-56 rounded-xl border-0 p-3 text-left shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18),0_2px_10px_-2px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] dark:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.5)] dark:ring-white/[0.08] [&_[data-slot=tooltip-arrow]]:hidden",
+        // The soft-ring + diffuse-shadow surface comes from TooltipContent now;
+        // only the layout specifics live here.
+        "w-56 rounded-xl p-3 text-left [&_[data-slot=tooltip-arrow]]:hidden",
         className,
       )}
     >
