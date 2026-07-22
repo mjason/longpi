@@ -24,10 +24,9 @@ defmodule Longpi.Agent.Session do
     Compactor,
     ConversationMessage,
     Message,
+    PromptAssembly,
     Subagents,
-    SystemPrompt,
     Toolbox,
-    ToolSpec,
     Turn
   }
 
@@ -117,24 +116,22 @@ defmodule Longpi.Agent.Session do
       subagent_depth: depth
     }
 
-    system_prompt =
-      opts[:system_prompt] ||
-        SystemPrompt.resolve(ctx, conversation && conversation.system_prompt)
+    # The ingredients the prompt is (re)assembled from each turn — see
+    # `Longpi.Agent.PromptAssembly`. Nothing model-facing is frozen here; this
+    # is only the initial snapshot for display before the first turn.
+    prompt_inputs = %{
+      system_prompt_override: opts[:system_prompt],
+      conversation_override: conversation && conversation.system_prompt,
+      ctx: ctx,
+      agent_def: agent_def
+    }
 
-    # A subagent role appends its own instructions to the base prompt (pi's
-    # --append-system-prompt model: extend, don't replace).
-    system_prompt =
-      case agent_def do
-        %Subagents.Def{system_prompt: extra} when extra != "" ->
-          system_prompt <> "\n\n# Your role\n\n" <> extra
-
-        _ ->
-          system_prompt
-      end
+    builtin_toolbox = builtin_toolbox(opts, agent_def)
+    spawns_subagents? = depth < subagent_max_depth()
 
     {:ok,
      %{
-       messages: [Message.system(system_prompt) | history],
+       messages: [PromptAssembly.system_message(prompt_inputs) | history],
        status: :idle,
        task: nil,
        partial: [],
@@ -146,10 +143,22 @@ defmodule Longpi.Agent.Session do
        # Reasoning effort ("minimal"|"low"|"medium"|"high") or nil for the
        # model's default; passed to the LLM per turn.
        reasoning_effort: (conversation && conversation.reasoning_effort) || opts[:reasoning_effort],
-       # `base_toolbox` is the built-ins only; `toolbox` merges extensions on
-       # top and is rebuilt from the base on reload.
-       base_toolbox: build_toolbox(opts, agent_def, depth, ctx.cwd),
-       toolbox: build_toolbox(opts, agent_def, depth, ctx.cwd),
+       # Prompt-assembly ingredients. `builtin_toolbox` (role-narrowed
+       # built-ins) is fixed; `extension_specs` update on load/reload;
+       # `spawns_subagents?` gates the agent tool family. The assembled
+       # `toolbox` is a cache refreshed on each assembly (turn + ext events) —
+       # only its count is read between turns.
+       prompt_inputs: prompt_inputs,
+       builtin_toolbox: builtin_toolbox,
+       spawns_subagents?: spawns_subagents?,
+       extension_specs: [],
+       toolbox:
+         PromptAssembly.toolbox(%{
+           builtin_toolbox: builtin_toolbox,
+           extension_specs: [],
+           spawns_subagents?: spawns_subagents?,
+           ctx: ctx
+         }),
        stream_to: opts[:stream_to],
        conversation_id: opts[:conversation_id],
        persisted_count: length(history),
@@ -378,8 +387,8 @@ defmodule Longpi.Agent.Session do
   def handle_call(:reload_extensions, _from, state) do
     specs = Longpi.Extensions.Host.reload(state.ext_host)
     commands = Longpi.Extensions.Host.commands(state.ext_host)
-    toolbox = Toolbox.with_extensions(state.base_toolbox, specs)
-    state = %{state | toolbox: toolbox, ext_commands: commands}
+    state = %{state | extension_specs: specs, ext_commands: commands}
+    state = %{state | toolbox: assemble_toolbox(state)}
     # Push the fresh command list so the composer's slash menu updates live.
     state = notify(state, {:commands, commands})
     {:reply, {:ok, %{tools: length(specs), commands: length(commands)}}, state}
@@ -553,11 +562,8 @@ defmodule Longpi.Agent.Session do
 
   @impl true
   def handle_info({:extensions_loaded, host, specs, commands}, %{ext_host: host} = state) do
-    state = %{
-      state
-      | toolbox: Toolbox.with_extensions(state.base_toolbox, specs),
-        ext_commands: commands
-    }
+    state = %{state | extension_specs: specs, ext_commands: commands}
+    state = %{state | toolbox: assemble_toolbox(state)}
 
     # Push the now-available slash commands to any connected channel.
     {:noreply, notify(state, {:commands, commands})}
@@ -730,52 +736,36 @@ defmodule Longpi.Agent.Session do
 
   defp subagent_max_depth, do: Application.get_env(:longpi, :subagent_max_depth, 1)
 
-  # Base toolbox for this session: default (or opt-supplied) built-ins,
-  # narrowed to the role's allowlist for subagents, plus the agent tool family
-  # when this session is still allowed to spawn (depth below the limit).
-  defp build_toolbox(opts, agent_def, depth, cwd) do
+  # The fixed part of the toolbox: default (or opt-supplied) built-ins,
+  # narrowed to a subagent role's allowlist. The subagent tool family and
+  # extension tools are layered on at assembly time (PromptAssembly), so this
+  # never changes over the session's life.
+  defp builtin_toolbox(opts, agent_def) do
     toolbox = Toolbox.new(opts[:tools] || Toolbox.default_modules())
 
-    toolbox =
-      case agent_def do
-        %Subagents.Def{tools: allow} when is_list(allow) -> Map.take(toolbox, allow)
-        _ -> toolbox
-      end
-
-    if depth < subagent_max_depth() do
-      Toolbox.with_extensions(toolbox, agent_tool_specs(cwd))
-    else
-      toolbox
+    case agent_def do
+      %Subagents.Def{tools: allow} when is_list(allow) -> Map.take(toolbox, allow)
+      _ -> toolbox
     end
   end
 
-  # spawn_agent's description embeds the roles discovered at session start so
-  # the model knows what it can delegate to.
-  defp agent_tool_specs(cwd) do
-    roles =
-      cwd
-      |> Subagents.discover()
-      |> Enum.map_join("\n", &"- #{&1.name}: #{&1.description}")
+  # Re-derive the model-facing prompt (system message + toolbox) from current
+  # state, and fold the fresh system message back into `messages` so both the
+  # LLM context and the stored history stay current.
+  defp assemble_prompt(state) do
+    [_stale_system | history] = state.messages
+    system = PromptAssembly.system_message(state.prompt_inputs)
+    toolbox = assemble_toolbox(state)
+    %{state | messages: [system | history], toolbox: toolbox}
+  end
 
-    spawn_spec = ToolSpec.from_module(Longpi.Agent.Tools.SpawnAgent)
-
-    spawn_spec = %{
-      spawn_spec
-      | description: spawn_spec.description <> "\nAvailable agent roles:\n" <> roles
-    }
-
-    [
-      spawn_spec
-      | Enum.map(
-          [
-            Longpi.Agent.Tools.WaitAgent,
-            Longpi.Agent.Tools.ListAgents,
-            Longpi.Agent.Tools.SendAgent,
-            Longpi.Agent.Tools.CloseAgent
-          ],
-          &ToolSpec.from_module/1
-        )
-    ]
+  defp assemble_toolbox(state) do
+    PromptAssembly.toolbox(%{
+      builtin_toolbox: state.builtin_toolbox,
+      extension_specs: state.extension_specs,
+      spawns_subagents?: state.spawns_subagents?,
+      ctx: state.ctx
+    })
   end
 
   defp check_subagent_limit(state) do
@@ -1011,6 +1001,10 @@ defmodule Longpi.Agent.Session do
 
   defp run_turn(state, _messages) do
     session = self()
+
+    # Reassemble the prompt from current state so this turn's system message
+    # and tool set reflect the latest settings, subagent roles, and extensions.
+    state = assemble_prompt(state)
 
     config = %{
       llm: state.llm,
