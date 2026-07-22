@@ -1,9 +1,8 @@
 defmodule Longpi.Extensions do
   @moduledoc """
-  Global extension management: the shared `~/.longpi/extensions/` directory and
-  `~/.longpi/packages.json` that every session's host loads. Per-conversation
-  (project) extensions live under each workspace's `.longpi/` and are managed
-  from that conversation.
+  Global extension management: the shared `~/.longpi/extensions/` directory
+  that every session's host loads. Per-conversation (project) extensions live
+  under each workspace's `.longpi/` and are managed from that conversation.
   """
 
   @doc """
@@ -17,35 +16,19 @@ defmodule Longpi.Extensions do
   end
 
   @doc """
-  The global packages config file (`~/.longpi/packages.json`). Overridable via
-  `config :longpi, :global_packages_path` so tests don't read the real one.
-  """
-  def global_packages_path do
-    Application.get_env(:longpi, :global_packages_path) ||
-      Path.expand("~/.longpi/packages.json")
-  end
-
-  @doc """
-  Whether a Bun extension host is needed for this workspace at all: true only
-  when some extension entry exists (global or project `*.ts`/`*.js` file, a
-  `subdir/index.ts|js`, or a configured packages.json). Sessions skip spawning
-  the Bun process entirely otherwise — the common no-extensions case costs
-  nothing.
+  Whether an extension host is needed for this workspace at all: true only
+  when some extension entry exists (global or project `*.ts`/`*.js`/`*.mjs`
+  file, or a `subdir/index.ts|js`). Sessions skip booting the wasm guest
+  otherwise — the common no-extensions case costs nothing.
   """
   @spec any_for?(String.t()) :: boolean()
   def any_for?(cwd) do
     dirs = [global_dir(), Path.join(cwd, ".longpi/extensions")]
-
-    packages = [
-      global_packages_path(),
-      Path.join(cwd, ".longpi/packages.json")
-    ]
-
-    Enum.any?(dirs, &dir_has_extension?/1) or Enum.any?(packages, &packages_configured?/1)
+    Enum.any?(dirs, &dir_has_extension?/1)
   end
 
-  # Mirrors host.ts discovery: one level deep — *.ts/*.js files or
-  # subdir/index.ts|index.js.
+  # Mirrors the harness's discovery: one level deep — *.ts/*.js/*.mjs files
+  # or subdir/index.ts|index.js.
   defp dir_has_extension?(dir) do
     case File.ls(dir) do
       {:ok, entries} ->
@@ -53,7 +36,7 @@ defmodule Longpi.Extensions do
           path = Path.join(dir, entry)
 
           cond do
-            String.ends_with?(entry, [".ts", ".js"]) -> File.regular?(path)
+            String.ends_with?(entry, [".ts", ".js", ".mjs"]) -> File.regular?(path)
             File.dir?(path) -> File.regular?(Path.join(path, "index.ts")) or
                                  File.regular?(Path.join(path, "index.js"))
             true -> false
@@ -62,16 +45,6 @@ defmodule Longpi.Extensions do
 
       {:error, _} ->
         false
-    end
-  end
-
-  defp packages_configured?(path) do
-    with {:ok, body} <- File.read(path),
-         {:ok, %{"packages" => packages}} when is_map(packages) and map_size(packages) > 0 <-
-           Jason.decode(body) do
-      true
-    else
-      _ -> false
     end
   end
 
@@ -89,24 +62,6 @@ defmodule Longpi.Extensions do
       {:error, _} ->
         []
     end
-  end
-
-  @doc "The global packages map (`%{name => spec}`); empty when unset/invalid."
-  @spec read_packages() :: %{optional(String.t()) => String.t()}
-  def read_packages do
-    with {:ok, body} <- File.read(global_packages_path()),
-         {:ok, %{"packages" => packages}} when is_map(packages) <- Jason.decode(body) do
-      packages
-    else
-      _ -> %{}
-    end
-  end
-
-  @doc "Writes the global packages map back to `~/.longpi/packages.json`."
-  @spec write_packages(map()) :: :ok | {:error, term()}
-  def write_packages(packages) when is_map(packages) do
-    File.mkdir_p!(Path.dirname(global_packages_path()))
-    File.write(global_packages_path(), Jason.encode!(%{packages: packages}, pretty: true))
   end
 
   @doc """

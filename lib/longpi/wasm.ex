@@ -13,7 +13,7 @@ defmodule Longpi.Wasm do
   @moduledoc """
   Self-maintained minimal wasmtime embedding (see native/longpi_wasm) used by
   the Wasm extension host: runs a WASI-p1 QuickJS guest whose stdio speaks the
-  same 4-byte-BE + JSON frame protocol as the Bun host.
+  same 4-byte-BE + JSON frame protocol the extension host speaks.
 
   The calling process receives:
 
@@ -34,7 +34,7 @@ defmodule Longpi.Wasm do
     instance =
       Longpi.Wasm.Native.start(
         qjs_wasm_path(),
-        preopen_dir,
+        [{preopen_dir, "/"}],
         ["qjs", "/" <> script_rel_path],
         id
       )

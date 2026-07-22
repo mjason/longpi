@@ -41,20 +41,4 @@ defmodule Longpi.ExtensionsLazyTest do
     refute Extensions.any_for?(project)
   end
 
-  test "a configured project packages.json counts", %{project: project} do
-    File.mkdir_p!(Path.join(project, ".longpi"))
-
-    File.write!(
-      Path.join(project, ".longpi/packages.json"),
-      ~s({"packages": {"leftpad": "^1.0.0"}})
-    )
-
-    assert Extensions.any_for?(project)
-  end
-
-  test "an empty packages map does not count", %{project: project} do
-    File.mkdir_p!(Path.join(project, ".longpi"))
-    File.write!(Path.join(project, ".longpi/packages.json"), ~s({"packages": {}}))
-    refute Extensions.any_for?(project)
-  end
 end

@@ -1,14 +1,23 @@
 defmodule Longpi.Extensions.Host do
   @moduledoc """
-  Manages one Bun extension-host process for a session's working directory.
+  Manages one WebAssembly extension host for a session's working directory.
 
-  The Elixir brain owns the agent loop; this Bun process (see
-  `priv/ext_host/host.ts`) owns extension module loading and tool execution,
-  mirroring pi's extension model across an IPC boundary. Framing is Erlang's
-  `{:packet, 4}` (4-byte length prefix) carrying JSON both ways.
+  The Elixir brain owns the agent loop; a sandboxed QuickJS guest (see
+  `priv/wasm/harness.js`, run by the self-maintained wasmtime NIF in
+  `Longpi.Wasm`) owns extension module loading and execution. Framing is a
+  4-byte length prefix carrying JSON both ways — the same protocol the old
+  Bun host spoke, so extensions are source-compatible (modern JS; TS type
+  syntax is not parsed by QuickJS).
 
-  The host is best-effort: if Bun isn't installed, `start_for/1` returns
-  `:none` and the session simply runs with only its built-in tools.
+  The guest has no capabilities beyond stdio and read-only extension dirs.
+  Real-world effects are capability frames this process services:
+
+    * `http` — fetch() shim; executed with Req, so timeouts/caps/secrets are
+      enforced (and auditable) on the Elixir side
+    * `run`  — `longpi.run(cmd, args)`; runs a system program (python, go, …)
+
+  Reload = kill the instance and boot a fresh one: instances start in
+  milliseconds and stale module caches can't exist.
   """
 
   use GenServer, restart: :temporary
@@ -18,22 +27,20 @@ defmodule Longpi.Extensions.Host do
   alias Longpi.Agent.ToolSpec
 
   @call_timeout 120_000
+  # A tool call stuck longer than this gets the guest epoch-interrupted.
+  @watchdog_timeout 150_000
+  @run_timeout 60_000
+  @http_body_cap 5_000_000
 
   # Client
 
-  @doc """
-  Starts a host for `cwd`, or returns `:none` when Bun is unavailable so the
-  caller can degrade to built-in tools only.
-  """
+  @doc "Starts a host for `cwd`, or `:none` when the workspace has no extensions."
   @spec start_for(String.t()) :: {:ok, pid()} | :none
   def start_for(cwd) do
     with true <- Longpi.Extensions.any_for?(cwd),
-         {:ok, _bun} <- find_bun(),
          {:ok, pid} <- GenServer.start_link(__MODULE__, cwd) do
       {:ok, pid}
     else
-      # No extensions/packages anywhere for this workspace (the common case),
-      # no Bun on PATH, or the host failed to boot: run without a Bun process.
       _ -> :none
     end
   end
@@ -60,7 +67,7 @@ defmodule Longpi.Extensions.Host do
   @spec fire_event(pid(), String.t(), map()) :: :ok
   def fire_event(host, event, payload), do: GenServer.cast(host, {:event, event, payload})
 
-  @doc "Re-discovers and hot-reloads the extension dirs (self-evolution)."
+  @doc "Re-discovers extensions by rebooting the guest (fresh instance)."
   @spec reload(pid()) :: [ToolSpec.t()]
   def reload(host), do: GenServer.call(host, :reload, 15_000)
 
@@ -74,33 +81,61 @@ defmodule Longpi.Extensions.Host do
 
   @impl true
   def init(cwd) do
-    {:ok, bun} = find_bun()
-    script = Path.join(:code.priv_dir(:longpi), "ext_host/host.ts")
+    case boot_instance(cwd) do
+      {:ok, instance, wasm_id} ->
+        {:ok,
+         %{
+           instance: instance,
+           wasm_id: wasm_id,
+           cwd: cwd,
+           tools: [],
+           commands: [],
+           ready?: false,
+           waiters: [],
+           pending: %{},
+           next_id: 0,
+           watchdog: nil
+         }}
 
-    port =
-      Port.open(
-        {:spawn_executable, bun},
-        [{:args, [script]}, :binary, {:packet, 4}, :exit_status, {:cd, cwd}]
-      )
+      {:error, reason} ->
+        {:stop, reason}
+    end
+  end
 
-    send_frame(port, %{
-      type: "load",
-      cwd: cwd,
-      dirs: extension_dirs(cwd),
-      env: Longpi.Extensions.secret_env()
-    })
+  # Boots a fresh QuickJS guest and sends it the load frame. The harness dir
+  # is preopened at /host; each existing extension dir at /ext0, /ext1, …
+  defp boot_instance(cwd) do
+    wasm_id = System.unique_integer([:positive])
+    harness_dir = Path.join(:code.priv_dir(:longpi), "wasm")
 
-    {:ok,
-     %{
-       port: port,
-       cwd: cwd,
-       tools: [],
-       commands: [],
-       ready?: false,
-       waiters: [],
-       pending: %{},
-       next_id: 0
-     }}
+    {host_dirs, guest_dirs} =
+      cwd
+      |> extension_dirs()
+      |> Enum.filter(&File.dir?/1)
+      |> Enum.with_index()
+      |> Enum.map(fn {dir, index} -> {dir, "/ext#{index}"} end)
+      |> Enum.unzip()
+
+    preopens = [{harness_dir, "/host"} | Enum.zip(host_dirs, guest_dirs)]
+
+    case Longpi.Wasm.Native.start(
+           Path.join(harness_dir, "qjs-wasi.wasm"),
+           preopens,
+           ["qjs", "/host/harness.js"],
+           wasm_id
+         ) do
+      instance when is_reference(instance) ->
+        Longpi.Wasm.send_json(instance, %{
+          type: "load",
+          cwd: cwd,
+          dirs: guest_dirs,
+          env: Longpi.Extensions.secret_env()
+        })
+
+        {:ok, instance, wasm_id}
+    end
+  rescue
+    e in ErlangError -> {:error, e.original}
   end
 
   @impl true
@@ -114,41 +149,60 @@ defmodule Longpi.Extensions.Host do
   end
 
   def handle_call(:reload, from, state) do
-    # Re-send env so newly-saved secrets take effect on /reload.
-    send_frame(state.port, %{type: "reload", env: Longpi.Extensions.secret_env()})
-    {:noreply, %{state | ready?: false, waiters: [{from, :tool_specs} | state.waiters]}}
+    # Fresh guest: newly written/edited extension files and newly saved
+    # secrets all take effect, and no stale module cache can survive.
+    Longpi.Wasm.close_stdin(state.instance)
+    Longpi.Wasm.interrupt(state.instance)
+
+    case boot_instance(state.cwd) do
+      {:ok, instance, wasm_id} ->
+        state = %{
+          state
+          | instance: instance,
+            wasm_id: wasm_id,
+            ready?: false,
+            waiters: [{from, :tool_specs} | state.waiters]
+        }
+
+        {:noreply, state}
+
+      {:error, reason} ->
+        {:stop, reason, state}
+    end
   end
 
-  def handle_call({:call, :tool, name, args}, from, state) do
+  def handle_call({:call, kind, name, args}, from, state) do
     id = state.next_id
-    # Inject the current secrets with every call — Elixir owns the state, so a
-    # key added/changed in the UI takes effect on the next tool call with no
-    # /reload.
-    send_frame(state.port, %{
-      type: "call",
-      id: id,
-      tool: name,
-      args: args,
-      env: Longpi.Extensions.secret_env()
-    })
 
-    {:noreply, %{state | next_id: id + 1, pending: Map.put(state.pending, id, from)}}
-  end
+    frame =
+      case kind do
+        # Secrets ride along on every call — a key added/changed in the UI
+        # takes effect on the next tool call with no reload.
+        :tool ->
+          %{type: "call", id: id, tool: name, args: args, env: Longpi.Extensions.secret_env()}
 
-  def handle_call({:call, :command, name, args}, from, state) do
-    id = state.next_id
-    send_frame(state.port, %{type: "command", id: id, name: name, args: args})
-    {:noreply, %{state | next_id: id + 1, pending: Map.put(state.pending, id, from)}}
+        :command ->
+          %{type: "command", id: id, name: name, args: args}
+      end
+
+    Longpi.Wasm.send_json(state.instance, frame)
+    watchdog = state.watchdog || Process.send_after(self(), :watchdog, @watchdog_timeout)
+
+    {:noreply,
+     %{state | next_id: id + 1, pending: Map.put(state.pending, id, from), watchdog: watchdog}}
   end
 
   @impl true
   def handle_cast({:event, event, payload}, state) do
-    if state.ready?, do: send_frame(state.port, %{type: "event", event: event, payload: payload})
+    if state.ready? do
+      Longpi.Wasm.send_json(state.instance, %{type: "event", event: event, payload: payload})
+    end
+
     {:noreply, state}
   end
 
   @impl true
-  def handle_info({port, {:data, data}}, %{port: port} = state) do
+  def handle_info({:wasm_frame, wasm_id, data}, %{wasm_id: wasm_id} = state) do
     case Jason.decode(data) do
       {:ok, %{"type" => "ready", "tools" => tools} = msg} ->
         log_errors(state.cwd, msg["errors"])
@@ -159,21 +213,153 @@ defmodule Longpi.Extensions.Host do
       {:ok, %{"type" => "result", "id" => id, "ok" => ok, "content" => content}} ->
         {from, pending} = Map.pop(state.pending, id)
         if from, do: GenServer.reply(from, if(ok, do: {:ok, content}, else: {:error, content}))
-        {:noreply, %{state | pending: pending}}
+        state = cancel_watchdog(%{state | pending: pending})
+        {:noreply, state}
+
+      {:ok, %{"type" => "http", "id" => id, "request" => request}} ->
+        serve_http(self(), state.instance, id, request)
+        {:noreply, state}
+
+      {:ok, %{"type" => "run", "id" => id} = msg} ->
+        serve_run(self(), state.instance, id, msg, state.cwd)
+        {:noreply, state}
 
       _ ->
         {:noreply, state}
     end
   end
 
-  def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-    Logger.warning("longpi extension host exited (status #{status})")
+  def handle_info({:wasm_frame, _stale_id, _data}, state), do: {:noreply, state}
+
+  def handle_info({:wasm_exit, wasm_id, reason}, %{wasm_id: wasm_id} = state) do
+    Logger.warning("longpi wasm extension host exited (#{inspect(reason)})")
     Enum.each(Map.values(state.pending), &GenServer.reply(&1, {:error, "extension host exited"}))
     Enum.each(state.waiters, fn {from, _kind} -> GenServer.reply(from, []) end)
     {:stop, :normal, state}
   end
 
+  def handle_info({:wasm_exit, _stale_id, _reason}, state), do: {:noreply, state}
+
+  # A call outlived the watchdog: the guest is likely stuck in a hot loop.
+  # Epoch-interrupt traps it; the resulting :wasm_exit fails pending callers.
+  def handle_info(:watchdog, %{pending: pending} = state) when map_size(pending) > 0 do
+    Logger.warning("extension call watchdog fired — interrupting the wasm guest")
+    Longpi.Wasm.interrupt(state.instance)
+    {:noreply, %{state | watchdog: nil}}
+  end
+
+  def handle_info(:watchdog, state), do: {:noreply, %{state | watchdog: nil}}
+
   def handle_info(_msg, state), do: {:noreply, state}
+
+  # ── Capability brokering ────────────────────────────────────────────
+
+  # fetch() shim backend: Req with hard limits; the guest gets text bodies
+  # as-is and binary bodies base64-tagged.
+  defp serve_http(host, instance, id, request) do
+    Task.start(fn ->
+      response =
+        try do
+          options =
+            [
+              method: parse_method(request["method"]),
+              url: request["url"],
+              headers: Map.to_list(request["headers"] || %{}),
+              body: request["body"],
+              receive_timeout: 30_000,
+              retry: false
+            ] ++ Application.get_env(:longpi, :ext_http_options, [])
+
+          case Req.request(options) do
+            {:ok, %Req.Response{} = res} ->
+              body = clamp_body(res.body)
+
+              base = %{
+                type: "http_result",
+                id: id,
+                status: res.status,
+                headers: Map.new(res.headers, fn {k, v} -> {k, Enum.join(List.wrap(v), ", ")} end)
+              }
+
+              if is_binary(body) and not String.valid?(body) do
+                Map.merge(base, %{body: Base.encode64(body), bodyEncoding: "base64"})
+              else
+                Map.put(base, :body, to_text_body(body))
+              end
+
+            {:error, error} ->
+              %{type: "http_result", id: id, error: Exception.message(error)}
+          end
+        rescue
+          e -> %{type: "http_result", id: id, error: Exception.message(e)}
+        end
+
+      if Process.alive?(host), do: Longpi.Wasm.send_json(instance, response)
+    end)
+  end
+
+  defp parse_method(method) when is_binary(method),
+    do: method |> String.downcase() |> String.to_existing_atom()
+
+  defp parse_method(_), do: :get
+
+  defp clamp_body(body) when is_binary(body) and byte_size(body) > @http_body_cap,
+    do: binary_part(body, 0, @http_body_cap)
+
+  defp clamp_body(body), do: body
+
+  # Req may have decoded JSON into a map — hand the guest the raw text back.
+  defp to_text_body(body) when is_binary(body), do: body
+  defp to_text_body(body), do: Jason.encode!(body)
+
+  # longpi.run() backend: run a system program with a timeout, from the
+  # workspace directory.
+  defp serve_run(host, instance, id, msg, cwd) do
+    Task.start(fn ->
+      response =
+        try do
+          cmd = msg["cmd"]
+          args = Enum.map(msg["args"] || [], &to_string/1)
+          dir = (msg["opts"] || %{})["cwd"] || cwd
+
+          case System.find_executable(cmd) do
+            nil ->
+              %{type: "run_result", id: id, status: 127, stdout: "", stderr: "#{cmd}: not found"}
+
+            path ->
+              task =
+                Task.async(fn ->
+                  System.cmd(path, args, cd: dir, stderr_to_stdout: true, env: [])
+                end)
+
+              case Task.yield(task, @run_timeout) || Task.shutdown(task, :brutal_kill) do
+                {:ok, {output, status}} ->
+                  %{type: "run_result", id: id, status: status, stdout: output, stderr: ""}
+
+                _ ->
+                  %{type: "run_result", id: id, status: 124, stdout: "", stderr: "timed out"}
+              end
+          end
+        rescue
+          e -> %{type: "run_result", id: id, status: 1, stdout: "", stderr: Exception.message(e)}
+        end
+
+      if Process.alive?(host), do: Longpi.Wasm.send_json(instance, response)
+    end)
+  end
+
+  # ── Helpers ─────────────────────────────────────────────────────────
+
+  defp cancel_watchdog(%{watchdog: nil} = state), do: state
+
+  defp cancel_watchdog(state) do
+    if map_size(state.pending) == 0 do
+      Process.cancel_timer(state.watchdog)
+      %{state | watchdog: nil}
+    else
+      state
+    end
+  end
 
   # Each reported tool becomes a spec whose run forwards to this host process.
   defp build_specs(state) do
@@ -197,21 +383,12 @@ defmodule Longpi.Extensions.Host do
     end)
   end
 
-  defp send_frame(port, message), do: Port.command(port, Jason.encode!(message))
-
   defp log_errors(_cwd, nil), do: :ok
   defp log_errors(_cwd, []), do: :ok
 
   defp log_errors(cwd, errors) do
     for %{"file" => file, "error" => error} <- errors do
       Logger.warning("extension failed to load (#{cwd}): #{file}\n#{error}")
-    end
-  end
-
-  defp find_bun do
-    case System.find_executable("bun") || Application.get_env(:longpi, :bun_path) do
-      path when is_binary(path) -> {:ok, path}
-      _ -> :error
     end
   end
 end

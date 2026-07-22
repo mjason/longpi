@@ -37,16 +37,8 @@ defmodule LongpiWeb.ConfigController do
   def extensions(conn, _params) do
     json(conn, %{
       dir: Longpi.Extensions.global_dir(),
-      extensions: Longpi.Extensions.list_global(),
-      packages: Longpi.Extensions.read_packages()
+      extensions: Longpi.Extensions.list_global()
     })
-  end
-
-  def save_packages(conn, %{"packages" => packages}) when is_map(packages) do
-    case Longpi.Extensions.write_packages(packages) do
-      :ok -> json(conn, %{ok: true})
-      {:error, reason} -> conn |> put_status(422) |> json(%{error: inspect(reason)})
-    end
   end
 
   # Extension secrets: names only leave the server; values are write-only.

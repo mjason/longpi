@@ -130,7 +130,7 @@ defmodule LongpiWeb.ConversationChannel do
     end
   end
 
-  # Extension-registered slash commands run in the Bun host; the handler's text
+  # Extension-registered slash commands run in the wasm host; the handler's text
   # comes back as `content` for the client to surface as a notice.
   def handle_in("command", %{"name" => name} = payload, socket) do
     case socket.assigns[:ext_host] do

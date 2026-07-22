@@ -1,22 +1,20 @@
 defmodule Longpi.Extensions.HostSecretsTest do
-  # Exercises the real Bun host reading a DB-stored secret from process.env.
-  # Needs `bun` on PATH (tagged :extensions) and DB access (DataCase, async:
-  # false → shared sandbox so the Host process sees the seeded secret).
+  # The wasm host reading a DB-stored secret via process.env. DataCase +
+  # async: false → shared sandbox so the Host process sees the seeded secret.
   use Longpi.DataCase, async: false
 
-  @moduletag :extensions
   @moduletag :tmp_dir
 
   alias Longpi.Extensions
   alias Longpi.Extensions.Host
 
-  test "an extension reads a DB secret via process.env, and /reload applies changes",
+  test "an extension reads a DB secret via process.env; edits apply on the next call",
        %{tmp_dir: cwd} do
     File.mkdir_p!(Path.join(cwd, ".longpi/extensions"))
 
-    File.write!(Path.join([cwd, ".longpi/extensions", "echo.ts"]), """
-    export default function (pi) {
-      pi.registerTool({
+    File.write!(Path.join([cwd, ".longpi/extensions", "echo.js"]), """
+    export default function (longpi) {
+      longpi.registerTool({
         name: "echo_secret",
         description: "Returns the injected secret.",
         parameters: { type: "object", properties: {} },
@@ -30,15 +28,14 @@ defmodule Longpi.Extensions.HostSecretsTest do
     # No secret yet.
     assert {:ok, "(unset)"} = Host.call_tool(host, "echo_secret", %{})
 
-    # Adding a secret takes effect on the very next call — no /reload.
-    :ok = Extensions.put_secret("MY_SECRET", "from-db")
-    assert {:ok, "from-db"} = Host.call_tool(host, "echo_secret", %{})
+    # Secrets ride along on every call — no reload needed.
+    :ok = Extensions.put_secret("MY_SECRET", "s3cr3t")
+    assert {:ok, "s3cr3t"} = Host.call_tool(host, "echo_secret", %{})
 
-    # Changing it is likewise immediate.
-    :ok = Extensions.put_secret("MY_SECRET", "changed")
-    assert {:ok, "changed"} = Host.call_tool(host, "echo_secret", %{})
+    :ok = Extensions.put_secret("MY_SECRET", "rotated")
+    assert {:ok, "rotated"} = Host.call_tool(host, "echo_secret", %{})
 
-    # And deleting it removes the var on the next call.
+    # Deleted secrets disappear too.
     :ok = Extensions.delete_secret("MY_SECRET")
     assert {:ok, "(unset)"} = Host.call_tool(host, "echo_secret", %{})
   end

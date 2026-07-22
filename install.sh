@@ -29,12 +29,6 @@ case "$(uname -s)/$(uname -m)" in
 esac
 command -v systemctl >/dev/null || die "systemd (systemctl --user) is required"
 
-# The extension host runs via bun; the service needs it on PATH.
-BUN_BIN="$(command -v bun || true)"
-[ -n "$BUN_BIN" ] || BUN_BIN="$HOME/.local/share/reflex/bun/bin/bun"
-BUN_DIR="$(dirname "$BUN_BIN")"
-[ -x "$BUN_BIN" ] || say "warning: bun not found — extensions will be disabled until 'bun' is on PATH"
-
 # --- resolve version ---------------------------------------------------------
 TAG="${1:-}"
 if [ -z "$TAG" ]; then
@@ -106,7 +100,7 @@ After=network-online.target
 
 [Service]
 Type=exec
-Environment=PATH=$BUN_DIR:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
 ExecStartPre=$ROOT/current/bin/longpi eval "Longpi.Release.migrate()"
 ExecStart=$ROOT/current/bin/longpi start
 ExecStop=$ROOT/current/bin/longpi stop

@@ -55,14 +55,14 @@ fn send_to(pid: &LocalPid, f: impl FnOnce(Env) -> rustler::Term) {
     let _ = env.send_and_clear(pid, f);
 }
 
-/// Starts a guest: `wasm_path` module with WASI args `argv`, preopening
-/// `preopen_dir` read-only at `/`. Frames the guest writes to stdout arrive at
-/// `owner` as `{:wasm_frame, id, binary}`.
+/// Starts a guest: `wasm_path` module with WASI args `argv`, preopening each
+/// `(host_dir, guest_path)` read-only. Frames the guest writes to stdout
+/// arrive at `owner` as `{:wasm_frame, id, binary}`.
 #[rustler::nif(schedule = "DirtyIo")]
 fn start(
     env: Env,
     wasm_path: String,
-    preopen_dir: String,
+    preopens: Vec<(String, String)>,
     argv: Vec<String>,
     id: u64,
 ) -> NifResult<ResourceArc<Instance>> {
@@ -82,7 +82,8 @@ fn start(
     let stdin_file = std::fs::File::from(std::os::fd::OwnedFd::from(stdin_read));
     let stdout_file = std::fs::File::from(std::os::fd::OwnedFd::from(stdout_write));
 
-    let wasi: WasiP1Ctx = WasiCtxBuilder::new()
+    let mut builder = WasiCtxBuilder::new();
+    builder
         .stdin(AsyncStdinStream::new(
             wasmtime_wasi::pipe::AsyncReadStream::new(tokio::fs::File::from_std(stdin_file)),
         ))
@@ -93,10 +94,15 @@ fn start(
             ),
         ))
         .inherit_stderr()
-        .preopened_dir(&preopen_dir, "/", DirPerms::READ, FilePerms::READ)
-        .map_err(|e| rustler::Error::Term(Box::new(e.to_string())))?
-        .args(&argv)
-        .build_p1();
+        .args(&argv);
+
+    for (host_dir, guest_path) in &preopens {
+        builder
+            .preopened_dir(host_dir, guest_path, DirPerms::READ, FilePerms::READ)
+            .map_err(|e| rustler::Error::Term(Box::new(e.to_string())))?;
+    }
+
+    let wasi: WasiP1Ctx = builder.build_p1();
 
     let mut linker: Linker<WasiP1Ctx> = Linker::new(&engine);
     preview1::add_to_linker_sync(&mut linker, |t| t)

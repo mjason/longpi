@@ -4,7 +4,7 @@ defmodule Longpi.MixProject do
   def project do
     [
       app: :longpi,
-      version: "0.1.30",
+      version: "0.1.31",
       elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -23,7 +23,7 @@ defmodule Longpi.MixProject do
   # toolchain on the target. Runtime configuration is NOT baked in — the release
   # reads ~/.config/longpi/config.jsonc at boot (config/runtime.exs +
   # Longpi.RuntimeConfig), so no environment variables are needed to deploy.
-  # A Bun runtime on the target is still required for the extension host.
+  # Extensions run in an embedded WebAssembly host — no runtime needed on the target.
   defp releases do
     [
       longpi: [

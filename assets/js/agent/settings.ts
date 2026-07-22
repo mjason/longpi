@@ -127,23 +127,14 @@ export async function stopSession(conversationId: string): Promise<void> {
 export type GlobalExtensions = {
   dir: string;
   extensions: { name: string; "dir?": boolean }[];
-  packages: Record<string, string>;
 };
 
 export async function loadGlobalExtensions(): Promise<GlobalExtensions> {
   const res = await fetch("/rpc/extensions", { headers: buildCSRFHeaders() });
-  if (!res.ok) return { dir: "", extensions: [], packages: {} };
+  if (!res.ok) return { dir: "", extensions: [] };
   return await res.json();
 }
 
-export async function saveGlobalPackages(packages: Record<string, string>): Promise<boolean> {
-  const res = await fetch("/rpc/extensions/packages", {
-    method: "POST",
-    headers: { ...buildCSRFHeaders(), "content-type": "application/json" },
-    body: JSON.stringify({ packages }),
-  });
-  return res.ok;
-}
 
 /** Names of the extension secrets stored in the app (values never leave the server). */
 export async function loadExtensionSecretNames(): Promise<string[]> {

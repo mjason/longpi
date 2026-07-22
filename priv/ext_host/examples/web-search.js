@@ -1,10 +1,14 @@
 // Example longpi extension: a `web_search` tool backed by the Tavily API.
 //
-// Copy this to `<cwd>/.longpi/extensions/web-search.ts` (project-local) or
-// `~/.longpi/extensions/web-search.ts` (global) — it hot-reloads automatically,
+// Copy this to `<cwd>/.longpi/extensions/web-search.js` (project-local) or
+// `~/.longpi/extensions/web-search.js` (global) — it hot-reloads automatically,
 // no /reload needed. Add a TAVILY_API_KEY secret under Settings → Extensions →
 // Secrets (stored in the app db and injected into the host on every call — no
 // shell `export` needed).
+//
+// Extensions run in a sandboxed WebAssembly (QuickJS) host: plain modern
+// JavaScript, no Node/npm APIs. `fetch`, `process.env`, and `longpi.run` are
+// provided by the host.
 //
 // This is the canonical pattern for an extension that calls an external API
 // with a secret key: read the key from `process.env`, fail clearly when it is

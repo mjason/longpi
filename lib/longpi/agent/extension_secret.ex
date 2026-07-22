@@ -1,6 +1,6 @@
 defmodule Longpi.Agent.ExtensionSecret do
   @moduledoc """
-  A named secret (e.g. an API key) exposed to the Bun extension host as an
+  A named secret (e.g. an API key) exposed to the extension host as an
   environment variable, stored in the app database instead of the machine's
   environment. Extensions read it via `process.env.<NAME>`.
 

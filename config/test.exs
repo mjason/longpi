@@ -26,7 +26,7 @@ config :longpi,
   llm_model: "test:model",
   # Auto-titling adds an extra LLM call per session; opt in per test.
   auto_title: false,
-  # Don't spawn a Bun extension host per session in tests.
+  # Don't boot a wasm extension host per session in tests.
   extensions_enabled: false
 
 # In test we don't send emails
@@ -56,8 +56,3 @@ config :longpi, :global_extensions_dir, Path.join(System.tmp_dir!(), "longpi_tes
 config :longpi,
        :subagents_global_dir,
        Path.join(System.tmp_dir!(), "longpi_test_global_agents_#{System.pid()}")
-
-# Keep lazy-host detection away from the developer's real ~/.longpi/packages.json.
-config :longpi,
-       :global_packages_path,
-       Path.join(System.tmp_dir!(), "longpi_test_packages_#{System.pid()}.json")
