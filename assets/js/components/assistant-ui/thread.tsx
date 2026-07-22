@@ -250,8 +250,16 @@ const UserActionBar: FC = () => {
         | { isLastUser?: boolean; lastItemIndex?: number }
         | undefined,
   );
+  const messageText = useAuiState((s) =>
+    s.message.content
+      .filter((part): part is { type: "text"; text: string } => part.type === "text")
+      .map((part) => part.text)
+      .join(""),
+  );
   const isLastUser = custom?.isLastUser === true;
   const position = custom?.lastItemIndex;
+  // pi's fork model for user messages: new conversation gets the history
+  // BEFORE this message, and this message's text lands in the composer.
   const canFork = fork != null && position != null && position >= 0;
   if (!isLastUser && !canFork) return null;
 
@@ -263,7 +271,10 @@ const UserActionBar: FC = () => {
       className="aui-user-action-bar-root flex items-center gap-0.5"
     >
       {canFork && (
-        <TooltipIconButton tooltip={t("msg.fork")} onClick={() => fork(position)}>
+        <TooltipIconButton
+          tooltip={t("msg.fork")}
+          onClick={() => fork(position - 1, messageText)}
+        >
           <GitBranchIcon />
         </TooltipIconButton>
       )}

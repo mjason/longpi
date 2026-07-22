@@ -63,4 +63,23 @@ defmodule LongpiWeb.ForkTest do
     assert filtered == ["src/foo.ts"]
   end
 
+
+  test "position -1 forks BEFORE the first message (empty history, pi-style)", %{conn: conn} do
+    source = Longpi.Agent.create_conversation!(%{cwd: "/tmp/fork-src2", model: "test:model"})
+
+    Longpi.Agent.append_message!(%{
+      role: :user,
+      content: "q1",
+      position: 0,
+      conversation_id: source.id
+    })
+
+    body =
+      conn
+      |> post(~p"/rpc/conversations/fork", %{"conversation_id" => source.id, "position" => -1})
+      |> json_response(200)
+
+    assert Longpi.Agent.list_messages!(body["id"]) == []
+  end
+
 end

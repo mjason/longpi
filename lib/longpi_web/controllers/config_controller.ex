@@ -97,8 +97,10 @@ defmodule LongpiWeb.ConfigController do
 
   # Fork: a NEW conversation seeded with this one's history up to (and
   # including) `position` — "start a new conversation from here".
+  # position >= 0 copies rows 0..position; -1 copies nothing (forking BEFORE
+  # the first message: fresh history, the client prefills the composer).
   def fork_conversation(conn, %{"conversation_id" => id, "position" => position})
-      when is_integer(position) and position >= 0 do
+      when is_integer(position) and position >= -1 do
     with {:ok, source} <- Longpi.Agent.get_conversation(id) do
       {:ok, fork} =
         Longpi.Agent.create_conversation(%{

@@ -24,10 +24,14 @@ export const RegenerateContext = createContext<(() => void) | null>(null);
 
 /**
  * "New conversation from here": fork the conversation with history up to a
- * message (its last underlying item index / DB position). Provided by the
- * hosting view (ChatApp navigates; the embed switches in place).
+ * DB position. Forking a USER message passes `prefill` — pi's model: the new
+ * conversation gets the history BEFORE that message, and its text lands in
+ * the composer for editing and resending. Provided by the hosting view
+ * (ChatApp navigates; the embed switches in place).
  */
-export const ForkContext = createContext<((position: number) => void) | null>(null);
+export const ForkContext = createContext<
+  ((position: number, prefill?: string) => void) | null
+>(null);
 
 // Official assistant-ui adapters power the composer's attach button: images are
 // encoded to base64 data URLs for the vision model, text files inlined as text.

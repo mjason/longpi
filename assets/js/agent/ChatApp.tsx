@@ -1,4 +1,4 @@
-import { AssistantRuntimeProvider } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, useComposerRuntime } from "@assistant-ui/react";
 import {
   ChevronRight,
   Folder,
@@ -50,6 +50,28 @@ export const DEFAULT_MODEL = "openai:gpt-5.4";
 
 /** Relative paths of the conversation's workspace files ("@" mentions). */
 export const WorkspaceFilesContext = React.createContext<string[]>([]);
+
+/**
+ * After a user-message fork, drop that message's text into the fresh
+ * conversation's composer (stashed in sessionStorage across the navigation).
+ */
+function ForkPrefill({ conversationId }: { conversationId: string }) {
+  const composer = useComposerRuntime();
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("longpi:fork-prefill");
+      if (!raw) return;
+      const { id, text } = JSON.parse(raw) as { id: string; text: string };
+      if (id !== conversationId || !text) return;
+      sessionStorage.removeItem("longpi:fork-prefill");
+      composer.setText(text);
+    } catch {
+      // storage unavailable or malformed — nothing to prefill
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+  return null;
+}
 
 export function conversationLabel(conversation: ConversationSummary): string {
   if (conversation.title) return conversation.title;
@@ -517,12 +539,24 @@ export function ConversationPane({
     };
   }, [conversation.cwd]);
 
-  // "New conversation from here": copy history up to the message, then hand
+  // "New conversation from here": copy history up to the position, then hand
   // the fresh conversation to the host view (navigate / switch in place).
+  // Forking a user message passes `prefill` (pi's model): its text is stashed
+  // for the new conversation's composer (ForkPrefill picks it up).
   const fork = useMemo(
-    () => async (position: number) => {
+    () => async (position: number, prefill?: string) => {
       const forked = await forkConversation(conversation.id, position);
       if (!forked) return;
+      if (prefill) {
+        try {
+          sessionStorage.setItem(
+            "longpi:fork-prefill",
+            JSON.stringify({ id: forked.id, text: prefill }),
+          );
+        } catch {
+          // sandboxed iframe without storage: the fork still works, minus prefill
+        }
+      }
       if (onForked) onForked(forked);
       else window.location.href = `/c/${forked.id}`;
     },
@@ -586,6 +620,7 @@ export function ConversationPane({
                 <RegenerateContext.Provider value={regenerate}>
                   <ForkContext.Provider value={fork}>
                     <WorkspaceFilesContext.Provider value={workspaceFiles}>
+                      <ForkPrefill conversationId={conversation.id} />
                       <Thread />
                     </WorkspaceFilesContext.Provider>
                   </ForkContext.Provider>
