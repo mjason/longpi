@@ -15,5 +15,15 @@ os_pipe = "1"
 tokio = { version = "1", features = ["fs", "io-util", "rt"] }
 anyhow = "1"
 
+# TypeScript type-stripping (extensions are authored in TS; QuickJS runs plain
+# JS). oxc erases the types on the host side — compiled into the release, no
+# runtime dependency on the target.
+oxc_allocator = "0.90"
+oxc_parser = "0.90"
+oxc_span = "0.90"
+oxc_semantic = "0.90"
+oxc_codegen = "0.90"
+oxc_transformer = "0.90"
+
 [profile.release]
 lto = "thin"

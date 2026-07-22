@@ -196,6 +196,30 @@ defmodule Longpi.Extensions.HostTest do
     assert {:ok, "still here"} = Host.call_tool(host, "legacy", %{})
   end
 
+  test "a .ts file with real TypeScript type syntax loads (types stripped)", %{cwd: cwd} do
+    write_ext(cwd, "typed.ts", """
+    function label(n: number): string {
+      return `#${n}`;
+    }
+
+    export default function (longpi: any) {
+      longpi.registerTool({
+        name: "typed",
+        description: "Uses TS type annotations.",
+        parameters: { type: "object", properties: { n: { type: "number" } } },
+        async execute(args: { n: number }) {
+          const items = (args.n ? [args.n] : []) as Array<number>;
+          return label(items.length);
+        },
+      });
+    }
+    """)
+
+    {:ok, host} = Host.start_for(cwd)
+    assert ["typed"] = host |> Host.tool_specs() |> Enum.map(& &1.name)
+    assert {:ok, "#1"} = Host.call_tool(host, "typed", %{"n" => 5})
+  end
+
   test "no extensions anywhere → :none (no guest boots)", %{cwd: cwd} do
     File.rm_rf!(Path.join(cwd, ".longpi/extensions"))
     assert :none = Host.start_for(cwd)

@@ -212,4 +212,41 @@ fn io_err(e: std::io::Error) -> rustler::Error {
     rustler::Error::Term(Box::new(e.to_string()))
 }
 
+/// Strips TypeScript type syntax from `source`, returning plain JavaScript the
+/// QuickJS guest can run. Extensions are authored in TS (type annotations,
+/// `as` casts, generics); QuickJS has no transpiler, so we erase the types
+/// here. On a genuine parse error, returns `{:error, message}` so the caller
+/// can surface it. JavaScript in, JavaScript out — it's a no-op for plain JS.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn strip_ts(source: String) -> Result<String, String> {
+    use oxc_allocator::Allocator;
+    use oxc_codegen::Codegen;
+    use oxc_parser::Parser;
+    use oxc_semantic::SemanticBuilder;
+    use oxc_span::SourceType;
+    use oxc_transformer::{TransformOptions, Transformer};
+
+    let allocator = Allocator::default();
+    let source_type = SourceType::ts();
+    let parsed = Parser::new(&allocator, &source, source_type).parse();
+
+    if !parsed.errors.is_empty() {
+        let msg = parsed
+            .errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(msg);
+    }
+
+    let mut program = parsed.program;
+    let scoping = SemanticBuilder::new().build(&program).semantic.into_scoping();
+    let path = std::path::Path::new("extension.ts");
+    let options = TransformOptions::default();
+    let _ = Transformer::new(&allocator, path, &options).build_with_scoping(scoping, &mut program);
+
+    Ok(Codegen::new().build(&program).code)
+}
+
 rustler::init!("Elixir.Longpi.Wasm.Native");

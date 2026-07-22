@@ -81,12 +81,15 @@ defmodule Longpi.Extensions.Host do
 
   @impl true
   def init(cwd) do
+    Process.flag(:trap_exit, true)
+
     case boot_instance(cwd) do
-      {:ok, instance, wasm_id} ->
+      {:ok, instance, wasm_id, staging_root} ->
         {:ok,
          %{
            instance: instance,
            wasm_id: wasm_id,
+           staging_root: staging_root,
            cwd: cwd,
            tools: [],
            commands: [],
@@ -102,21 +105,37 @@ defmodule Longpi.Extensions.Host do
     end
   end
 
+  @impl true
+  def terminate(_reason, state) do
+    cleanup_staging(state[:staging_root])
+    :ok
+  end
+
   # Boots a fresh QuickJS guest and sends it the load frame. The harness dir
   # is preopened at /host; each existing extension dir at /ext0, /ext1, …
   defp boot_instance(cwd) do
     wasm_id = System.unique_integer([:positive])
     harness_dir = Path.join(:code.priv_dir(:longpi), "wasm")
+    staging_root = Path.join(System.tmp_dir!(), "longpi-ext-#{wasm_id}")
 
-    {host_dirs, guest_dirs} =
+    # Extensions are authored in TS but the guest runs plain JS, so we stage a
+    # type-stripped copy of each extension dir into a temp tree and preopen
+    # THOSE (read-only) instead of the user's originals. The guest's discovery
+    # is unchanged — it just imports the staged `.js`.
+    {staged_preopens, guest_dirs} =
       cwd
       |> extension_dirs()
       |> Enum.filter(&File.dir?/1)
       |> Enum.with_index()
-      |> Enum.map(fn {dir, index} -> {dir, "/ext#{index}"} end)
+      |> Enum.map(fn {src_dir, index} ->
+        guest = "/ext#{index}"
+        stage_dir = Path.join(staging_root, "ext#{index}")
+        stage_extension_dir(src_dir, stage_dir)
+        {{stage_dir, guest}, guest}
+      end)
       |> Enum.unzip()
 
-    preopens = [{harness_dir, "/host"} | Enum.zip(host_dirs, guest_dirs)]
+    preopens = [{harness_dir, "/host"} | staged_preopens]
 
     case Longpi.Wasm.Native.start(
            Path.join(harness_dir, "qjs-wasi.wasm"),
@@ -132,11 +151,77 @@ defmodule Longpi.Extensions.Host do
           env: Longpi.Extensions.secret_env()
         })
 
-        {:ok, instance, wasm_id}
+        {:ok, instance, wasm_id, staging_root}
     end
   rescue
     e in ErlangError -> {:error, e.original}
   end
+
+  # Mirrors one extension dir into `dst` as plain JS. Matches the guest's
+  # discovery (one level deep): top-level `*.ts`/`*.js`/`*.mjs`, and
+  # `<subdir>/index.{ts,js}`. `.ts` files are type-stripped and written as
+  # `.js`; `.js`/`.mjs` are copied verbatim. A file whose TS fails to strip is
+  # copied as-is so the guest surfaces the real syntax error.
+  defp stage_extension_dir(src_dir, dst_dir) do
+    File.mkdir_p!(dst_dir)
+
+    case File.ls(src_dir) do
+      {:ok, entries} ->
+        for entry <- entries do
+          path = Path.join(src_dir, entry)
+
+          cond do
+            File.regular?(path) and String.ends_with?(entry, [".ts", ".js", ".mjs"]) ->
+              stage_file(path, Path.join(dst_dir, staged_name(entry)))
+
+            File.dir?(path) ->
+              Enum.find_value(["index.ts", "index.js"], fn index ->
+                index_path = Path.join(path, index)
+
+                if File.regular?(index_path) do
+                  sub = Path.join(dst_dir, entry)
+                  File.mkdir_p!(sub)
+                  stage_file(index_path, Path.join(sub, staged_name(index)))
+                end
+              end)
+
+            true ->
+              :ok
+          end
+        end
+
+      {:error, _} ->
+        :ok
+    end
+  end
+
+  # `.ts` becomes `.js` (post-strip); other extensions keep their name.
+  defp staged_name(entry) do
+    if String.ends_with?(entry, ".ts"), do: Path.rootname(entry) <> ".js", else: entry
+  end
+
+  defp stage_file(src_path, dst_path) do
+    source = File.read!(src_path)
+
+    staged =
+      if String.ends_with?(src_path, ".ts") do
+        case Longpi.Wasm.strip_ts(source) do
+          {:ok, js} ->
+            js
+
+          {:error, message} ->
+            Logger.warning("extension type-strip failed (#{src_path}): #{message}")
+            source
+        end
+      else
+        source
+      end
+
+    File.write!(dst_path, staged)
+  end
+
+  defp cleanup_staging(nil), do: :ok
+  defp cleanup_staging(staging_root), do: File.rm_rf(staging_root)
 
   @impl true
   def handle_call(:tool_specs, _from, %{ready?: true} = state),
@@ -153,13 +238,15 @@ defmodule Longpi.Extensions.Host do
     # secrets all take effect, and no stale module cache can survive.
     Longpi.Wasm.close_stdin(state.instance)
     Longpi.Wasm.interrupt(state.instance)
+    cleanup_staging(state.staging_root)
 
     case boot_instance(state.cwd) do
-      {:ok, instance, wasm_id} ->
+      {:ok, instance, wasm_id, staging_root} ->
         state = %{
           state
           | instance: instance,
             wasm_id: wasm_id,
+            staging_root: staging_root,
             ready?: false,
             waiters: [{from, :tool_specs} | state.waiters]
         }

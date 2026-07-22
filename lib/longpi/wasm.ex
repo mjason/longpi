@@ -2,11 +2,12 @@ defmodule Longpi.Wasm.Native do
   @moduledoc false
   use Rustler, otp_app: :longpi, crate: "longpi_wasm"
 
-  def start(_wasm_path, _preopen_dir, _argv, _id), do: :erlang.nif_error(:nif_not_loaded)
+  def start(_wasm_path, _preopens, _argv, _id), do: :erlang.nif_error(:nif_not_loaded)
   def send_frame(_instance, _payload), do: :erlang.nif_error(:nif_not_loaded)
   def interrupt(_instance), do: :erlang.nif_error(:nif_not_loaded)
   def close_stdin(_instance), do: :erlang.nif_error(:nif_not_loaded)
   def instance_id(_instance), do: :erlang.nif_error(:nif_not_loaded)
+  def strip_ts(_source), do: :erlang.nif_error(:nif_not_loaded)
 end
 
 defmodule Longpi.Wasm do
@@ -50,6 +51,18 @@ defmodule Longpi.Wasm do
 
   @doc "Sends a map as a JSON frame."
   def send_json(instance, map), do: send_frame(instance, Jason.encode!(map))
+
+  @doc """
+  Strips TypeScript type syntax to plain JavaScript (extensions are authored in
+  TS; the QuickJS guest runs only JS). `{:ok, js}` or `{:error, message}` on a
+  genuine syntax error. A no-op for plain JavaScript input.
+  """
+  def strip_ts(source) when is_binary(source) do
+    # The NIF returns {:ok, js} / {:error, message} (a Rust Result).
+    Longpi.Wasm.Native.strip_ts(source)
+  rescue
+    e in ErlangError -> {:error, inspect(e.original)}
+  end
 
   defp qjs_wasm_path do
     Path.join(:code.priv_dir(:longpi), "wasm/qjs-wasi.wasm")
