@@ -13,6 +13,7 @@ import {
 } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
 import { cn } from "../lib/utils";
+import { useI18n } from "./i18n";
 import {
   addModel,
   APPROVAL_LEVELS,
@@ -36,13 +37,14 @@ import {
 // directly — GeneralTab, ProvidersTab, ToolsTab. There is no standalone settings
 // dialog or Models tab here anymore (models live in sections/ModelsSection).
 
-function SaveButton({ onSave, label = "Save" }: { onSave: () => Promise<void>; label?: string }) {
+function SaveButton({ onSave, label }: { onSave: () => Promise<void>; label?: string }) {
+  const { t } = useI18n();
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
   return (
     <div className="flex items-center justify-end gap-3">
       {state === "saved" && (
         <span className="flex items-center gap-1.5 text-sm text-tool">
-          <Check className="size-4" /> Saved
+          <Check className="size-4" /> {t("common.saved")}
         </span>
       )}
       <Button
@@ -55,7 +57,7 @@ function SaveButton({ onSave, label = "Save" }: { onSave: () => Promise<void>; l
         }}
       >
         {state === "saving" && <Loader2 className="animate-spin" />}
-        {label}
+        {label ?? t("common.save")}
       </Button>
     </div>
   );
@@ -72,6 +74,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 export function GeneralTab() {
+  const { t } = useI18n();
   const [systemPrompt, setSystemPrompt] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
   const [defaultPrompt, setDefaultPrompt] = useState("");
@@ -102,8 +105,8 @@ export function GeneralTab() {
   return (
     <div className="space-y-5 py-4">
       <Field
-        label="Approval level"
-        hint="How much the agent may do without asking you first."
+        label={t("settings.approvalLevel")}
+        hint={t("settings.approvalLevelHint")}
       >
         <div className="grid grid-cols-3 gap-2">
           {APPROVAL_LEVELS.map((lvl) => (
@@ -120,14 +123,16 @@ export function GeneralTab() {
                   : "ring-black/[0.06] hover:bg-accent/50 dark:ring-white/[0.08]",
               )}
             >
-              <div className="text-sm font-medium">{lvl.label}</div>
-              <div className="mt-0.5 text-[11px] leading-tight text-muted-foreground">{lvl.hint}</div>
+              <div className="text-sm font-medium">{t(`settings.approval.${lvl.id}`)}</div>
+              <div className="mt-0.5 text-[11px] leading-tight text-muted-foreground">
+                {t(`settings.approval.${lvl.id}.hint`)}
+              </div>
             </button>
           ))}
         </div>
       </Field>
 
-      <Field label="Default model" hint="Prefills new conversations.">
+      <Field label={t("settings.defaultModel")} hint={t("settings.defaultModelHint")}>
         <Input
           className="font-mono text-sm"
           placeholder="openai:gpt-5.4"
@@ -135,13 +140,10 @@ export function GeneralTab() {
           onChange={(e) => setDefaultModel(e.target.value)}
         />
       </Field>
-      <Field
-        label="System prompt"
-        hint="Sent at the start of every conversation. Edit freely; use {{cwd}} for the workspace path."
-      >
+      <Field label={t("settings.systemPrompt")} hint={t("settings.systemPromptHint")}>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">
-            {isDefault ? "Using the built-in default." : "Customized."}
+            {isDefault ? t("settings.usingDefault") : t("settings.customized")}
           </span>
           {!isDefault && (
             <Button
@@ -150,7 +152,7 @@ export function GeneralTab() {
               className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
               onClick={() => setSystemPrompt(defaultPrompt)}
             >
-              <RotateCcw className="size-3" /> reset to default
+              <RotateCcw className="size-3" /> {t("settings.resetToDefault")}
             </Button>
           )}
         </div>
@@ -161,16 +163,13 @@ export function GeneralTab() {
         />
       </Field>
 
-      <Field
-        label="Context compaction"
-        hint="When a conversation nears the model's context window, older messages are summarized to make room. The full history stays stored."
-      >
+      <Field label={t("settings.compaction")} hint={t("settings.compactionHint")}>
         <label className="flex items-center gap-2 text-sm">
           <Checkbox
             checked={compactionEnabled}
             onCheckedChange={(v: boolean | "indeterminate") => setCompactionEnabled(v === true)}
           />
-          Enabled
+          {t("settings.enabled")}
         </label>
         <div className="flex items-center gap-3">
           <Slider
@@ -183,7 +182,7 @@ export function GeneralTab() {
             className="flex-1"
           />
           <span className="w-28 text-xs text-muted-foreground">
-            compact at {compactionPct}% of window
+            {t("settings.compactAt", { pct: compactionPct })}
           </span>
         </div>
       </Field>
@@ -206,6 +205,7 @@ export function GeneralTab() {
 }
 
 export function ProvidersTab() {
+  const { t } = useI18n();
   const [providers, setProviders] = useState<ProviderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [presetId, setPresetId] = useState<string>(PROVIDER_PRESETS[0].id);
@@ -225,15 +225,10 @@ export function ProvidersTab() {
 
   return (
     <div className="space-y-4 py-4">
-      <p className="text-xs text-muted-foreground">
-        API credentials per provider. Keys are write-only — once saved they never leave the server.
-        For an OpenAI-compatible gateway, set the base URL and discover its models with one click.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("settings.providersIntro")}</p>
 
       {providers.length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          No providers yet. Falls back to environment variables until you add one.
-        </p>
+        <p className="text-sm text-muted-foreground">{t("settings.noProviders")}</p>
       )}
 
       {providers.map((p) => (
@@ -254,7 +249,7 @@ export function ProvidersTab() {
           </SelectContent>
         </Select>
         <Button onClick={addPreset}>
-          <Plus className="size-4" /> Add provider
+          <Plus className="size-4" /> {t("settings.addProvider")}
         </Button>
       </div>
     </div>
@@ -262,6 +257,7 @@ export function ProvidersTab() {
 }
 
 function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onChange: () => void }) {
+  const { t } = useI18n();
   const [label, setLabel] = useState(provider.label ?? "");
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl ?? "");
   const [apiKey, setApiKey] = useState("");
@@ -294,8 +290,7 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
   }
 
   async function remove() {
-    if (!confirm(`Remove provider "${label || provider.name}"? Saved models keep working only if another provider serves them.`))
-      return;
+    if (!confirm(t("settings.removeProviderConfirm", { name: label || provider.name }))) return;
     await removeProvider(provider.id);
     onChange();
   }
@@ -321,39 +316,38 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
           )}
         >
           <KeyRound className="size-3" />
-          {provider.configured ? "key set" : "no key"}
+          {provider.configured ? t("settings.keySet") : t("settings.noKey")}
         </span>
         <Button
           variant="ghost"
           size="icon"
           onClick={remove}
-          aria-label="Remove provider"
+          aria-label={t("settings.removeProvider")}
           className="size-7 text-muted-foreground hover:text-destructive"
         >
           <Trash2 className="size-4" />
         </Button>
       </div>
       <Input
-        placeholder="display name (e.g. listenai)"
+        placeholder={t("settings.displayNamePlaceholder")}
         value={label}
         onChange={(e) => setLabel(e.target.value)}
       />
       <Input
         className="font-mono text-xs"
-        placeholder="base URL (e.g. https://openrouter.listenai.com/v1)"
+        placeholder={t("settings.baseUrlPlaceholder")}
         value={baseUrl}
         onChange={(e) => setBaseUrl(e.target.value)}
       />
       <Input
         type="password"
         className="font-mono text-xs"
-        placeholder={provider.configured ? "•••••••• (leave blank to keep)" : "api key"}
+        placeholder={provider.configured ? t("settings.keyKeepPlaceholder") : t("settings.keyPlaceholder")}
         value={apiKey}
         onChange={(e) => setApiKey(e.target.value)}
       />
       <div className="flex items-center gap-2">
         <SaveButton
-          label="Save"
           onSave={async () => {
             await persist();
             onChange();
@@ -361,7 +355,7 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
         />
         <Button variant="outline" onClick={discover} disabled={discovering || !baseUrl.trim()}>
           {discovering ? <Loader2 className="animate-spin" /> : <Search className="size-4" />}
-          Discover models
+          {t("settings.discoverModels")}
         </Button>
       </div>
 
@@ -370,7 +364,7 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
       {discovered && (
         <div className="space-y-2 rounded-md bg-card/40 p-2 ring-1 ring-black/[0.06] dark:ring-white/[0.08]">
           <p className="text-xs text-muted-foreground">
-            {discovered.length} models found. Select the ones to add.
+            {t("settings.modelsFound", { count: discovered.length })}
           </p>
           <div className="max-h-40 space-y-1 overflow-y-auto">
             {discovered.map((id) => (
@@ -390,7 +384,7 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
             ))}
           </div>
           <Button size="sm" onClick={addSelected} disabled={selected.size === 0}>
-            Add {selected.size} to Models
+            {t("settings.addToModels", { count: selected.size })}
           </Button>
         </div>
       )}
@@ -399,6 +393,7 @@ function ProviderRowEditor({ provider, onChange }: { provider: ProviderRow; onCh
 }
 
 export function ToolsTab() {
+  const { t } = useI18n();
   const [tools, setTools] = useState<ToolCatalogEntry[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -415,9 +410,7 @@ export function ToolsTab() {
 
   return (
     <div className="space-y-5 py-4">
-      <p className="text-xs text-muted-foreground">
-        The description each tool advertises to the model. Reset restores the built-in text.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("settings.toolsIntro")}</p>
       {tools.map((tool) => {
         const value = drafts[tool.name] ?? "";
         const isDefault = value === tool.default_description;
@@ -432,7 +425,7 @@ export function ToolsTab() {
                   className="h-6 gap-1 px-1.5 text-xs text-muted-foreground hover:text-foreground"
                   onClick={() => setDrafts((d) => ({ ...d, [tool.name]: tool.default_description }))}
                 >
-                  <RotateCcw className="size-3" /> reset
+                  <RotateCcw className="size-3" /> {t("settings.reset")}
                 </Button>
               )}
             </div>
@@ -445,7 +438,7 @@ export function ToolsTab() {
         );
       })}
       <SaveButton
-        label="Save tool descriptions"
+        label={t("settings.saveToolDescriptions")}
         onSave={async () => {
           await Promise.all(
             tools.map((tool) => saveSetting(toolDescKey(tool.name), drafts[tool.name] ?? "")),

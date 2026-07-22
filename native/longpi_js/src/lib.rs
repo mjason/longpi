@@ -30,7 +30,7 @@ use rustler::{Binary, Encoder, Env, LocalPid, NifResult, OwnedBinary, OwnedEnv, 
 use tokio::sync::{mpsc, oneshot};
 
 mod atoms {
-    rustler::atoms! { ok, error, js_loaded, js_result, js_capability, js_down }
+    rustler::atoms! { ok, error, js_loaded, js_result, js_capability, js_down, js_event_done }
 }
 
 const MEMORY_LIMIT: usize = 64 * 1024 * 1024;
@@ -440,6 +440,9 @@ async fn handle_command(
             payload_json,
         } => {
             fire_event_handlers(ctx, registry, &event, &payload_json).await;
+            // Signal completion so the host can clear its watchdog — a hung
+            // lifecycle handler would otherwise block the command queue silently.
+            send_to(&owner, move |e| (atoms::js_event_done(), id).encode(e));
         }
         Command::Stop => {}
     }
@@ -494,6 +497,68 @@ globalThis.crypto.randomUUID = () => __uuid();
 globalThis.process = globalThis.process || {};
 globalThis.process.env = globalThis.process.env || {};
 
+globalThis.structuredClone = globalThis.structuredClone ||
+  ((v) => v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+
+globalThis.queueMicrotask = globalThis.queueMicrotask || ((fn) => Promise.resolve().then(fn));
+
+// setTimeout/setInterval are built on the async __sleep primitive. Callbacks
+// fire while the runtime is driven (during a tool/command/event invocation);
+// a cancelled id short-circuits before firing (and stops an interval's loop).
+globalThis.__timers = { seq: 0, cancelled: new Set() };
+globalThis.setTimeout = (fn, ms, ...args) => {
+  const id = ++__timers.seq;
+  (async () => {
+    await __sleep(Number(ms) || 0);
+    if (!__timers.cancelled.has(id)) {
+      try { fn(...args); } catch (e) { console.error(e); }
+    }
+  })();
+  return id;
+};
+globalThis.setInterval = (fn, ms, ...args) => {
+  const id = ++__timers.seq;
+  (async () => {
+    while (!__timers.cancelled.has(id)) {
+      await __sleep(Number(ms) || 0);
+      if (__timers.cancelled.has(id)) break;
+      try { fn(...args); } catch (e) { console.error(e); }
+    }
+  })();
+  return id;
+};
+globalThis.clearTimeout = (id) => { if (id != null) __timers.cancelled.add(id); };
+globalThis.clearInterval = globalThis.clearTimeout;
+
+if (typeof globalThis.atob === "undefined") {
+  const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  globalThis.atob = (input) => {
+    const str = String(input).replace(/[^A-Za-z0-9+/]/g, "");
+    let out = "", bits = 0, acc = 0;
+    for (const ch of str) {
+      const v = B64.indexOf(ch);
+      if (v < 0) continue;
+      acc = (acc << 6) | v;
+      bits += 6;
+      if (bits >= 8) { bits -= 8; out += String.fromCharCode((acc >> bits) & 0xff); }
+    }
+    return out;
+  };
+  globalThis.btoa = (input) => {
+    const s = String(input);
+    let out = "";
+    for (let i = 0; i < s.length; i += 3) {
+      const a = s.charCodeAt(i);
+      const b = i + 1 < s.length ? s.charCodeAt(i + 1) : 0;
+      const c = i + 2 < s.length ? s.charCodeAt(i + 2) : 0;
+      out += B64[a >> 2] + B64[((a & 3) << 4) | (b >> 4)] +
+        (i + 1 < s.length ? B64[((b & 15) << 2) | (c >> 6)] : "=") +
+        (i + 2 < s.length ? B64[c & 63] : "=");
+    }
+    return out;
+  };
+}
+
 if (typeof globalThis.TextEncoder === "undefined") {
   globalThis.TextEncoder = class {
     encode(str) {
@@ -539,6 +604,17 @@ globalThis.fetch = async (url, options = {}) => {
   const headers = res.headers || {};
   const lower = {};
   for (const k in headers) lower[k.toLowerCase()] = headers[k];
+  // Text responses arrive as `body` (UTF-8); binary responses (invalid UTF-8)
+  // arrive intact as base64 in `bodyB64` so arrayBuffer() isn't lossy.
+  const toBytes = () => {
+    if (res.bodyB64) {
+      const bin = atob(res.bodyB64);
+      const u = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+      return u;
+    }
+    return new TextEncoder().encode(res.body || "");
+  };
   return {
     ok: res.status >= 200 && res.status < 300,
     status: res.status,
@@ -546,6 +622,8 @@ globalThis.fetch = async (url, options = {}) => {
     headers: { get: (k) => lower[String(k).toLowerCase()] ?? null },
     text: async () => res.body || "",
     json: async () => JSON.parse(res.body || "null"),
+    arrayBuffer: async () => toBytes().buffer,
+    bytes: async () => toBytes(),
   };
 };
 
@@ -618,6 +696,15 @@ async fn bind_globals(
             reg.commands.insert(name, CommandEntry { description, execute: saved });
             Ok(())
         })).ok();
+
+        // The async primitive setTimeout/setInterval are built on: returns a
+        // promise resolving after `ms`, driven by the same executor that runs
+        // tool calls — so `await new Promise(r => setTimeout(r, n))` inside a
+        // tool resolves mid-call (like fetch/run do).
+        g.set("__sleep", Func::from(Async(move |ms: f64| async move {
+            let delay = if ms.is_finite() && ms > 0.0 { ms as u64 } else { 0 };
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        }))).ok();
 
         let reg_on = registry.clone();
         g.set("__on", Func::from(move |event: String, handler: Function<'_>| -> rquickjs::Result<()> {
@@ -881,13 +968,35 @@ async fn do_http(client: &reqwest::Client, req_json: &str) -> Result<String, Str
     } else {
         &bytes[..]
     };
-    let body = String::from_utf8_lossy(capped).to_string();
+
+    // Text (valid UTF-8) rides as `body`, the common cheap path. Binary bodies
+    // ride intact as base64 in `bodyB64` so `arrayBuffer()`/`bytes()` aren't
+    // corrupted by a lossy UTF-8 conversion.
+    let (body, body_b64) = match std::str::from_utf8(capped) {
+        Ok(text) => (json_string(text), "null".to_string()),
+        Err(_) => ("\"\"".to_string(), json_string(&base64_encode(capped))),
+    };
 
     Ok(format!(
-        "{{\"status\":{status},\"statusText\":{},\"headers\":{headers},\"body\":{}}}",
+        "{{\"status\":{status},\"statusText\":{},\"headers\":{headers},\"body\":{body},\"bodyB64\":{body_b64}}}",
         json_string(&status_text),
-        json_string(&body)
     ))
+}
+
+// Standard base64 (with padding); no external dependency.
+fn base64_encode(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = chunk.get(1).copied().unwrap_or(0);
+        let b2 = chunk.get(2).copied().unwrap_or(0);
+        out.push(T[(b0 >> 2) as usize] as char);
+        out.push(T[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+        out.push(if chunk.len() > 1 { T[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { T[(b2 & 0x3f) as usize] as char } else { '=' });
+    }
+    out
 }
 
 struct HttpReq {

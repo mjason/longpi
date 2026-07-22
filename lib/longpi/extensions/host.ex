@@ -93,7 +93,11 @@ defmodule Longpi.Extensions.Host do
            waiters: [],
            pending: %{},
            next_id: 0,
-           watchdog: nil
+           watchdog: nil,
+           # In-flight fire-and-forget lifecycle events (turn_start/turn_end).
+           # They report no result, so the watchdog covers them too: a hung
+           # event handler would otherwise stall the command queue unnoticed.
+           events_inflight: 0
          }}
 
       {:error, reason} ->
@@ -184,10 +188,13 @@ defmodule Longpi.Extensions.Host do
   defp command_arg(_), do: ""
 
   @impl true
-  def handle_cast({:event, event, payload}, state) do
-    if state.ready?, do: Longpi.Js.fire_event(state.instance, event, payload)
-    {:noreply, state}
+  def handle_cast({:event, event, payload}, %{ready?: true} = state) do
+    Longpi.Js.fire_event(state.instance, event, payload)
+    watchdog = state.watchdog || Process.send_after(self(), :watchdog, @watchdog_timeout)
+    {:noreply, %{state | events_inflight: state.events_inflight + 1, watchdog: watchdog}}
   end
+
+  def handle_cast({:event, _event, _payload}, state), do: {:noreply, state}
 
   # ── Runtime messages ─────────────────────────────────────────────────
 
@@ -208,6 +215,14 @@ defmodule Longpi.Extensions.Host do
     if from, do: GenServer.reply(from, if(ok, do: {:ok, content}, else: {:error, content}))
     {:noreply, cancel_watchdog(%{state | pending: pending})}
   end
+
+  # A lifecycle event finished on the runtime — one fewer outstanding job.
+  def handle_info({:js_event_done, id}, %{id: id} = state) do
+    events = max(state.events_inflight - 1, 0)
+    {:noreply, cancel_watchdog(%{state | events_inflight: events})}
+  end
+
+  def handle_info({:js_event_done, _stale}, state), do: {:noreply, state}
 
   # `longpi.run` brokered from the runtime: run the program and reply. Done in a
   # task so a slow command doesn't block the host's mailbox. `service_run` never
@@ -243,6 +258,7 @@ defmodule Longpi.Extensions.Host do
              commands: [],
              waiters: [],
              pending: %{},
+             events_inflight: 0,
              watchdog: cancel_timer(state.watchdog)
          }}
 
@@ -257,14 +273,16 @@ defmodule Longpi.Extensions.Host do
 
   def handle_info({:js_down, _stale}, state), do: {:noreply, state}
 
-  # A tool call outran the watchdog — likely a hot loop. Interrupt the runtime.
-  def handle_info(:watchdog, %{pending: pending} = state) when map_size(pending) > 0 do
-    Logger.warning("extension call watchdog fired — interrupting the JS runtime")
-    Longpi.Js.interrupt(state.instance)
+  # A tool call or event outran the watchdog — likely a hot loop. Interrupt the
+  # runtime; the interrupted command still reports back and clears its slot.
+  def handle_info(:watchdog, state) do
+    if map_size(state.pending) > 0 or state.events_inflight > 0 do
+      Logger.warning("extension watchdog fired — interrupting the JS runtime")
+      Longpi.Js.interrupt(state.instance)
+    end
+
     {:noreply, %{state | watchdog: nil}}
   end
-
-  def handle_info(:watchdog, state), do: {:noreply, %{state | watchdog: nil}}
 
   def handle_info(_msg, state), do: {:noreply, state}
 
@@ -280,7 +298,7 @@ defmodule Longpi.Extensions.Host do
   defp cancel_watchdog(%{watchdog: nil} = state), do: state
 
   defp cancel_watchdog(state) do
-    if map_size(state.pending) == 0 do
+    if map_size(state.pending) == 0 and state.events_inflight == 0 do
       Process.cancel_timer(state.watchdog)
       %{state | watchdog: nil}
     else

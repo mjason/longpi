@@ -62,6 +62,13 @@ defmodule Longpi.Agent.Session do
     :ok
   end
 
+  @doc """
+  Registers a live watcher (a channel process). The session won't idle-reap
+  while any watcher is connected; the watcher is dropped automatically when its
+  process dies (tab closed / socket lost).
+  """
+  def watch(session, pid), do: GenServer.call(session, {:watch, pid})
+
   @doc "Tool-call ids currently awaiting approval (so a joining client can show them)."
   def pending_approvals(session), do: GenServer.call(session, :pending_approvals)
 
@@ -194,7 +201,12 @@ defmodule Longpi.Agent.Session do
        parent_session: opts[:parent_session],
        # Subagent sessions skip the extension host unless the role opts in
        # (extensions: true) — starting one per child is wasteful by default.
-       ext_enabled: is_nil(agent_def) or agent_def.extensions
+       ext_enabled: is_nil(agent_def) or agent_def.extensions,
+       # Idle-reaping: channels watching this session (ref => pid), and the
+       # timer that recycles the process when it's idle with no watchers. The
+       # conversation lives in the DB, so a reaped session rebuilds on reopen.
+       watchers: %{},
+       idle_timer: nil
      }, {:continue, :load_extensions}}
   end
 
@@ -212,7 +224,7 @@ defmodule Longpi.Agent.Session do
 
   @impl true
   def handle_continue(:load_extensions, state) do
-    {:noreply, start_ext_host(state)}
+    {:noreply, touch(start_ext_host(state))}
   end
 
   # Starts the Bun host when this session wants extensions AND the workspace
@@ -251,6 +263,13 @@ defmodule Longpi.Agent.Session do
   def terminate(_reason, state) do
     if state.ext_host && Process.alive?(state.ext_host) do
       GenServer.stop(state.ext_host, :normal, 1_000)
+    end
+
+    # Recycle child subagent sessions this instance spawned — they're tied to
+    # this parent and aren't reconnected when the conversation reopens, so
+    # leaving them running (e.g. after an idle-reap) would leak processes.
+    for {_handle, %{conversation_id: cid}} <- state.subagents do
+      Longpi.Agent.Sessions.stop(cid)
     end
 
     :ok
@@ -363,6 +382,11 @@ defmodule Longpi.Agent.Session do
 
   def handle_call(:pending_approvals, _from, state),
     do: {:reply, Map.keys(state.pending_approvals), state}
+
+  def handle_call({:watch, pid}, _from, state) do
+    ref = Process.monitor(pid)
+    {:reply, :ok, %{state | watchers: Map.put(state.watchers, ref, pid)}}
+  end
 
   def handle_call(:context_usage, _from, state),
     do: {:reply, context_usage_payload(state), state}
@@ -668,7 +692,7 @@ defmodule Longpi.Agent.Session do
   # Turn task finished
   def handle_info({ref, result}, %{task: %Task{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
-    state = %{state | status: :idle, task: nil, partial: []}
+    state = touch(%{state | status: :idle, task: nil, partial: []})
 
     case result do
       {:ok, new_messages} ->
@@ -782,6 +806,13 @@ defmodule Longpi.Agent.Session do
     end
   end
 
+  # A watching channel died (tab closed / socket lost) — drop it. When the last
+  # watcher leaves, the idle timer may now find the session reapable.
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{watchers: watchers} = state)
+      when is_map_key(watchers, ref) do
+    {:noreply, %{state | watchers: Map.delete(watchers, ref)}}
+  end
+
   # A subagent session died. Normal completion keeps the child alive (idle),
   # so an unexpected DOWN on a non-terminal child means it crashed.
   def handle_info({:DOWN, _ref, :process, pid, reason}, state) do
@@ -797,7 +828,48 @@ defmodule Longpi.Agent.Session do
     end
   end
 
+  # Idle-reap tick: recycle the process if it's genuinely idle with nobody
+  # watching, otherwise re-arm and keep waiting. Stopping is transparent — the
+  # conversation is persisted and rebuilt from the DB on the next open.
+  def handle_info(:idle_reap, state) do
+    if reapable?(state) do
+      {:stop, :normal, state}
+    else
+      {:noreply, touch(state)}
+    end
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
+
+  # ── Idle reaping ────────────────────────────────────────────────────
+
+  # 0 / nil disables reaping (set in tests that assert liveness).
+  defp idle_timeout, do: Application.get_env(:longpi, :session_idle_timeout_ms, 30 * 60_000)
+
+  defp touch(state) do
+    case idle_timeout() do
+      ms when is_integer(ms) and ms > 0 ->
+        if ref = state.idle_timer, do: Process.cancel_timer(ref)
+        %{state | idle_timer: Process.send_after(self(), :idle_reap, ms)}
+
+      _ ->
+        state
+    end
+  end
+
+  # Only recycle a persisted, top-level session that is doing nothing and has no
+  # connected client, no pending approvals, and no live children/background work.
+  defp reapable?(state) do
+    state.status == :idle and
+      not is_nil(state.conversation_id) and
+      is_nil(state.parent_session) and
+      is_nil(state.compaction_task) and
+      is_nil(state.title_task) and
+      map_size(state.watchers) == 0 and
+      map_size(state.pending_approvals) == 0 and
+      map_size(state.subagent_approvals) == 0 and
+      not Enum.any?(state.subagents, fn {_h, info} -> info.status == :running end)
+  end
 
   # ── Subagent helpers ────────────────────────────────────────────────
 
@@ -1140,7 +1212,7 @@ defmodule Longpi.Agent.Session do
       end)
 
     fire_ext_event(state, "turn_start", %{})
-    %{state | status: :running, task: task, partial: []}
+    touch(%{state | status: :running, task: task, partial: []})
   end
 
   # ── Context compaction ────────────────────────────────────────────────

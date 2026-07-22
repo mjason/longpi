@@ -18,6 +18,9 @@ defmodule LongpiWeb.ConversationChannel do
     case Sessions.ensure_started(conversation_id) do
       {:ok, session} ->
         Phoenix.PubSub.subscribe(Longpi.PubSub, Session.topic(conversation_id))
+        # Keep the session alive while this channel is connected (and let it
+        # idle-reap once every tab closes).
+        Session.watch(session, self())
 
         history =
           session

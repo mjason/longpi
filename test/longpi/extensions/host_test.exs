@@ -226,8 +226,116 @@ defmodule Longpi.Extensions.HostTest do
     assert :none = Host.start_for(cwd)
   end
 
-  # Tiny one-shot HTTP server: accept one connection, return a fixed JSON body.
-  defp start_http_stub(body) do
+  test "setTimeout resolves an awaited promise mid-call", %{cwd: cwd} do
+    write_ext(cwd, "timer.js", """
+    export default function (longpi) {
+      longpi.registerTool({
+        name: "delayed",
+        description: "Waits then answers.",
+        parameters: { type: "object", properties: {} },
+        async execute() {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return "tick";
+        },
+      });
+    }
+    """)
+
+    {:ok, host} = Host.start_for(cwd)
+    assert {:ok, "tick"} = Host.call_tool(host, "delayed", %{})
+  end
+
+  test "structuredClone deep-copies (nested mutation doesn't leak)", %{cwd: cwd} do
+    write_ext(cwd, "clone.js", """
+    export default function (longpi) {
+      longpi.registerTool({
+        name: "cloned",
+        description: "Clones then mutates the copy.",
+        parameters: { type: "object", properties: {} },
+        execute() {
+          const original = { n: 1, list: [1, 2] };
+          const copy = structuredClone(original);
+          copy.list.push(3);
+          return JSON.stringify({ original: original.list.length, copy: copy.list.length });
+        },
+      });
+    }
+    """)
+
+    {:ok, host} = Host.start_for(cwd)
+    assert {:ok, ~s({"original":2,"copy":3})} = Host.call_tool(host, "cloned", %{})
+  end
+
+  test "atob/btoa round-trip base64", %{cwd: cwd} do
+    write_ext(cwd, "b64.js", """
+    export default function (longpi) {
+      longpi.registerTool({
+        name: "b64",
+        description: "base64 round-trip",
+        parameters: { type: "object", properties: {} },
+        execute() {
+          const encoded = btoa("hi!");
+          return `${encoded} ${atob(encoded)}`;
+        },
+      });
+    }
+    """)
+
+    {:ok, host} = Host.start_for(cwd)
+    assert {:ok, "aGkh hi!"} = Host.call_tool(host, "b64", %{})
+  end
+
+  test "fetch keeps binary (non-UTF-8) bodies intact via arrayBuffer()", %{cwd: cwd} do
+    # 0xff/0x80 are invalid UTF-8 — a lossy conversion would corrupt them.
+    port = start_http_stub(<<0xFF, 0x00, 0xFE, 0x80>>, "application/octet-stream")
+
+    write_ext(cwd, "bin.js", """
+    export default function (longpi) {
+      longpi.registerTool({
+        name: "grab",
+        description: "Reads raw bytes.",
+        parameters: { type: "object", properties: {} },
+        async execute() {
+          const res = await fetch("http://127.0.0.1:#{port}/");
+          const bytes = new Uint8Array(await res.arrayBuffer());
+          return Array.from(bytes).join(",");
+        },
+      });
+    }
+    """)
+
+    {:ok, host} = Host.start_for(cwd)
+    assert {:ok, "255,0,254,128"} = Host.call_tool(host, "grab", %{})
+  end
+
+  test "a lifecycle event handler runs and doesn't wedge the command queue", %{cwd: cwd} do
+    write_ext(cwd, "life.js", """
+    export default function (longpi) {
+      let started = 0;
+      longpi.on("turn_start", () => { started++; });
+      longpi.registerTool({
+        name: "count",
+        description: "Reports how many turn_start events fired.",
+        parameters: { type: "object", properties: {} },
+        execute() { return String(started); },
+      });
+    }
+    """)
+
+    {:ok, host} = Host.start_for(cwd)
+    # Ensure the extension is loaded before firing events at it.
+    _ = Host.tool_specs(host)
+
+    Host.fire_event(host, "turn_start", %{})
+    Host.fire_event(host, "turn_start", %{})
+
+    # Casts are mailbox-ordered before the following call, so both events are
+    # processed first; the call proves the queue is still live afterward.
+    assert {:ok, "2"} = Host.call_tool(host, "count", %{})
+  end
+
+  # Tiny one-shot HTTP server: accept one connection, return a fixed body.
+  defp start_http_stub(body, content_type \\ "application/json") do
     {:ok, listen} = :gen_tcp.listen(0, [:binary, packet: :raw, active: false, reuseaddr: true])
     {:ok, port} = :inet.port(listen)
 
@@ -236,7 +344,7 @@ defmodule Longpi.Extensions.HostTest do
       {:ok, _request} = :gen_tcp.recv(sock, 0, 5_000)
 
       response =
-        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n" <>
+        "HTTP/1.1 200 OK\r\ncontent-type: #{content_type}\r\n" <>
           "content-length: #{byte_size(body)}\r\nconnection: close\r\n\r\n" <> body
 
       :gen_tcp.send(sock, response)

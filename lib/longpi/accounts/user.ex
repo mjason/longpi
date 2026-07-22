@@ -85,6 +85,13 @@ defmodule Longpi.Accounts.User do
                 strategy_name: :password, password_argument: :current_password}
 
       change {AshAuthentication.Strategy.Password.HashPasswordChange, strategy_name: :password}
+
+      # Tokens are revoked by log_out_everywhere; also drop live sockets so
+      # already-connected tabs don't keep running until they reconnect.
+      change after_action(fn _changeset, user, _context ->
+               LongpiWeb.UserSocket.disconnect(user.id)
+               {:ok, user}
+             end)
     end
 
     read :sign_in_with_password do
@@ -163,6 +170,13 @@ defmodule Longpi.Accounts.User do
       end
 
       change {AshAuthentication.Strategy.Password.HashPasswordChange, strategy_name: :password}
+
+      # Admin "reset password" reuses this upsert (config_controller); kick the
+      # target user's live sockets. Boot-safe: a no-op during initial seeding.
+      change after_action(fn _changeset, user, _context ->
+               LongpiWeb.UserSocket.disconnect(user.id)
+               {:ok, user}
+             end)
     end
   end
 

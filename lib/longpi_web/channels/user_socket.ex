@@ -27,4 +27,19 @@ defmodule LongpiWeb.UserSocket do
   @impl true
   def id(%{assigns: %{user_id: user_id}}), do: "user_socket:#{user_id}"
   def id(_socket), do: nil
+
+  @doc """
+  Drops every live socket belonging to a user, so a password change takes
+  effect immediately instead of leaving already-connected tabs authenticated.
+  Best-effort and boot-safe: a no-op when the endpoint isn't running yet (e.g.
+  during boot-time user seeding).
+  """
+  @spec disconnect(term()) :: :ok
+  def disconnect(user_id) do
+    if Process.whereis(LongpiWeb.Endpoint) do
+      LongpiWeb.Endpoint.broadcast("user_socket:#{user_id}", "disconnect", %{})
+    end
+
+    :ok
+  end
 end
