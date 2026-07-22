@@ -64,6 +64,17 @@ const en = {
   "msg.update": "Update",
   "msg.fork": "New conversation from here",
 
+  // File / link preview dialogs
+  "file.notFound": "File not found.",
+  "file.binary": "This file can't be previewed — download it to view.",
+  "file.truncated": "Preview truncated — showing the first 256 KB.",
+  "file.copyPath": "Copy path",
+  "file.download": "Download",
+  "link.openExternal": "Open external link?",
+  "link.externalWarning": "You're about to visit an external website.",
+  "link.copy": "Copy link",
+  "link.open": "Open link",
+
   // New conversation dialog
   "newConv.title": "New conversation",
   "newConv.workspace": "Workspace",
@@ -208,6 +219,17 @@ const zh: Record<I18nKey, string> = {
   "msg.cancel": "取消",
   "msg.update": "更新",
   "msg.fork": "从这里开新会话",
+
+  // File / link preview dialogs
+  "file.notFound": "文件不存在。",
+  "file.binary": "此文件无法预览——可下载查看。",
+  "file.truncated": "预览已截断——仅显示前 256 KB。",
+  "file.copyPath": "复制路径",
+  "file.download": "下载",
+  "link.openExternal": "打开外部链接?",
+  "link.externalWarning": "即将访问外部网站。",
+  "link.copy": "复制链接",
+  "link.open": "打开链接",
 
   "newConv.title": "新建会话",
   "newConv.workspace": "工作区",

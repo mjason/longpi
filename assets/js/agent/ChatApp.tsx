@@ -33,6 +33,7 @@ import { Label } from "../components/ui/label";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { Thread } from "../components/assistant-ui/thread";
+import { WorkspaceCwdContext } from "../components/assistant-ui/file-link-modal";
 import { AuthStatus } from "./AuthStatus";
 import { ConversationUsageContext } from "./ContextMeter";
 import { ExtCommandsContext } from "./ExtCommandsContext";
@@ -620,8 +621,10 @@ export function ConversationPane({
                 <RegenerateContext.Provider value={regenerate}>
                   <ForkContext.Provider value={fork}>
                     <WorkspaceFilesContext.Provider value={workspaceFiles}>
-                      <ForkPrefill conversationId={conversation.id} />
-                      <Thread />
+                      <WorkspaceCwdContext.Provider value={conversation.cwd}>
+                        <ForkPrefill conversationId={conversation.id} />
+                        <Thread />
+                      </WorkspaceCwdContext.Provider>
                     </WorkspaceFilesContext.Provider>
                   </ForkContext.Provider>
                 </RegenerateContext.Provider>

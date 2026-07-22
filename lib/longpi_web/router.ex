@@ -85,6 +85,8 @@ defmodule LongpiWeb.Router do
     get "/rpc/embed-info", ConfigController, :embed_info
     post "/rpc/conversations/fork", ConfigController, :fork_conversation
     get "/rpc/files", ConfigController, :list_files
+    get "/rpc/file", ConfigController, :file_preview
+    get "/rpc/file/raw", ConfigController, :file_raw
     get "/rpc/auth", ConfigController, :auth_status
     post "/rpc/auth", ConfigController, :set_auth
     get "/rpc/users", ConfigController, :list_users

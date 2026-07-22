@@ -95,6 +95,121 @@ defmodule LongpiWeb.ConfigController do
     end
   end
 
+  # File preview for local paths linked in chat messages: text files return
+  # their (capped) content, images/binaries return just metadata so the client
+  # can render via /rpc/file/raw or offer a download.
+  @preview_cap 256_000
+
+  def file_preview(conn, %{"path" => path} = params) when is_binary(path) do
+    case resolve_file(path, params["cwd"]) do
+      {:ok, abs, %File.Stat{size: size}} ->
+        mime = MIME.from_path(abs)
+        base = %{name: Path.basename(abs), path: abs, size: size, mime: mime}
+
+        cond do
+          String.starts_with?(mime, "image/") ->
+            json(conn, Map.put(base, :kind, "image"))
+
+          true ->
+            {head, truncated} = read_head(abs, size)
+
+            case printable_text(head) do
+              {:ok, text} ->
+                json(
+                  conn,
+                  base |> Map.merge(%{kind: "text", content: text, truncated: truncated})
+                )
+
+              :binary ->
+                json(conn, Map.put(base, :kind, "binary"))
+            end
+        end
+
+      :error ->
+        conn |> put_status(404) |> json(%{error: "not_found"})
+    end
+  end
+
+  def file_raw(conn, %{"path" => path} = params) when is_binary(path) do
+    case resolve_file(path, params["cwd"]) do
+      {:ok, abs, _stat} ->
+        disposition = if params["download"] in ["1", "true"], do: "attachment", else: "inline"
+        encoded_name = URI.encode(Path.basename(abs), &URI.char_unreserved?/1)
+
+        conn
+        |> put_resp_content_type(MIME.from_path(abs), nil)
+        |> put_resp_header(
+          "content-disposition",
+          "#{disposition}; filename*=UTF-8''#{encoded_name}"
+        )
+        |> send_file(200, abs)
+
+      :error ->
+        send_resp(conn, 404, "not found")
+    end
+  end
+
+  # Absolute paths (and file:// / ~) are taken as-is; relative paths resolve
+  # against the conversation's cwd. An absolute-looking path that doesn't
+  # exist also falls back to cwd-relative: the client's markdown sanitizer
+  # resolves relative hrefs against the page origin, so `lib/foo.ex` arrives
+  # here as `/lib/foo.ex`. Only regular files qualify.
+  defp resolve_file(path, cwd) do
+    candidates =
+      cond do
+        String.starts_with?(path, "file://") ->
+          [String.replace_prefix(path, "file://", "")]
+
+        String.starts_with?(path, "~") ->
+          [Path.expand(path)]
+
+        Path.type(path) == :absolute ->
+          [path | cwd_candidate(String.trim_leading(path, "/"), cwd)]
+
+        true ->
+          cwd_candidate(path, cwd) ++ [Path.expand(path)]
+      end
+
+    Enum.find_value(candidates, :error, fn abs ->
+      case File.stat(abs) do
+        {:ok, %File.Stat{type: :regular} = stat} -> {:ok, abs, stat}
+        _ -> nil
+      end
+    end)
+  end
+
+  defp cwd_candidate(rel, cwd) when is_binary(cwd) and cwd != "", do: [Path.expand(rel, cwd)]
+  defp cwd_candidate(_rel, _cwd), do: []
+
+  defp read_head(path, size) do
+    if size > @preview_cap do
+      {:ok, io} = File.open(path, [:read, :binary])
+      head = IO.binread(io, @preview_cap)
+      File.close(io)
+      {head, true}
+    else
+      {File.read!(path), false}
+    end
+  end
+
+  # Text iff valid UTF-8 with no NUL bytes. A truncated read may split a
+  # multi-byte character, so trim up to 3 trailing bytes before giving up.
+  defp printable_text(bytes) do
+    if String.contains?(bytes, <<0>>) do
+      :binary
+    else
+      trim_to_valid(bytes, 3)
+    end
+  end
+
+  defp trim_to_valid(bytes, tries) do
+    cond do
+      String.valid?(bytes) -> {:ok, bytes}
+      tries == 0 or byte_size(bytes) == 0 -> :binary
+      true -> trim_to_valid(binary_part(bytes, 0, byte_size(bytes) - 1), tries - 1)
+    end
+  end
+
   # Fork: a NEW conversation seeded with this one's history up to (and
   # including) `position` — "start a new conversation from here".
   # position >= 0 copies rows 0..position; -1 copies nothing (forking BEFORE
