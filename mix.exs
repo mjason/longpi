@@ -97,6 +97,7 @@ defmodule Longpi.MixProject do
        depth: 1},
       {:swoosh, "~> 1.16"},
       {:req, "~> 0.5"},
+      {:rustler, "~> 0.36", runtime: false},
       {:req_llm, "~> 1.17"},
       # req_llm's websocket streaming needs this at compile time
       {:websockex, "~> 0.5"},

@@ -41,13 +41,12 @@ npm-debug.log
 
 
 # Rust shim build artifacts
-native/longpi_shim/target/
+native/*/target/
 priv/shim/
 
 config/dev.secret.exs
 
 # Rust search build artifacts
-native/longpi_search/target/
 priv/search/
 
 # e2e (Playwright)
@@ -61,3 +60,4 @@ e2e/playwright-report/
 # phx.digest output (digested + gzipped copies of static files)
 /priv/static/**/*.gz
 /priv/static/**/*-????????????????????????????????.*
+priv/native/
