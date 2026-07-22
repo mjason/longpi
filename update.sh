@@ -13,6 +13,21 @@ REPO="${LONGPI_REPO:-mjason/longpi}"
 ROOT="${LONGPI_HOME:-$HOME/.local/longpi}"
 SERVICE_NAME="${LONGPI_SERVICE:-longpi}"
 
+# --- GitHub token (optional) -------------------------------------------------
+# A token (env, else the config file's "githubToken") is attached to the GitHub
+# API + release-asset requests when present. Anonymous downloads intermittently
+# hit 403 (rate limit) or 404 from the release CDN; an authenticated request
+# avoids both. With no token, everything falls back to anonymous.
+CONFIG_FILE="${LONGPI_CONFIG_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/longpi/config.jsonc}"
+gh_token() {
+  [ -n "${LONGPI_GITHUB_TOKEN:-}" ] && { printf '%s' "$LONGPI_GITHUB_TOKEN"; return; }
+  [ -n "${GITHUB_TOKEN:-}" ] && { printf '%s' "$GITHUB_TOKEN"; return; }
+  [ -f "$CONFIG_FILE" ] && sed -n 's/.*"githubToken"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$CONFIG_FILE" | head -1
+}
+TOKEN="$(gh_token || true)"
+AUTH=()
+[ -n "$TOKEN" ] && AUTH=(-H "Authorization: token $TOKEN")
+
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
@@ -26,7 +41,7 @@ CURRENT=$(basename "$(cd "$ROOT/current" && pwd -P)")
 
 TAG="${1:-}"
 if [ -z "$TAG" ]; then
-  TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=15" |
+  TAG=$(curl -fsSL "${AUTH[@]}" "https://api.github.com/repos/$REPO/releases?per_page=15" |
     grep '"tag_name"' | cut -d'"' -f4 | grep -m1 '^v[0-9]') || true
   [ -n "$TAG" ] || die "could not resolve the latest release"
 fi
@@ -43,8 +58,8 @@ DEST="$ROOT/versions/$TAG"
 if [ ! -x "$DEST/bin/longpi" ]; then
   say "downloading $ASSET"
   TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
-  curl -fSL --progress-bar -o "$TMP/$ASSET" "$URL"
-  if curl -fsSL -o "$TMP/$ASSET.sha256" "$URL.sha256" 2>/dev/null; then
+  curl -fSL "${AUTH[@]}" --progress-bar -o "$TMP/$ASSET" "$URL"
+  if curl -fsSL "${AUTH[@]}" -o "$TMP/$ASSET.sha256" "$URL.sha256" 2>/dev/null; then
     (cd "$TMP" && sha256sum -c "$ASSET.sha256" >/dev/null) || die "checksum mismatch"
     say "checksum ok"
   fi
