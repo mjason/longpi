@@ -4,7 +4,7 @@ import { memo, type FC } from "react";
 import type { TextMessagePartComponent } from "@assistant-ui/react";
 import type { Unstable_DirectiveFormatter } from "@assistant-ui/react";
 import { unstable_defaultDirectiveFormatter } from "@assistant-ui/react";
-import { Badge } from "@/components/ui/badge";
+import { Badge } from "./badge";
 
 type IconComponent = FC<{ className?: string }>;
 
@@ -45,7 +45,8 @@ export function createDirectiveText(
           return (
             <Badge
               key={i}
-              variant="secondary"
+              variant="info"
+              size="sm"
               data-slot="directive-text-chip"
               data-directive-type={seg.type}
               data-directive-id={seg.id}
