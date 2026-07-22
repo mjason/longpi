@@ -101,6 +101,9 @@ defmodule Longpi.Agent.Session do
   @doc "Children this session has spawned: %{handle => info}."
   def subagents(session), do: GenServer.call(session, :subagent_snapshot)
 
+  @doc "Tool approvals bubbled up from children, awaiting the user's decision."
+  def subagent_approvals(session), do: GenServer.call(session, :subagent_approvals)
+
   # Server
 
   @impl true
@@ -184,6 +187,9 @@ defmodule Longpi.Agent.Session do
        # who to notify on completion.
        subagents: %{},
        subagent_counter: 0,
+       # Tool approvals a child bubbled up for the user to answer here:
+       # %{call_id => child_conversation_id}.
+       subagent_approvals: %{},
        agent_def: agent_def,
        parent_session: opts[:parent_session],
        # Subagent sessions skip the extension host unless the role opts in
@@ -458,6 +464,9 @@ defmodule Longpi.Agent.Session do
 
   def handle_call(:subagent_snapshot, _from, state), do: {:reply, state.subagents, state}
 
+  def handle_call(:subagent_approvals, _from, state),
+    do: {:reply, Map.values(state.subagent_approvals), state}
+
   def handle_call({:spawn_subagent, args}, _from, state) do
     with :ok <- check_subagent_limit(state),
          {:ok, agent_def} <- lookup_subagent_role(state, args[:agent]),
@@ -605,15 +614,46 @@ defmodule Longpi.Agent.Session do
     end
   end
 
-  # A tool needs approval: remember who's waiting and prompt the user.
+  # A tool needs approval: remember who's waiting and prompt the user. A
+  # subagent has no one watching its own conversation, so it ALSO bubbles the
+  # request to its parent, which surfaces it in the parent's view.
   def handle_info({:approval_request, task_pid, ref, call}, state) do
     pending = Map.put(state.pending_approvals, call.id, {task_pid, ref})
     state = notify(%{state | pending_approvals: pending}, {:approval_request, call})
+
+    if state.parent_session do
+      send(
+        state.parent_session,
+        {:subagent_approval_request, state.conversation_id, agent_role(state), call}
+      )
+    end
+
     {:noreply, state}
   end
 
   # The user's decision, forwarded from the channel; unblock the waiting task.
+  # A subagent's own pending approval may instead be one the PARENT is holding
+  # on its behalf — route those to the child before checking our own.
+  def handle_info({:approval_response, call_id, approved?}, %{subagent_approvals: approvals} = state)
+      when is_map_key(approvals, call_id) do
+    %{conversation_id: child_id} = approvals[call_id]
+
+    case Longpi.Agent.Sessions.whereis(child_id) do
+      nil -> :ok
+      pid -> __MODULE__.respond_approval(pid, call_id, approved?)
+    end
+
+    state = %{state | subagent_approvals: Map.delete(approvals, call_id)}
+    {:noreply, notify(state, {:subagent_approval_resolved, call_id})}
+  end
+
   def handle_info({:approval_response, call_id, approved?}, state) do
+    # A subagent that resolved its own approval tells its parent to clear the
+    # bubbled prompt.
+    if state.parent_session do
+      send(state.parent_session, {:subagent_approval_resolved, state.conversation_id, call_id})
+    end
+
     case Map.pop(state.pending_approvals, call_id) do
       {{task_pid, ref}, pending} ->
         decision = if approved?, do: :allow, else: :deny
@@ -702,6 +742,25 @@ defmodule Longpi.Agent.Session do
     {:noreply, apply_compaction(%{state | compaction_task: nil, status: :idle}, :fallback)}
   end
 
+  # A child bubbled a tool approval — track it and surface it in this
+  # conversation's view (attributed to the subagent).
+  def handle_info({:subagent_approval_request, child_id, role, call}, state) do
+    entry = %{conversation_id: child_id, role: role, handle: subagent_handle_for(state, child_id), call: call}
+    approvals = Map.put(state.subagent_approvals, call.id, entry)
+    {:noreply, notify(%{state | subagent_approvals: approvals}, {:subagent_approval, entry})}
+  end
+
+  # A child's approval was answered (here or on the child's own page) — clear
+  # the bubbled prompt.
+  def handle_info({:subagent_approval_resolved, _child_id, call_id}, state) do
+    if Map.has_key?(state.subagent_approvals, call_id) do
+      approvals = Map.delete(state.subagent_approvals, call_id)
+      {:noreply, notify(%{state | subagent_approvals: approvals}, {:subagent_approval_resolved, call_id})}
+    else
+      {:noreply, state}
+    end
+  end
+
   # A subagent finished a turn (child sessions send this to parent_session).
   def handle_info({:subagent_update, conversation_id, status}, state) do
     case Enum.find(state.subagents, fn {_h, info} -> info.conversation_id == conversation_id end) do
@@ -717,6 +776,7 @@ defmodule Longpi.Agent.Session do
 
         info = %{info | status: new_status, detail: detail}
         state = %{state | subagents: Map.put(state.subagents, handle, info)}
+        state = clear_subagent_approvals_for(state, conversation_id)
         state = notify_subagents(state)
         {:noreply, maybe_inject_subagent_notice(state, handle, info)}
     end
@@ -860,6 +920,32 @@ defmodule Longpi.Agent.Session do
   end
 
   # UI event: the current children snapshot, serializable for the channel.
+  defp agent_role(%{agent_def: %Subagents.Def{name: name}}), do: name
+  defp agent_role(_state), do: "agent"
+
+  # A terminal child can't answer a pending bubbled approval — drop it (and
+  # clear the parent's prompt) so it doesn't linger.
+  defp clear_subagent_approvals_for(state, child_id) do
+    {stale, kept} =
+      Map.split_with(state.subagent_approvals, fn {_call_id, %{conversation_id: cid}} ->
+        cid == child_id
+      end)
+
+    state = %{state | subagent_approvals: kept}
+
+    Enum.reduce(stale, state, fn {call_id, _}, acc ->
+      notify(acc, {:subagent_approval_resolved, call_id})
+    end)
+  end
+
+  # The parent's handle ("scout-1") for a child conversation id.
+  defp subagent_handle_for(state, child_id) do
+    Enum.find_value(state.subagents, "agent", fn
+      {handle, %{conversation_id: ^child_id}} -> handle
+      _ -> false
+    end)
+  end
+
   defp notify_subagents(state) do
     snapshot =
       Map.new(state.subagents, fn {handle, info} ->

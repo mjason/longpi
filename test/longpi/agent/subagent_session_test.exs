@@ -139,4 +139,42 @@ defmodule Longpi.Agent.SubagentSessionTest do
       _ -> Process.sleep(100) && wait_until_done(parent, handle, tries - 1)
     end
   end
+
+  test "a subagent tool approval bubbles to the parent, routes back on response", %{
+    parent: parent
+  } do
+    call = %{id: "call-1", name: "bash", args: %{"command" => "ls"}}
+
+    # The child bubbles an approval request up to the parent.
+    send(parent, {:subagent_approval_request, "child-abc", "scout", call})
+
+    assert_receive {:agent_event, {:subagent_approval, entry}}, 2_000
+    assert entry.call.id == "call-1"
+    assert entry.conversation_id == "child-abc"
+    assert entry.role == "scout"
+
+    # The parent surfaces it for a re-joining client.
+    assert [%{call: %{id: "call-1"}}] = Session.subagent_approvals(parent)
+
+    # The user answers in the parent view → the parent clears it and broadcasts
+    # the resolution (and forwards to the child, a no-op here since it isn't live).
+    send(parent, {:approval_response, "call-1", true})
+
+    assert_receive {:agent_event, {:subagent_approval_resolved, "call-1"}}, 2_000
+    assert Session.subagent_approvals(parent) == []
+  end
+
+  test "a subagent going terminal clears its pending bubbled approval", %{parent: parent} do
+    stub(LLMMock, :stream, fn _, _, _, _, _ -> {:ok, %{text: "done", tool_calls: []}} end)
+    {:ok, handle} = GenServer.call(parent, {:spawn_subagent, %{agent: "scout", task: "t"}})
+    %{^handle => %{conversation_id: child_id}} = GenServer.call(parent, :subagent_snapshot)
+
+    send(parent, {:subagent_approval_request, child_id, "scout", %{id: "c2", name: "bash", args: %{}}})
+    assert_receive {:agent_event, {:subagent_approval, _}}, 2_000
+
+    # Child failing/finishing must not leave a stuck approval prompt.
+    send(parent, {:subagent_update, child_id, {:failed, :boom}})
+    assert_receive {:agent_event, {:subagent_approval_resolved, "c2"}}, 2_000
+    assert Session.subagent_approvals(parent) == []
+  end
 end

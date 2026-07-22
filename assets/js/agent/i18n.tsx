@@ -73,6 +73,9 @@ const en = {
   "subagents.clickToOpen": "Click to open its conversation",
   "subagents.childBadge": "Subagent · {role}",
   "subagents.backToParent": "Back to parent conversation",
+  "subagentApproval.wants": "wants to run",
+  "subagentApproval.allow": "Allow",
+  "subagentApproval.deny": "Deny",
 
   // File / link preview dialogs
   "file.notFound": "File not found.",
@@ -239,6 +242,9 @@ const zh: Record<I18nKey, string> = {
   "subagents.clickToOpen": "点击查看它的会话",
   "subagents.childBadge": "子 Agent · {role}",
   "subagents.backToParent": "返回父会话",
+  "subagentApproval.wants": "请求运行",
+  "subagentApproval.allow": "允许",
+  "subagentApproval.deny": "拒绝",
 
   // File / link preview dialogs
   "file.notFound": "文件不存在。",

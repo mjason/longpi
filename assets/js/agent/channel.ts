@@ -103,6 +103,12 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   channel.on("subagents", (p: { agents: Record<string, SubagentInfo>; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "subagents_updated", agents: p.agents })),
   );
+  channel.on("subagent_approval", (p: SubagentApproval & { seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "subagent_approval", approval: p })),
+  );
+  channel.on("subagent_approval_resolved", (p: { id: string; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "subagent_approval_resolved", id: p.id })),
+  );
   channel.on("turn_ended", (p: { reason: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "turn_ended", reason: p.reason })),
   );
@@ -114,7 +120,7 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
     channel
       .join()
       .receive("ok", (reply: JoinReply) => {
-        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands, subagents: reply.subagents });
+        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands, subagents: reply.subagents, subagentApprovals: reply.subagent_approvals });
         resolve();
       })
       .receive("error", (reply: { reason: string }) => {
@@ -137,6 +143,15 @@ export type SubagentInfo = {
   startedAt: number;
 };
 
+export type SubagentApproval = {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  conversationId: string;
+  role: string;
+  handle: string;
+};
+
 type JoinReply = {
   messages: HistoryMessage[];
   status: string;
@@ -145,6 +160,7 @@ type JoinReply = {
   reasoning_effort?: string | null;
   commands?: ExtCommand[];
   subagents?: Record<string, SubagentInfo>;
+  subagent_approvals?: SubagentApproval[];
 };
 
 export type ConversationChannelState = {
@@ -161,10 +177,14 @@ export type ConversationChannelState = {
   commands: ExtCommand[];
   // Subagents this conversation has spawned, keyed by handle ("scout-1").
   subagents: Record<string, SubagentInfo>;
+  // Tool approvals bubbled up from subagents, keyed by call id.
+  subagentApprovals: Record<string, SubagentApproval>;
 };
 
 export type ConversationAction =
-  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage; commands?: ExtCommand[]; reasoningEffort?: string | null; subagents?: Record<string, SubagentInfo> }
+  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage; commands?: ExtCommand[]; reasoningEffort?: string | null; subagents?: Record<string, SubagentInfo>; subagentApprovals?: SubagentApproval[] }
+  | { type: "subagent_approval"; approval: SubagentApproval }
+  | { type: "subagent_approval_resolved"; id: string }
   | { type: "model_changed"; model: string }
   | { type: "reasoning_changed"; effort: string | null }
   | { type: "titled"; title: string }
@@ -256,7 +276,7 @@ function settle(items: ThreadItem[]): ThreadItem[] {
 export function reduce(state: ConversationChannelState, action: ConversationAction): ConversationChannelState {
   switch (action.type) {
     case "reset":
-      return { items: [], status: "connecting", usage: null, model: null, reasoningEffort: null, title: null, commands: [], subagents: {} };
+      return { items: [], status: "connecting", usage: null, model: null, reasoningEffort: null, title: null, commands: [], subagents: {}, subagentApprovals: {} };
 
     case "model_changed":
       return { ...state, model: action.model };
@@ -279,10 +299,24 @@ export function reduce(state: ConversationChannelState, action: ConversationActi
         reasoningEffort: action.reasoningEffort ?? state.reasoningEffort,
         commands: action.commands ?? state.commands,
         subagents: action.subagents ?? state.subagents,
+        subagentApprovals: action.subagentApprovals
+          ? Object.fromEntries(action.subagentApprovals.map((a) => [a.id, a]))
+          : state.subagentApprovals,
       };
 
     case "subagents_updated":
       return { ...state, subagents: action.agents };
+
+    case "subagent_approval":
+      return {
+        ...state,
+        subagentApprovals: { ...state.subagentApprovals, [action.approval.id]: action.approval },
+      };
+
+    case "subagent_approval_resolved": {
+      const { [action.id]: _removed, ...rest } = state.subagentApprovals;
+      return { ...state, subagentApprovals: rest };
+    }
 
     case "context_usage":
       return { ...state, usage: { used: action.used, window: action.window } };

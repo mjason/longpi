@@ -37,7 +37,8 @@ defmodule LongpiWeb.ConversationChannel do
           context_usage: Session.context_usage(session),
           reasoning_effort: Session.reasoning_effort(session),
           commands: ext.commands,
-          subagents: serialize_subagents(Session.subagents(session))
+          subagents: serialize_subagents(Session.subagents(session)),
+          subagent_approvals: Enum.map(Session.subagent_approvals(session), &serialize_approval/1)
         }
 
         {:ok, reply, socket}
@@ -163,7 +164,8 @@ defmodule LongpiWeb.ConversationChannel do
       context_usage: Session.context_usage(session),
       reasoning_effort: Session.reasoning_effort(session),
       commands: Session.ext_info(session).commands,
-      subagents: serialize_subagents(Session.subagents(session))
+      subagents: serialize_subagents(Session.subagents(session)),
+      subagent_approvals: Enum.map(Session.subagent_approvals(session), &serialize_approval/1)
     }
 
     {:reply, {:ok, reply}, socket}
@@ -214,6 +216,13 @@ defmodule LongpiWeb.ConversationChannel do
   defp serialize_event({:subagents, snapshot}),
     do: {"subagents", %{agents: serialize_subagents(snapshot)}}
 
+  # A child's tool approval bubbled up for the user to answer here.
+  defp serialize_event({:subagent_approval, entry}),
+    do: {"subagent_approval", serialize_approval(entry)}
+
+  defp serialize_event({:subagent_approval_resolved, call_id}),
+    do: {"subagent_approval_resolved", %{id: call_id}}
+
   defp serialize_event({:commands, commands}), do: {"commands", %{commands: commands}}
 
   defp serialize_event({:history, messages}),
@@ -225,6 +234,17 @@ defmodule LongpiWeb.ConversationChannel do
     do: {"turn_failed", %{reason: inspect(reason)}}
 
   defp serialize_event(_event), do: nil
+
+  defp serialize_approval(%{call: call, conversation_id: cid, role: role, handle: handle}) do
+    %{
+      id: call.id,
+      name: call.name,
+      args: call.args,
+      conversationId: cid,
+      role: role,
+      handle: handle
+    }
+  end
 
   defp serialize_subagents(snapshot) do
     Map.new(snapshot, fn {handle, info} ->

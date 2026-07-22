@@ -48,7 +48,7 @@ import {
 } from "./store";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/shallow";
-import { SubagentsBar } from "./SubagentsBar";
+import { SubagentApprovals, SubagentsBar } from "./SubagentsBar";
 import { forkConversation, loadSettings, loadWorkspaceFiles, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
 import { UpdateCheck } from "./UpdateCheck";
@@ -551,6 +551,7 @@ export function ConversationPane({
   // s.subagents is a stable ref (replaced only on subagents_updated); useShallow
   // guards against an accidental identity change.
   const subagents = useStore(store, useShallow((s) => s.subagents));
+  const subagentApprovals = useStore(store, useShallow((s) => s.subagentApprovals));
 
   // Feed the host-owned bits into the store: the conversation's default model,
   // its workspace files (for "@" mentions), and the fork handler (navigate vs
@@ -660,6 +661,14 @@ export function ConversationPane({
             </button>
           </div>
         )}
+
+        <SubagentApprovals
+          approvals={subagentApprovals}
+          onRespond={(id, approved) => store.getState().respondApproval(id, approved)}
+          onOpen={(id) =>
+            onOpenConversation ? onOpenConversation(id) : window.open(`/c/${id}`, "_blank")
+          }
+        />
 
         <SubagentsBar
           agents={subagents}

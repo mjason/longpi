@@ -71,6 +71,7 @@ const INITIAL: ConversationChannelState = {
   title: null,
   commands: [],
   subagents: {},
+  subagentApprovals: {},
 };
 
 export type ConversationStore = ReturnType<typeof createConversationStore>;
@@ -202,4 +203,4 @@ export function useConversationStore<T>(selector: (state: ConversationState) => 
   return useStore(store, selector);
 }
 
-export type { ContextUsage, ExtCommand, SubagentInfo };
+export type { ContextUsage, ExtCommand, SubagentApproval, SubagentInfo } from "./channel";
