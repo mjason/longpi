@@ -39,7 +39,11 @@ defmodule Longpi.Agent.PromptAssembly do
           required(:conversation_override) => String.t() | nil,
           required(:ctx) => map(),
           # A subagent role whose instructions append to the resolved base.
-          required(:agent_def) => Subagents.Def.t() | nil
+          required(:agent_def) => Subagents.Def.t() | nil,
+          # Currently-loaded extension tools, so the model can answer "what
+          # extensions do I have?" authoritatively instead of guessing at the
+          # filesystem. Optional; defaults to none.
+          optional(:extension_tools) => [%{name: String.t(), description: String.t()}]
         }
 
   @typedoc "Inputs for `toolbox/1`."
@@ -57,8 +61,29 @@ defmodule Longpi.Agent.PromptAssembly do
   @spec system_message(system_inputs()) :: Message.t()
   def system_message(inputs) do
     base = inputs.system_prompt_override || SystemPrompt.resolve(inputs.ctx, inputs.conversation_override)
-    Message.system(append_role(base, inputs.agent_def))
+
+    base
+    |> append_extensions(Map.get(inputs, :extension_tools, []))
+    |> append_role(inputs.agent_def)
+    |> Message.system()
   end
+
+  # Tell the model exactly which extension tools are loaded right now, so a
+  # question like "what extensions do I have?" is answered from fact rather
+  # than a fragile filesystem scan (which the model was getting wrong — it
+  # globbed `*.js` and missed `.ts` extensions). Nothing is appended when no
+  # extensions are loaded.
+  defp append_extensions(base, tools) when is_list(tools) and tools != [] do
+    list = Enum.map_join(tools, "\n", &"- #{&1.name}: #{&1.description}")
+
+    base <>
+      "\n\n# Loaded extensions\n\n" <>
+      "You currently have these extension tools available (already loaded — call " <>
+      "them directly). When asked what extensions or custom tools you have, answer " <>
+      "from this list; do not go looking through the filesystem:\n\n" <> list
+  end
+
+  defp append_extensions(base, _tools), do: base
 
   # A subagent role extends (not replaces) the base prompt — pi's
   # --append-system-prompt model.

@@ -98,6 +98,26 @@ defmodule Longpi.Agent.SessionPromptRefreshTest do
     end
   end
 
+  describe "loaded extensions are advertised in the system prompt" do
+    test "an extension tool the session has loaded is listed for the model", %{session: session} do
+      # Simulate the extension host having loaded a tool.
+      spec = %Longpi.Agent.ToolSpec{
+        name: "web_search",
+        description: "Search the web with Tavily.",
+        schema: %{"type" => "object"},
+        run: fn _args, _ctx -> {:ok, "…"} end,
+        source: :extension
+      }
+
+      :sys.replace_state(session, fn state -> %{state | extension_specs: [spec]} end)
+
+      {system, tools} = run_turn(session, "现在有什么扩展呢")
+      assert system =~ "# Loaded extensions"
+      assert system =~ "web_search: Search the web with Tavily."
+      assert "web_search" in tools
+    end
+  end
+
   describe "history is unaffected by prompt refresh" do
     test "refreshing the system message does not duplicate or drop history rows", %{
       session: session

@@ -83,6 +83,28 @@ defmodule Longpi.Agent.PromptAssemblyTest do
       assert msg.content == "HARD"
     end
 
+    test "lists loaded extension tools so the model answers from fact", %{ctx: ctx} do
+      tools = [
+        %{name: "web_search", description: "Search the web with Tavily."},
+        %{name: "jira", description: "Query Jira issues."}
+      ]
+
+      msg = PromptAssembly.system_message(system_inputs(ctx, %{extension_tools: tools}))
+      assert msg.content =~ "# Loaded extensions"
+      assert msg.content =~ "web_search: Search the web with Tavily."
+      assert msg.content =~ "jira: Query Jira issues."
+      assert msg.content =~ "do not go looking through the filesystem"
+    end
+
+    test "no extensions section when none are loaded", %{ctx: ctx} do
+      msg = PromptAssembly.system_message(system_inputs(ctx, %{extension_tools: []}))
+      refute msg.content =~ "Loaded extensions"
+
+      # Also absent when the key is omitted entirely.
+      msg2 = PromptAssembly.system_message(system_inputs(ctx))
+      refute msg2.content =~ "Loaded extensions"
+    end
+
     test "a subagent role appends its instructions to the resolved base", %{ctx: ctx} do
       agent_def = %Subagents.Def{
         name: "scout",

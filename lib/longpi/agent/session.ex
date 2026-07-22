@@ -762,9 +762,17 @@ defmodule Longpi.Agent.Session do
   # LLM context and the stored history stay current.
   defp assemble_prompt(state) do
     [_stale_system | history] = state.messages
-    system = PromptAssembly.system_message(state.prompt_inputs)
+
+    inputs =
+      Map.put(state.prompt_inputs, :extension_tools, extension_tool_summaries(state))
+
+    system = PromptAssembly.system_message(inputs)
     toolbox = assemble_toolbox(state)
     %{state | messages: [system | history], toolbox: toolbox}
+  end
+
+  defp extension_tool_summaries(state) do
+    Enum.map(state.extension_specs, &%{name: &1.name, description: &1.description})
   end
 
   defp assemble_toolbox(state) do
