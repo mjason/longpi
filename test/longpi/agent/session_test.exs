@@ -38,6 +38,24 @@ defmodule Longpi.Agent.SessionTest do
     assert roles == [:system, :user, :assistant]
   end
 
+  test "a completed turn broadcasts committed history before turn_ended (refresh-safe)", %{
+    session: session
+  } do
+    expect(LLMMock, :stream, fn _, _, _, _, sink ->
+      sink.({:text_delta, "answer"})
+      {:ok, %{text: "answer", tool_calls: []}}
+    end)
+
+    assert :ok = Session.send_message(session, "q")
+
+    # The committed messages are broadcast (so a client that missed the deltas
+    # can converge) and — crucially — BEFORE turn_ended, which flips to idle.
+    assert_receive {:agent_event, {:history, history}}, 2_000
+    assert Enum.map(history, & &1.role) == [:user, :assistant]
+    assert Enum.find(history, &(&1.role == :assistant)).content == "answer"
+    assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
+  end
+
   test "send_message/3 passes user attachments through to the LLM client", %{session: session} do
     test_pid = self()
     image = %{"type" => "image", "media_type" => "image/png", "data" => "AAAA", "name" => "s.png"}

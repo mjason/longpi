@@ -207,6 +207,9 @@ defmodule Longpi.Agent.SessionPersistenceTest do
     end)
 
     :ok = Session.send_message(session, "first wording")
+    # Drain the first turn's convergence broadcast so the post-edit assertion
+    # below matches the EDIT's history event, not this one.
+    assert_receive {:agent_event, {:history, _first}}, 2_000
     assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
 
     # Edit: the LLM must see ONLY the replacement text, not the old wording.

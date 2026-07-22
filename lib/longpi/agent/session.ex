@@ -633,6 +633,12 @@ defmodule Longpi.Agent.Session do
       {:ok, new_messages} ->
         state = persist(state, new_messages)
         state = %{state | messages: state.messages ++ new_messages}
+        # Broadcast the committed history BEFORE turn_ended so any client —
+        # including one that reloaded mid-turn and missed the streamed deltas —
+        # converges to the correct, complete messages. (Order matters: the
+        # `history` event forces status "running"; the following `turn_ended`
+        # settles items and flips to idle.)
+        state = notify(state, {:history, broadcast_history(state)})
         state = notify(state, {:turn_ended, :complete})
         fire_ext_event(state, "turn_end", %{reason: "complete"})
         notify_parent_done(state, :done)
@@ -642,6 +648,7 @@ defmodule Longpi.Agent.Session do
       {:error, reason, new_messages} ->
         state = persist(state, new_messages)
         state = %{state | messages: state.messages ++ new_messages}
+        state = notify(state, {:history, broadcast_history(state)})
         state = notify(state, {:turn_failed, reason})
         fire_ext_event(state, "turn_end", %{reason: "failed"})
         notify_parent_done(state, {:failed, reason})
@@ -679,6 +686,7 @@ defmodule Longpi.Agent.Session do
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
     state = keep_partial_text(state)
     state = %{state | status: :idle, task: nil, partial: []}
+    state = notify(state, {:history, broadcast_history(state)})
     state = notify(state, {:turn_failed, {:crashed, reason}})
     notify_parent_done(state, {:failed, {:crashed, reason}})
     {:noreply, state}
