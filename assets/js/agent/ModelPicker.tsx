@@ -1,24 +1,17 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { buildCSRFHeaders, listEnabledModels } from "../ash_rpc";
 import { ModelSelector, type ModelOption } from "../components/assistant-ui/model-selector";
 import { modelIcon } from "../components/model-icons";
-
-/** Current conversation's model + live switcher, surfaced to the composer's
- * inline model picker. Null outside a conversation. */
-export const ConversationModelContext = createContext<{
-  model: string;
-  setModel: (spec: string) => void;
-} | null>(null);
+import { selectCurrentModel, useConversationStore } from "./store";
 
 /**
  * Model switcher docked in the composer action row (ChatGPT/Codex style).
- * Reads the conversation's live model from context; renders nothing when there
- * is no conversation (e.g. the management view has no composer anyway).
+ * Reads the conversation's live model from the store.
  */
 export function ComposerModelPicker() {
-  const ctx = useContext(ConversationModelContext);
-  if (!ctx) return null;
-  return <ModelPicker value={ctx.model} onChange={ctx.setModel} align="start" />;
+  const model = useConversationStore(selectCurrentModel);
+  const setModel = useConversationStore((s) => s.setModel);
+  return <ModelPicker value={model} onChange={setModel} align="start" />;
 }
 
 /**

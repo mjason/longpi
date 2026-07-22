@@ -1,5 +1,4 @@
 import { Brain, Check, ChevronDown } from "lucide-react";
-import { createContext, useContext } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,14 +6,7 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import { type I18nKey, useI18n } from "./i18n";
-
-/** Current conversation's reasoning effort + setter, surfaced to the composer.
- * `effort` is null when the model's default is used. Null context = no
- * conversation (e.g. the management view). */
-export const ReasoningEffortContext = createContext<{
-  effort: string | null;
-  setEffort: (effort: string | null) => void;
-} | null>(null);
+import { useConversationStore } from "./store";
 
 // null = "Auto" (send no reasoning_effort — let the model decide). The rest map
 // straight to req_llm's unified reasoning_effort.
@@ -34,10 +26,10 @@ const LEVELS: { id: string | null; label: I18nKey; hint: I18nKey }[] = [
  */
 export function ComposerReasoningPicker() {
   const { t } = useI18n();
-  const ctx = useContext(ReasoningEffortContext);
-  if (!ctx) return null;
+  const effort = useConversationStore((s) => s.reasoningEffort);
+  const setEffort = useConversationStore((s) => s.setReasoning);
 
-  const current = LEVELS.find((l) => l.id === ctx.effort) ?? LEVELS[0];
+  const current = LEVELS.find((l) => l.id === effort) ?? LEVELS[0];
 
   return (
     <DropdownMenu>
@@ -54,11 +46,11 @@ export function ComposerReasoningPicker() {
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-64">
         {LEVELS.map((lvl) => {
-          const selected = lvl.id === ctx.effort;
+          const selected = lvl.id === effort;
           return (
             <DropdownMenuItem
               key={lvl.id ?? "auto"}
-              onSelect={() => ctx.setEffort(lvl.id)}
+              onSelect={() => setEffort(lvl.id)}
               className="items-start gap-2.5 py-2"
             >
               <Brain className="mt-0.5 size-4 shrink-0 text-muted-foreground" />

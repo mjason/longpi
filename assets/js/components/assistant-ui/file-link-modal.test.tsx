@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { renderWithProviders, screen, waitFor } from "../../test/render";
-import { LinkModal, WorkspaceCwdContext } from "./file-link-modal";
+import { renderWithStore, screen, waitFor } from "../../test/render";
+import { LinkModal } from "./file-link-modal";
 
 // A LinkSafetyModalProps stub with sensible defaults.
 function props(overrides: Partial<Parameters<typeof LinkModal>[0]> = {}) {
@@ -16,13 +16,9 @@ function props(overrides: Partial<Parameters<typeof LinkModal>[0]> = {}) {
 
 function renderModal(
   p: ReturnType<typeof props>,
-  cwd: string | null = "/home/mj/proj",
+  cwd = "/home/mj/proj",
 ) {
-  return renderWithProviders(
-    <WorkspaceCwdContext.Provider value={cwd}>
-      <LinkModal {...p} />
-    </WorkspaceCwdContext.Provider>,
-  );
+  return renderWithStore(<LinkModal {...p} />, { cwd });
 }
 
 describe("LinkModal", () => {

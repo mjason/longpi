@@ -1,10 +1,5 @@
-import { createContext, useContext } from "react";
 import { ContextDisplay } from "../components/assistant-ui/context-display";
-
-/** Live context-window usage for the current conversation, surfaced to the
- * composer's inline meter. Null until the first turn reports usage. */
-export type ConversationUsage = { used: number; window: number };
-export const ConversationUsageContext = createContext<ConversationUsage | null>(null);
+import { useConversationStore } from "./store";
 
 /**
  * Compact context-window meter docked in the composer action row, built on
@@ -13,8 +8,8 @@ export const ConversationUsageContext = createContext<ConversationUsage | null>(
  * agent loop runs server-side. Renders nothing until usage is known.
  */
 export function ComposerContextMeter() {
-  const usage = useContext(ConversationUsageContext);
-  if (!usage || usage.window <= 0) return null;
+  const usage = useConversationStore((s) => s.usage);
+  if (!usage || usage.used == null || usage.window <= 0) return null;
 
   return (
     <ContextDisplay.Ring

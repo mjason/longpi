@@ -1,6 +1,7 @@
 import { Channel, Socket } from "phoenix";
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { HistoryMessage, MessageAttachment, SessionStatus, ThreadItem } from "./types";
+import { type ConversationStore, createConversationStore } from "./store";
 
 let socket: Socket | null = null;
 
@@ -21,7 +22,7 @@ function getSocket(): Socket {
   return socket;
 }
 
-type Dispatch = (action: Action) => void;
+type Dispatch = (action: ConversationAction) => void;
 
 type ChannelEntry = {
   channel: Channel;
@@ -146,7 +147,7 @@ type JoinReply = {
   subagents?: Record<string, SubagentInfo>;
 };
 
-type State = {
+export type ConversationChannelState = {
   items: ThreadItem[];
   status: SessionStatus;
   usage: ContextUsage | null;
@@ -162,7 +163,7 @@ type State = {
   subagents: Record<string, SubagentInfo>;
 };
 
-type Action =
+export type ConversationAction =
   | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage; commands?: ExtCommand[]; reasoningEffort?: string | null; subagents?: Record<string, SubagentInfo> }
   | { type: "model_changed"; model: string }
   | { type: "reasoning_changed"; effort: string | null }
@@ -252,7 +253,7 @@ function settle(items: ThreadItem[]): ThreadItem[] {
   });
 }
 
-function reduce(state: State, action: Action): State {
+export function reduce(state: ConversationChannelState, action: ConversationAction): ConversationChannelState {
   switch (action.type) {
     case "reset":
       return { items: [], status: "connecting", usage: null, model: null, reasoningEffort: null, title: null, commands: [], subagents: {} };
@@ -397,143 +398,51 @@ function reduce(state: State, action: Action): State {
   }
 }
 
-export function useConversationChannel(conversationId: string | null) {
-  const [state, dispatch] = useReducer(reduce, {
-    items: [],
-    status: "connecting",
-    usage: null,
-    model: null,
-    reasoningEffort: null,
-    title: null,
-    commands: [],
-    subagents: {},
-  });
-  const channelRef = useRef<Channel | null>(null);
+/**
+ * Owns one conversation's zustand store and keeps it wired to the Phoenix
+ * channel. Returns the store instance; components read slices via
+ * `useConversationStore`. The channel event handlers drive the store through
+ * its `apply` (the shared reducer); the store's actions push back through the
+ * channel bound here.
+ */
+export function useConversationChannel(conversationId: string | null): ConversationStore {
+  const storeRef = useRef<ConversationStore | null>(null);
+  if (!storeRef.current) storeRef.current = createConversationStore();
+  const store = storeRef.current;
 
   useEffect(() => {
     if (!conversationId) return;
-    dispatch({ type: "reset" });
+    store.getState().apply({ type: "reset" });
 
+    const dispatch: Dispatch = (action) => store.getState().apply(action);
     const entry = acquireChannel(`conversation:${conversationId}`, dispatch);
-    channelRef.current = entry.channel;
+    store.getState().bindChannel(entry.channel);
 
     // If we re-acquired an already-joined channel (e.g. remount), the join
-    // handler won't fire again - pull the current history explicitly.
+    // handler won't fire again - pull the current state explicitly.
     let cancelled = false;
     entry.joined.then(() => {
       if (cancelled || entry.channel.state !== "joined") return;
-      entry.channel
-        .push("get_state", {})
-        .receive("ok", (reply: JoinReply) => {
-          if (!cancelled)
-            dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands, subagents: reply.subagents });
-        });
+      entry.channel.push("get_state", {}).receive("ok", (reply: JoinReply) => {
+        if (!cancelled)
+          store.getState().apply({
+            type: "joined",
+            messages: reply.messages,
+            status: reply.status,
+            pending: reply.pending_approvals,
+            usage: reply.context_usage,
+            reasoningEffort: reply.reasoning_effort,
+            commands: reply.commands,
+            subagents: reply.subagents,
+          });
+      });
     });
 
     return () => {
       cancelled = true;
-      channelRef.current = null;
+      store.getState().bindChannel(null);
     };
-  }, [conversationId]);
+  }, [conversationId, store]);
 
-  function send(text: string, attachments: MessageAttachment[] = []) {
-    dispatch({ type: "user_sent", text, attachments });
-    channelRef.current
-      ?.push("send_message", { text, attachments })
-      .receive("error", (reply: { reason: string }) =>
-        dispatch({
-          type: "notice",
-          tone: "error",
-          text: reply.reason === "busy" ? "The agent is still working - interrupt it first." : reply.reason,
-        }),
-      );
-  }
-
-  function interrupt() {
-    channelRef.current?.push("interrupt", {});
-  }
-
-  function regenerate() {
-    channelRef.current
-      ?.push("regenerate", {})
-      .receive("error", (reply: { reason: string }) =>
-        dispatch({ type: "notice", tone: "error", text: reply.reason }),
-      );
-  }
-
-  function respondApproval(id: string, approved: boolean) {
-    channelRef.current?.push("permission_response", { id, approved });
-  }
-
-  function showNotice(tone: "error" | "info", text: string) {
-    dispatch({ type: "notice", tone, text });
-  }
-
-  function setModel(spec: string) {
-    channelRef.current
-      ?.push("set_model", { spec })
-      .receive("error", (reply: { reason: string }) =>
-        dispatch({
-          type: "notice",
-          tone: "error",
-          text:
-            reply.reason === "busy"
-              ? "Can't switch model while the agent is working - interrupt it first."
-              : reply.reason,
-        }),
-      );
-  }
-
-  function editLast(text: string, attachments: MessageAttachment[] = []) {
-    channelRef.current
-      ?.push("edit_last", { text, attachments })
-      .receive("error", (reply: { reason: string }) =>
-        dispatch({ type: "notice", tone: "error", text: reply.reason }),
-      );
-  }
-
-  // effort: "minimal" | "low" | "medium" | "high" | null (null = model default).
-  function setReasoning(effort: string | null) {
-    // Optimistic: the server echoes back the normalized value via reasoning_changed.
-    dispatch({ type: "reasoning_changed", effort });
-    channelRef.current?.push("set_reasoning", { effort });
-  }
-
-  function runCommand(name: string, arg = "") {
-    channelRef.current
-      ?.push("command", { name, arg })
-      .receive("ok", (reply: { content?: string }) => {
-        if (reply?.content) dispatch({ type: "notice", tone: "info", text: reply.content });
-      })
-      .receive("error", (reply: { reason: string }) =>
-        dispatch({ type: "notice", tone: "error", text: reply.reason }),
-      );
-  }
-
-  const pendingApprovals = state.items.flatMap((item) =>
-    item.kind === "tool" && item.awaitingApproval
-      ? [{ id: item.id, name: item.name, args: item.args }]
-      : [],
-  );
-
-  const compactionCount = state.items.filter((item) => item.kind === "compaction").length;
-  const notices = state.items.flatMap((item) =>
-    item.kind === "notice" ? [{ tone: item.tone, text: item.text }] : [],
-  );
-
-  return {
-    ...state,
-    send,
-    interrupt,
-    regenerate,
-    editLast,
-    respondApproval,
-    runCommand,
-    setModel,
-    setReasoning,
-    showNotice,
-    pendingApprovals,
-    compactionCount,
-    notices,
-  };
+  return store;
 }

@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  type FC,
-} from "react";
+import { useEffect, useState, type FC } from "react";
 import type { LinkSafetyModalProps } from "@assistant-ui/react-streamdown";
 import {
   CheckIcon,
@@ -28,13 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/agent/i18n";
 import { cn } from "@/lib/utils";
-
-/**
- * Local-file links in chat messages open an in-app preview instead of the
- * browser treating `/home/...` as a site URL. Provided by ConversationPane so
- * relative paths resolve against the conversation's workspace.
- */
-export const WorkspaceCwdContext = createContext<string | null>(null);
+import { useConversationStore } from "@/agent/store";
 
 /**
  * A markdown href with no URL scheme (and not an anchor) is a file path.
@@ -111,7 +99,7 @@ const CopyButton: FC<{ text: string; label: string }> = ({ text, label }) => {
 /** In-app viewer for a local file path: text inline, images inline, else download. */
 const FilePreviewDialog: FC<LinkSafetyModalProps> = ({ url, isOpen, onClose }) => {
   const { t } = useI18n();
-  const cwd = useContext(WorkspaceCwdContext);
+  const cwd = useConversationStore((s) => s.cwd);
   const path = hrefToPath(url);
   const [preview, setPreview] = useState<Preview>({ state: "loading" });
 

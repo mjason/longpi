@@ -7,31 +7,11 @@ import {
   type ThreadMessageLike,
   useExternalStoreRuntime,
 } from "@assistant-ui/react";
-import { createContext } from "react";
-import { useConversationChannel } from "./channel";
+import { useStore } from "zustand";
 import { useI18n } from "./i18n";
 import { slashCommandHelp } from "./slashCommands";
+import type { ConversationStore } from "./store";
 import type { MessageAttachment, ThreadItem } from "./types";
-
-/**
- * Re-run the last turn. Exposed via context (not assistant-ui's Reload action)
- * because our backend truncates the last turn and streams a fresh reply in
- * place — it does not keep the old response as a switchable branch. Wiring it
- * through assistant-ui's reload would spawn a phantom "2/2" branch that can't
- * be navigated (the old tool history is already gone server-side).
- */
-export const RegenerateContext = createContext<(() => void) | null>(null);
-
-/**
- * "New conversation from here": fork the conversation with history up to a
- * DB position. Forking a USER message passes `prefill` — pi's model: the new
- * conversation gets the history BEFORE that message, and its text lands in
- * the composer for editing and resending. Provided by the hosting view
- * (ChatApp navigates; the embed switches in place).
- */
-export const ForkContext = createContext<
-  ((position: number, prefill?: string) => void) | null
->(null);
 
 // Official assistant-ui adapters power the composer's attach button: images are
 // encoded to base64 data URLs for the vision model, text files inlined as text.
@@ -96,34 +76,15 @@ export function toUiAttachments(attachments: MessageAttachment[]) {
  * channel.
  */
 export function useChannelRuntime(
-  conversationId: string,
+  store: ConversationStore,
   defaultModel: string,
   // Optional thread list (assistant-ui's ThreadList component reads it) — the
   // embed view uses this for per-workspace conversation switching.
   threadList?: ExternalStoreThreadListAdapter,
 ) {
-  const {
-    items,
-    status,
-    send,
-    interrupt,
-    regenerate,
-    editLast,
-    respondApproval,
-    runCommand,
-    setModel,
-    setReasoning,
-    showNotice,
-    pendingApprovals,
-    compactionCount,
-    notices,
-    usage,
-    model,
-    reasoningEffort,
-    title,
-    commands,
-    subagents,
-  } = useConversationChannel(conversationId);
+  const items = useStore(store, (s) => s.items);
+  const isRunning = useStore(store, (s) => s.status === "running");
+  const model = useStore(store, (s) => s.model);
 
   const { t } = useI18n();
   const currentModel = model ?? defaultModel;
@@ -132,7 +93,7 @@ export function useChannelRuntime(
 
   const runtime = useExternalStoreRuntime({
     messages,
-    isRunning: status === "running",
+    isRunning,
     adapters: { attachments: attachmentAdapter, ...(threadList ? { threadList } : {}) },
     onNew: async (message: AppendMessage) => {
       const text = message.content
@@ -142,6 +103,8 @@ export function useChannelRuntime(
       const trimmed = text.trim();
       const attachments = extractAttachments(message);
       if (!trimmed && attachments.length === 0) return;
+
+      const { send, setModel, runCommand, showNotice } = store.getState();
 
       // Slash commands go to the command channel instead of being sent as a
       // message. Extensible: add cases as commands are added.
@@ -176,32 +139,19 @@ export function useChannelRuntime(
         .filter((part): part is { type: "text"; text: string } => part.type === "text")
         .map((part) => part.text)
         .join("");
-      if (text.trim()) editLast(text.trim());
+      if (text.trim()) store.getState().editLast(text.trim());
     },
-    // No onReload: regenerate is exposed via RegenerateContext instead, so it
-    // replaces the last turn in place rather than creating a branch we can't
-    // support (see RegenerateContext).
-    onCancel: async () => interrupt(),
+    // No onReload: regenerate is exposed via the store (store.regenerate)
+    // instead, so it replaces the last turn in place rather than creating a
+    // branch we can't support.
+    onCancel: async () => store.getState().interrupt(),
     // Native in-message tool approval: ToolFallback's Allow/Deny routes here.
     onRespondToToolApproval: ({ approvalId, approved }) =>
-      respondApproval(approvalId, approved ?? false),
+      store.getState().respondApproval(approvalId, approved ?? false),
     convertMessage: (message: ThreadMessageLike) => message,
   });
 
-  return {
-    runtime,
-    compactionCount,
-    notices,
-    usage,
-    currentModel,
-    setModel,
-    reasoningEffort,
-    setReasoning,
-    title,
-    commands,
-    regenerate,
-    subagents,
-  };
+  return { runtime };
 }
 
 type AssistantPart = Extract<ThreadMessageLike["content"], readonly unknown[]>[number];

@@ -26,8 +26,7 @@ import { ComposerContextMeter } from "@/agent/ContextMeter";
 import { ComposerModelPicker } from "@/agent/ModelPicker";
 import { ComposerReasoningPicker } from "@/agent/ReasoningPicker";
 import { useI18n } from "@/agent/i18n";
-import { WorkspaceFilesContext } from "@/agent/ChatApp";
-import { ForkContext, RegenerateContext } from "@/agent/runtime";
+import { useConversationStore } from "@/agent/store";
 import { ComposerTriggerPopover } from "@/components/assistant-ui/composer-trigger-popover";
 import { createDirectiveText } from "@/components/assistant-ui/directive-text";
 import { SlashCommandMenu } from "@/agent/SlashCommandMenu";
@@ -228,7 +227,7 @@ const EditComposer: FC = () => {
 // undiscoverable.
 const ForkButton: FC = () => {
   const { t } = useI18n();
-  const fork = useContext(ForkContext);
+  const fork = useConversationStore((s) => s.fork);
   const position = useAuiState(
     (s) => (s.message.metadata?.custom as { lastItemIndex?: number } | undefined)?.lastItemIndex,
   );
@@ -246,7 +245,7 @@ const ForkButton: FC = () => {
 // last one, whose submit swaps the message in place and re-runs.
 const UserActionBar: FC = () => {
   const { t } = useI18n();
-  const fork = useContext(ForkContext);
+  const fork = useConversationStore((s) => s.fork);
   const custom = useAuiState(
     (s) =>
       s.message.metadata?.custom as
@@ -368,7 +367,7 @@ const Composer: FC = () => {
   // "@" file mentions (pi-style): workspace paths from the conversation's cwd.
   // Selecting one inserts a `:file[name]{name=path}` directive chip; the
   // backend hands the model a plain `@path` (see ReqLLMClient).
-  const files = useContext(WorkspaceFilesContext);
+  const files = useConversationStore((s) => s.workspaceFiles);
   const mention = unstable_useMentionAdapter({
     items: useMemo(
       () =>
@@ -606,11 +605,10 @@ const AssistantMessage: FC = () => {
 
 // Regenerate re-runs the last turn in place (our backend truncates + re-streams).
 // It deliberately does NOT use assistant-ui's Reload action, which would spawn a
-// branch we can't navigate — see RegenerateContext.
+// branch we can't navigate (regenerate replaces the last turn in place).
 const RegenerateButton: FC = () => {
   const { t } = useI18n();
-  const regenerate = useContext(RegenerateContext);
-  if (!regenerate) return null;
+  const regenerate = useConversationStore((s) => s.regenerate);
   return (
     <TooltipIconButton tooltip={t("msg.regenerate")} onClick={() => regenerate()}>
       <RefreshCwIcon />

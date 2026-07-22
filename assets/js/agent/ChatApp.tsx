@@ -33,26 +33,27 @@ import { Label } from "../components/ui/label";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { cn } from "../lib/utils";
 import { Thread } from "../components/assistant-ui/thread";
-import { WorkspaceCwdContext } from "../components/assistant-ui/file-link-modal";
 import { Badge } from "../components/assistant-ui/badge";
 import { AuthStatus } from "./AuthStatus";
-import { ConversationUsageContext } from "./ContextMeter";
-import { ExtCommandsContext } from "./ExtCommandsContext";
-import { ConversationModelContext } from "./ModelPicker";
-import { ReasoningEffortContext } from "./ReasoningPicker";
 import { ThemeToggle } from "./ThemeToggle";
 import { useI18n } from "./i18n";
 import { LanguageToggle } from "./LanguageToggle";
-import { ForkContext, RegenerateContext, useChannelRuntime } from "./runtime";
+import { useChannelRuntime } from "./runtime";
+import { useConversationChannel } from "./channel";
+import {
+  ConversationStoreProvider,
+  selectCompactionCount,
+  selectCurrentModel,
+  selectNotices,
+} from "./store";
+import { useStore } from "zustand";
+import { useShallow } from "zustand/shallow";
 import { SubagentsBar } from "./SubagentsBar";
 import { forkConversation, loadSettings, loadWorkspaceFiles, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
 import { UpdateCheck } from "./UpdateCheck";
 
 export const DEFAULT_MODEL = "openai:gpt-5.4";
-
-/** Relative paths of the conversation's workspace files ("@" mentions). */
-export const WorkspaceFilesContext = React.createContext<string[]>([]);
 
 /**
  * After a user-message fork, drop that message's text into the fresh
@@ -533,37 +534,44 @@ export function ConversationPane({
   /** Open another conversation (subagent chips); default opens a new tab. */
   onOpenConversation?: (id: string) => void;
 }) {
-  const { runtime, compactionCount, notices, usage, currentModel, setModel, reasoningEffort, setReasoning, title, commands, regenerate, subagents } =
-    useChannelRuntime(conversation.id, conversation.model, threadList);
+  // One zustand store is the single source of truth for this conversation's
+  // live state (see agent/store.ts). It replaces the former reducer + eight
+  // Provider pyramid; components read slices via useConversationStore.
+  const store = useConversationChannel(conversation.id);
+  const { runtime } = useChannelRuntime(store, conversation.model, threadList);
 
-  const modelCtx = useMemo(
-    () => ({ model: currentModel, setModel }),
-    [currentModel, setModel],
-  );
+  const compactionCount = useStore(store, selectCompactionCount);
+  // selectNotices/subagents build new references; useShallow compares contents
+  // so an unchanged list doesn't spin the render loop.
+  const notices = useStore(store, useShallow(selectNotices));
+  const currentModel = useStore(store, selectCurrentModel);
+  const title = useStore(store, (s) => s.title);
+  const subagents = useStore(store, useShallow((s) => s.subagents));
 
-  const reasoningCtx = useMemo(
-    () => ({ effort: reasoningEffort, setEffort: setReasoning }),
-    [reasoningEffort, setReasoning],
-  );
+  // Feed the host-owned bits into the store: the conversation's default model,
+  // its workspace files (for "@" mentions), and the fork handler (navigate vs
+  // switch-in-place is the host's call).
+  useEffect(() => {
+    store.getState().setDefaultModel(conversation.model);
+  }, [store, conversation.model]);
 
-  // Workspace file list for "@" mentions (fd engine, .gitignore respected).
-  const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
   useEffect(() => {
     let cancelled = false;
+    store.getState().setWorkspace(conversation.cwd, []);
     loadWorkspaceFiles(conversation.cwd).then((files) => {
-      if (!cancelled) setWorkspaceFiles(files);
+      if (!cancelled) store.getState().setWorkspace(conversation.cwd, files);
     });
     return () => {
       cancelled = true;
     };
-  }, [conversation.cwd]);
+  }, [store, conversation.cwd]);
 
-  // "New conversation from here": copy history up to the position, then hand
-  // the fresh conversation to the host view (navigate / switch in place).
-  // Forking a user message passes `prefill` (pi's model): its text is stashed
-  // for the new conversation's composer (ForkPrefill picks it up).
-  const fork = useMemo(
-    () => async (position: number, prefill?: string) => {
+  useEffect(() => {
+    // "New conversation from here": copy history up to the position, then hand
+    // the fresh conversation to the host (navigate / switch in place). Forking
+    // a user message passes `prefill` (pi's model): its text is stashed for the
+    // new conversation's composer (ForkPrefill picks it up).
+    store.getState().setFork(async (position: number, prefill?: string) => {
       const forked = await forkConversation(conversation.id, position);
       if (!forked) return;
       if (prefill) {
@@ -578,18 +586,14 @@ export function ConversationPane({
       }
       if (onForked) onForked(forked);
       else window.location.href = `/c/${forked.id}`;
-    },
-    [conversation.id, onForked],
-  );
-
-  const usageCtx = useMemo(
-    () => (usage?.used != null && usage.window ? { used: usage.used, window: usage.window } : null),
-    [usage?.used, usage?.window],
-  );
+    });
+  }, [store, conversation.id, onForked]);
 
   // Keep the sidebar label in sync when the model changes via /model.
   useEffect(() => {
-    if (currentModel !== conversation.model) onModelChanged(conversation.id, currentModel);
+    if (currentModel && currentModel !== conversation.model) {
+      onModelChanged(conversation.id, currentModel);
+    }
   }, [currentModel]);
 
   // Adopt the auto-generated title into the sidebar once it arrives.
@@ -609,6 +613,7 @@ export function ConversationPane({
   }, [notices.length]);
 
   return (
+    <ConversationStoreProvider value={store}>
     <AssistantRuntimeProvider runtime={runtime}>
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
@@ -660,24 +665,8 @@ export function ConversationPane({
         />
 
         <div className="min-h-0 flex-1">
-          <ConversationModelContext.Provider value={modelCtx}>
-            <ReasoningEffortContext.Provider value={reasoningCtx}>
-            <ConversationUsageContext.Provider value={usageCtx}>
-              <ExtCommandsContext.Provider value={commands}>
-                <RegenerateContext.Provider value={regenerate}>
-                  <ForkContext.Provider value={fork}>
-                    <WorkspaceFilesContext.Provider value={workspaceFiles}>
-                      <WorkspaceCwdContext.Provider value={conversation.cwd}>
-                        <ForkPrefill conversationId={conversation.id} />
-                        <Thread />
-                      </WorkspaceCwdContext.Provider>
-                    </WorkspaceFilesContext.Provider>
-                  </ForkContext.Provider>
-                </RegenerateContext.Provider>
-              </ExtCommandsContext.Provider>
-            </ConversationUsageContext.Provider>
-            </ReasoningEffortContext.Provider>
-          </ConversationModelContext.Provider>
+          <ForkPrefill conversationId={conversation.id} />
+          <Thread />
         </div>
 
         {toast && (
@@ -694,5 +683,6 @@ export function ConversationPane({
         )}
       </main>
     </AssistantRuntimeProvider>
+    </ConversationStoreProvider>
   );
 }
