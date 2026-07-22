@@ -59,6 +59,10 @@ const en = {
   "msg.copy": "Copy",
   "msg.regenerate": "Regenerate",
   "msg.more": "More",
+  "msg.edit": "Edit",
+  "msg.cancel": "Cancel",
+  "msg.update": "Update",
+  "msg.fork": "New conversation from here",
 
   // New conversation dialog
   "newConv.title": "New conversation",
@@ -200,6 +204,10 @@ const zh: Record<I18nKey, string> = {
   "msg.copy": "复制",
   "msg.regenerate": "重新生成",
   "msg.more": "更多",
+  "msg.edit": "编辑",
+  "msg.cancel": "取消",
+  "msg.update": "更新",
+  "msg.fork": "从这里开新会话",
 
   "newConv.title": "新建会话",
   "newConv.workspace": "工作区",

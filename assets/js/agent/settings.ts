@@ -221,6 +221,30 @@ export async function deleteUser(id: string): Promise<string | null> {
   return (await res.json().catch(() => ({}))).error || `HTTP ${res.status}`;
 }
 
+/** Workspace files (relative paths) for the composer's "@" mentions. */
+export async function loadWorkspaceFiles(cwd: string): Promise<string[]> {
+  const res = await fetch(`/rpc/files?cwd=${encodeURIComponent(cwd)}`, {
+    headers: buildCSRFHeaders(),
+  });
+  if (!res.ok) return [];
+  return (await res.json()).files ?? [];
+}
+
+export type ForkResult = { id: string; cwd: string; model: string; title: string | null };
+
+/** New conversation seeded with this one's history up to `position` (inclusive). */
+export async function forkConversation(
+  conversationId: string,
+  position: number,
+): Promise<ForkResult | null> {
+  const res = await fetch("/rpc/conversations/fork", {
+    method: "POST",
+    headers: { ...buildCSRFHeaders(), "content-type": "application/json" },
+    body: JSON.stringify({ conversation_id: conversationId, position }),
+  });
+  return res.ok ? await res.json() : null;
+}
+
 export type EmbedInfo = { authEnabled: boolean; embedToken: string | null; baseUrl: string };
 
 export async function loadEmbedInfo(): Promise<EmbedInfo | null> {

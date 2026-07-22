@@ -80,6 +80,61 @@ defmodule LongpiWeb.ConfigController do
     json(conn, %{ok: true})
   end
 
+  # Workspace file list for the composer's "@" file mentions. Returns paths
+  # relative to cwd (fd's engine; respects .gitignore).
+  def list_files(conn, %{"cwd" => cwd} = params) when is_binary(cwd) do
+    query = params["q"] || ""
+    # A bare substring query becomes a glob; glob metacharacters are stripped
+    # so untrusted input can't turn into a pathological pattern.
+    sanitized = String.replace(query, ~r/[*?\[\]{}]/, "")
+    pattern = if sanitized == "", do: "**/*", else: "**/*#{sanitized}*"
+
+    case Longpi.Search.find(%{pattern: pattern, limit: 300}, cwd: cwd) do
+      {:ok, %{"files" => files}} -> json(conn, %{files: files})
+      _ -> json(conn, %{files: []})
+    end
+  end
+
+  # Fork: a NEW conversation seeded with this one's history up to (and
+  # including) `position` — "start a new conversation from here".
+  def fork_conversation(conn, %{"conversation_id" => id, "position" => position})
+      when is_integer(position) and position >= 0 do
+    with {:ok, source} <- Longpi.Agent.get_conversation(id) do
+      {:ok, fork} =
+        Longpi.Agent.create_conversation(%{
+          cwd: source.cwd,
+          model: source.model,
+          system_prompt: source.system_prompt,
+          reasoning_effort: source.reasoning_effort,
+          title: fork_title(source)
+        })
+
+      id
+      |> Longpi.Agent.list_messages!()
+      |> Enum.filter(&(&1.position <= position))
+      |> Enum.each(fn message ->
+        Longpi.Agent.append_message!(%{
+          role: message.role,
+          content: message.content,
+          attachments: message.attachments,
+          tool_calls: message.tool_calls,
+          tool_call_id: message.tool_call_id,
+          tool_name: message.tool_name,
+          error: message.error,
+          position: message.position,
+          conversation_id: fork.id
+        })
+      end)
+
+      json(conn, %{id: fork.id, cwd: fork.cwd, model: fork.model, title: fork.title})
+    else
+      _ -> conn |> put_status(404) |> json(%{error: "conversation not found"})
+    end
+  end
+
+  defp fork_title(%{title: nil}), do: nil
+  defp fork_title(%{title: title}), do: "#{title} ⑂"
+
   # ── Users & sign-in (Management → Users) ─────────────────────────────────
   # Account management lives HERE, in the UI — passwords go straight to the
   # database and never through config files or shell history.

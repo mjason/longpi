@@ -156,13 +156,25 @@ defmodule Longpi.Agent.LLM.ReqLLMClient do
   defp to_req_llm_message(%{role: :system, content: content}), do: Context.system(content)
 
   defp to_req_llm_message(%{role: :user, attachments: [_ | _] = attachments} = message) do
-    text = message[:content] || ""
+    text = normalize_directives(message[:content] || "")
     parts = Enum.reject(Enum.map(attachments, &attachment_part/1), &is_nil/1)
     parts = if text == "", do: parts, else: [ContentPart.text(text) | parts]
     Context.user(parts)
   end
 
-  defp to_req_llm_message(%{role: :user, content: content}), do: Context.user(content)
+  defp to_req_llm_message(%{role: :user, content: content}),
+    do: Context.user(normalize_directives(content))
+
+  # The composer's "@" file mentions are stored as assistant-ui directives
+  # (`:file[label]{name=path}`) so the UI can render chips. The MODEL gets the
+  # pi convention instead: a plain `@path` — the path itself is the signal, and
+  # the agent opens it with its read tool.
+  @doc false
+  def normalize_directives(text) when is_binary(text) do
+    Regex.replace(~r/:file\[[^\]]*\]\{name=([^}]*)\}/, text, "@\\1")
+  end
+
+  def normalize_directives(other), do: other
 
   defp to_req_llm_message(%{role: :assistant, tool_calls: calls} = message)
        when is_list(calls) and calls != [] do

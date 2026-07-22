@@ -61,6 +61,16 @@ defmodule LongpiWeb.ConversationChannel do
     {:reply, :ok, socket}
   end
 
+  def handle_in("edit_last", %{"text" => text} = payload, socket) do
+    attachments = sanitize_attachments(payload["attachments"])
+
+    case Session.edit_last(socket.assigns.session, text, attachments) do
+      :ok -> {:reply, :ok, socket}
+      {:error, :busy} -> {:reply, {:error, %{reason: "busy"}}, socket}
+      {:error, :nothing_to_edit} -> {:reply, {:error, %{reason: "nothing to edit"}}, socket}
+    end
+  end
+
   def handle_in("regenerate", _payload, socket) do
     case Session.regenerate(socket.assigns.session) do
       :ok -> {:reply, :ok, socket}

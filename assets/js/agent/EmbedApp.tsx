@@ -158,6 +158,10 @@ export default function EmbedApp() {
           onTitled={(id, title) =>
             setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, title } : c)))
           }
+          onForked={(fork) => {
+            setConversations((prev) => [fork as ConversationSummary, ...prev]);
+            setActiveId(fork.id);
+          }}
         />
       </div>
     </TooltipProvider>

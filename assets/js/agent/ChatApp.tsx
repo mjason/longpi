@@ -41,12 +41,15 @@ import { ReasoningEffortContext } from "./ReasoningPicker";
 import { ThemeToggle } from "./ThemeToggle";
 import { useI18n } from "./i18n";
 import { LanguageToggle } from "./LanguageToggle";
-import { RegenerateContext, useChannelRuntime } from "./runtime";
-import { loadSettings, SETTING_KEYS } from "./settings";
+import { ForkContext, RegenerateContext, useChannelRuntime } from "./runtime";
+import { forkConversation, loadSettings, loadWorkspaceFiles, SETTING_KEYS } from "./settings";
 import type { ConversationSummary } from "./types";
 import { UpdateCheck } from "./UpdateCheck";
 
 export const DEFAULT_MODEL = "openai:gpt-5.4";
+
+/** Relative paths of the conversation's workspace files ("@" mentions). */
+export const WorkspaceFilesContext = React.createContext<string[]>([]);
 
 export function conversationLabel(conversation: ConversationSummary): string {
   if (conversation.title) return conversation.title;
@@ -477,6 +480,7 @@ export function ConversationPane({
   onTitled,
   threadList,
   headerExtra,
+  onForked,
 }: {
   conversation: ConversationSummary;
   onModelChanged: (id: string, model: string) => void;
@@ -485,6 +489,8 @@ export function ConversationPane({
   threadList?: import("@assistant-ui/react").ExternalStoreThreadListAdapter;
   /** Embed mode: extra controls rendered at the right edge of the header. */
   headerExtra?: React.ReactNode;
+  /** Where to go after a fork; default reloads onto the new conversation. */
+  onForked?: (fork: { id: string; cwd: string; model: string; title: string | null }) => void;
 }) {
   const { runtime, compactionCount, notices, usage, currentModel, setModel, reasoningEffort, setReasoning, title, commands, regenerate } =
     useChannelRuntime(conversation.id, conversation.model, threadList);
@@ -497,6 +503,30 @@ export function ConversationPane({
   const reasoningCtx = useMemo(
     () => ({ effort: reasoningEffort, setEffort: setReasoning }),
     [reasoningEffort, setReasoning],
+  );
+
+  // Workspace file list for "@" mentions (fd engine, .gitignore respected).
+  const [workspaceFiles, setWorkspaceFiles] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    loadWorkspaceFiles(conversation.cwd).then((files) => {
+      if (!cancelled) setWorkspaceFiles(files);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversation.cwd]);
+
+  // "New conversation from here": copy history up to the message, then hand
+  // the fresh conversation to the host view (navigate / switch in place).
+  const fork = useMemo(
+    () => async (position: number) => {
+      const forked = await forkConversation(conversation.id, position);
+      if (!forked) return;
+      if (onForked) onForked(forked);
+      else window.location.href = `/c/${forked.id}`;
+    },
+    [conversation.id, onForked],
   );
 
   const usageCtx = useMemo(
@@ -554,7 +584,11 @@ export function ConversationPane({
             <ConversationUsageContext.Provider value={usageCtx}>
               <ExtCommandsContext.Provider value={commands}>
                 <RegenerateContext.Provider value={regenerate}>
-                  <Thread />
+                  <ForkContext.Provider value={fork}>
+                    <WorkspaceFilesContext.Provider value={workspaceFiles}>
+                      <Thread />
+                    </WorkspaceFilesContext.Provider>
+                  </ForkContext.Provider>
                 </RegenerateContext.Provider>
               </ExtCommandsContext.Provider>
             </ConversationUsageContext.Provider>

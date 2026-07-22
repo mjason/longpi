@@ -22,6 +22,13 @@ import type { MessageAttachment, ThreadItem } from "./types";
  */
 export const RegenerateContext = createContext<(() => void) | null>(null);
 
+/**
+ * "New conversation from here": fork the conversation with history up to a
+ * message (its last underlying item index / DB position). Provided by the
+ * hosting view (ChatApp navigates; the embed switches in place).
+ */
+export const ForkContext = createContext<((position: number) => void) | null>(null);
+
 // Official assistant-ui adapters power the composer's attach button: images are
 // encoded to base64 data URLs for the vision model, text files inlined as text.
 // Stateless, so one shared instance is fine.
@@ -97,6 +104,7 @@ export function useChannelRuntime(
     send,
     interrupt,
     regenerate,
+    editLast,
     respondApproval,
     runCommand,
     setModel,
@@ -155,6 +163,16 @@ export function useChannelRuntime(
 
       send(trimmed, attachments);
     },
+    // Editing is only offered on the LAST user message (the UI gates the
+    // pencil): the server drops that message + its reply and re-runs with the
+    // new text — an in-place replace, not a branch.
+    onEdit: async (message: AppendMessage) => {
+      const text = message.content
+        .filter((part): part is { type: "text"; text: string } => part.type === "text")
+        .map((part) => part.text)
+        .join("");
+      if (text.trim()) editLast(text.trim());
+    },
     // No onReload: regenerate is exposed via RegenerateContext instead, so it
     // replaces the last turn in place rather than creating a branch we can't
     // support (see RegenerateContext).
@@ -188,6 +206,13 @@ type AssistantPart = Extract<ThreadMessageLike["content"], readonly unknown[]>[n
 export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
   const messages: ThreadMessageLike[] = [];
   let assistantParts: AssistantPart[] | null = null;
+  // The DB position of the last item folded into the current/most recent
+  // message — powers "fork from here" and the last-user-message edit gate.
+  let currentItemIndex = -1;
+  const lastUserItemIndex = items.reduce(
+    (acc, item, index) => (item.kind === "user" ? index : acc),
+    -1,
+  );
 
   // Stable ids keyed by output position so assistant-ui reconciles messages
   // across streaming updates instead of treating each render as brand-new
@@ -204,6 +229,7 @@ export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
         id: `m-${messages.length}`,
         role: "assistant",
         content: assistantParts,
+        metadata: { custom: { lastItemIndex: currentItemIndex } },
         ...(awaitingApproval
           ? { status: { type: "requires-action" as const, reason: "tool-calls" as const } }
           : {}),
@@ -212,7 +238,11 @@ export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
     assistantParts = null;
   };
 
+  let index = -1;
+
   for (const item of items) {
+    index += 1;
+
     switch (item.kind) {
       case "user":
         flushAssistant();
@@ -220,6 +250,9 @@ export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
           id: `m-${messages.length}`,
           role: "user",
           content: [{ type: "text", text: item.text }],
+          metadata: {
+            custom: { lastItemIndex: index, isLastUser: index === lastUserItemIndex },
+          },
           ...(item.attachments?.length
             ? { attachments: toUiAttachments(item.attachments) }
             : {}),
@@ -227,16 +260,19 @@ export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
         break;
 
       case "reasoning":
+        currentItemIndex = index;
         assistantParts ??= [];
         if (item.text) assistantParts.push({ type: "reasoning", text: item.text });
         break;
 
       case "assistant":
+        currentItemIndex = index;
         assistantParts ??= [];
         if (item.text) assistantParts.push({ type: "text", text: item.text });
         break;
 
       case "tool":
+        currentItemIndex = index;
         assistantParts ??= [];
         assistantParts.push({
           type: "tool-call",

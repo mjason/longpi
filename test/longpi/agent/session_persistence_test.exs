@@ -198,4 +198,44 @@ defmodule Longpi.Agent.SessionPersistenceTest do
     GenServer.stop(session)
   end
 
+
+  test "edit_last replaces the last user message and re-runs", %{conversation: conversation} do
+    session = start_session(conversation)
+
+    expect(LLMMock, :stream, fn _, _, _, _, _ ->
+      {:ok, %{text: "old reply", tool_calls: []}}
+    end)
+
+    :ok = Session.send_message(session, "first wording")
+    assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
+
+    # Edit: the LLM must see ONLY the replacement text, not the old wording.
+    expect(LLMMock, :stream, fn _, messages, _, _, _ ->
+      texts = Enum.map(messages, & &1[:content])
+      assert "second wording" in texts
+      refute "first wording" in texts
+      {:ok, %{text: "new reply", tool_calls: []}}
+    end)
+
+    :ok = Session.edit_last(session, "second wording")
+    assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
+
+    # Persisted history holds exactly the edited turn.
+    contents =
+      conversation.id |> Longpi.Agent.list_messages!() |> Enum.map(& &1.content)
+
+    assert "second wording" in contents
+    assert "new reply" in contents
+    refute "first wording" in contents
+    refute "old reply" in contents
+
+    GenServer.stop(session)
+  end
+
+  test "edit_last with no user message errors", %{conversation: conversation} do
+    session = start_session(conversation)
+    assert {:error, :nothing_to_edit} = Session.edit_last(session, "anything")
+    GenServer.stop(session)
+  end
+
 end

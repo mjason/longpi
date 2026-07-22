@@ -453,6 +453,14 @@ export function useConversationChannel(conversationId: string | null) {
       );
   }
 
+  function editLast(text: string, attachments: MessageAttachment[] = []) {
+    channelRef.current
+      ?.push("edit_last", { text, attachments })
+      .receive("error", (reply: { reason: string }) =>
+        dispatch({ type: "notice", tone: "error", text: reply.reason }),
+      );
+  }
+
   // effort: "minimal" | "low" | "medium" | "high" | null (null = model default).
   function setReasoning(effort: string | null) {
     // Optimistic: the server echoes back the normalized value via reasoning_changed.
@@ -487,6 +495,7 @@ export function useConversationChannel(conversationId: string | null) {
     send,
     interrupt,
     regenerate,
+    editLast,
     respondApproval,
     runCommand,
     setModel,

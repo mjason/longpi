@@ -26,7 +26,10 @@ import { ComposerContextMeter } from "@/agent/ContextMeter";
 import { ComposerModelPicker } from "@/agent/ModelPicker";
 import { ComposerReasoningPicker } from "@/agent/ReasoningPicker";
 import { useI18n } from "@/agent/i18n";
-import { RegenerateContext } from "@/agent/runtime";
+import { WorkspaceFilesContext } from "@/agent/ChatApp";
+import { ForkContext, RegenerateContext } from "@/agent/runtime";
+import { ComposerTriggerPopover } from "@/components/assistant-ui/composer-trigger-popover";
+import { createDirectiveText } from "@/components/assistant-ui/directive-text";
 import { SlashCommandMenu } from "@/agent/SlashCommandMenu";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -39,6 +42,8 @@ import {
   ErrorPrimitive,
   groupPartByType,
   MessagePrimitive,
+  unstable_defaultDirectiveFormatter,
+  unstable_useMentionAdapter,
   SuggestionPrimitive,
   ThreadPrimitive,
   type ToolCallMessagePartComponent,
@@ -52,12 +57,16 @@ import {
   DownloadIcon,
   MicIcon,
   MoreHorizontalIcon,
+  FileIcon,
+  GitBranchIcon,
+  PencilIcon,
   RefreshCwIcon,
   SquareIcon,
 } from "lucide-react";
 import {
   createContext,
   useContext,
+  useMemo,
   type ComponentType,
   type FC,
   type PropsWithChildren,
@@ -173,9 +182,82 @@ const ThreadMessage: FC = () => {
   const { AssistantMessage: AssistantMessageComponent = AssistantMessage } =
     useContext(ThreadComponentsContext);
   const role = useAuiState((s) => s.message.role);
+  const isEditing = useAuiState((s) => s.message.composer.isEditing);
 
+  if (isEditing) return <EditComposer />;
   if (role === "user") return <UserMessage />;
   return <AssistantMessageComponent />;
+};
+
+// Edit-in-place for the LAST user message: the server swaps the message and
+// re-runs (see Session.edit_last) — an in-place replace, not a branch.
+const EditComposer: FC = () => {
+  const { t } = useI18n();
+  return (
+    <MessagePrimitive.Root
+      data-slot="aui_edit-composer-wrapper"
+      className="flex flex-col px-2 [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
+    >
+      <ComposerPrimitive.Root className="aui-edit-composer-root border-border/60 dark:border-muted-foreground/15 ms-auto flex w-full max-w-[85%] flex-col rounded-(--composer-radius) border bg-(--composer-bg) shadow-[0_4px_16px_-8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] dark:shadow-none">
+        <ComposerPrimitive.Input
+          className="aui-edit-composer-input text-foreground min-h-14 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-base outline-none"
+          autoFocus
+        />
+        <div className="aui-edit-composer-footer mx-2.5 mb-2.5 flex items-center gap-1.5 self-end">
+          <ComposerPrimitive.Cancel asChild>
+            <Button variant="ghost" size="sm" className="h-8 rounded-full px-3.5">
+              {t("msg.cancel")}
+            </Button>
+          </ComposerPrimitive.Cancel>
+          <ComposerPrimitive.Send asChild>
+            <Button size="sm" className="h-8 rounded-full px-3.5">
+              {t("msg.update")}
+            </Button>
+          </ComposerPrimitive.Send>
+        </div>
+      </ComposerPrimitive.Root>
+    </MessagePrimitive.Root>
+  );
+};
+
+// Fork: start a NEW conversation seeded with history up to this message.
+const ForkMenuItem: FC = () => {
+  const { t } = useI18n();
+  const fork = useContext(ForkContext);
+  const position = useAuiState(
+    (s) => (s.message.metadata?.custom as { lastItemIndex?: number } | undefined)?.lastItemIndex,
+  );
+  if (!fork || position == null || position < 0) return null;
+  return (
+    <ActionBarMorePrimitive.Item
+      className="aui-action-bar-more-item hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none"
+      onClick={() => fork(position)}
+    >
+      <GitBranchIcon className="size-4" /> {t("msg.fork")}
+    </ActionBarMorePrimitive.Item>
+  );
+};
+
+// Edit pencil, offered ONLY on the last user message (in-place edit → re-run).
+const UserActionBar: FC = () => {
+  const { t } = useI18n();
+  const isLastUser = useAuiState(
+    (s) => (s.message.metadata?.custom as { isLastUser?: boolean } | undefined)?.isLastUser === true,
+  );
+  if (!isLastUser) return null;
+  return (
+    <ActionBarPrimitive.Root
+      hideWhenRunning
+      autohide="never"
+      className="aui-user-action-bar-root flex flex-col items-end"
+    >
+      <ActionBarPrimitive.Edit asChild>
+        <TooltipIconButton tooltip={t("msg.edit")} className="aui-user-action-edit">
+          <PencilIcon />
+        </TooltipIconButton>
+      </ActionBarPrimitive.Edit>
+    </ActionBarPrimitive.Root>
+  );
 };
 
 const ThreadScrollToBottom: FC = () => {
@@ -205,9 +287,30 @@ const ThreadWelcome: FC = () => {
 
 const Composer: FC = () => {
   const { t } = useI18n();
+  // "@" file mentions (pi-style): workspace paths from the conversation's cwd.
+  // Selecting one inserts a `:file[name]{name=path}` directive chip; the
+  // backend hands the model a plain `@path` (see ReqLLMClient).
+  const files = useContext(WorkspaceFilesContext);
+  const mention = unstable_useMentionAdapter({
+    items: useMemo(
+      () =>
+        files.map((path) => ({
+          id: path,
+          type: "file",
+          label: path.split("/").pop() || path,
+          description: path,
+        })),
+      [files],
+    ),
+    includeModelContextTools: false,
+    formatter: unstable_defaultDirectiveFormatter,
+  });
+
   return (
+    <ComposerPrimitive.Unstable_TriggerPopoverRoot>
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
       <SlashCommandMenu />
+      <ComposerTriggerPopover char="@" {...mention} fallbackIcon={FileIcon} />
       <ComposerPrimitive.AttachmentDropzone asChild>
         <div
           data-slot="aui_composer-shell"
@@ -226,6 +329,7 @@ const Composer: FC = () => {
         </div>
       </ComposerPrimitive.AttachmentDropzone>
     </ComposerPrimitive.Root>
+    </ComposerPrimitive.Unstable_TriggerPopoverRoot>
   );
 };
 
@@ -469,6 +573,7 @@ const AssistantActionBar: FC = () => {
           sideOffset={6}
           className="aui-action-bar-more-content bg-popover/95 text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[8rem] overflow-hidden rounded-xl border-0 p-1.5 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18),0_2px_10px_-2px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] backdrop-blur-sm dark:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.5)] dark:ring-white/[0.08]"
         >
+          <ForkMenuItem />
           <ActionBarPrimitive.ExportMarkdown asChild>
             <ActionBarMorePrimitive.Item className="aui-action-bar-more-item hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none">
               <DownloadIcon className="size-4" />
@@ -481,6 +586,12 @@ const AssistantActionBar: FC = () => {
   );
 };
 
+// "@" file mentions render as inline chips (assistant-ui DirectiveText).
+const FileDirectiveText = createDirectiveText(unstable_defaultDirectiveFormatter, {
+  iconMap: { file: FileIcon },
+  fallbackIcon: FileIcon,
+});
+
 const UserMessage: FC = () => {
   return (
     <MessagePrimitive.Root
@@ -490,9 +601,12 @@ const UserMessage: FC = () => {
     >
       <UserMessageAttachments />
 
-      <div className="aui-user-message-content-wrapper col-start-2 min-w-0">
-        <div className="aui-user-message-content bg-muted text-foreground rounded-xl px-4 py-2 wrap-break-word empty:hidden">
-          <MessagePrimitive.Parts />
+      <div className="aui-user-message-content-wrapper relative col-start-2 min-w-0">
+        <div className="aui-user-message-content peer bg-muted text-foreground rounded-xl px-4 py-2 wrap-break-word empty:hidden">
+          <MessagePrimitive.Parts components={{ Text: FileDirectiveText }} />
+        </div>
+        <div className="aui-user-action-bar-wrapper absolute start-0 top-1/2 -translate-x-full -translate-y-1/2 pe-2 peer-empty:hidden rtl:translate-x-full">
+          <UserActionBar />
         </div>
       </div>
     </MessagePrimitive.Root>

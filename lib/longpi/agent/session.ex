@@ -79,6 +79,14 @@ defmodule Longpi.Agent.Session do
   @doc "Renames the conversation (the /rename command)."
   def rename(session, title), do: GenServer.call(session, {:rename, title})
 
+  @doc """
+  Replaces the LAST user message with new text and re-runs from there —
+  the graphical edit-and-resend. Everything after (and including) the old
+  message is dropped, mirroring `regenerate` semantics.
+  """
+  def edit_last(session, text, attachments \\ []),
+    do: GenServer.call(session, {:edit_last, text, attachments})
+
   @doc "The conversation's current reasoning effort (nil = model default)."
   def reasoning_effort(session), do: GenServer.call(session, :reasoning_effort)
 
@@ -226,6 +234,27 @@ defmodule Longpi.Agent.Session do
     state = persist(state, [user_message])
     messages = state.messages ++ [user_message]
     {:reply, :ok, run_turn(%{state | messages: messages}, messages)}
+  end
+
+  def handle_call({:edit_last, _text, _attachments}, _from, %{status: status} = state)
+      when status in [:running, :compacting] do
+    {:reply, {:error, :busy}, state}
+  end
+
+  def handle_call({:edit_last, text, attachments}, _from, state) do
+    case truncate_before_last_user(state) do
+      {:ok, state} ->
+        # Clients rebuild from the truncated history, then the replacement
+        # user message streams in like a normal send.
+        state = notify(state, {:history, broadcast_history(state)})
+        user_message = Message.user(text, attachments)
+        state = persist(state, [user_message])
+        messages = state.messages ++ [user_message]
+        {:reply, :ok, run_turn(%{state | messages: messages}, messages)}
+
+      :error ->
+        {:reply, {:error, :nothing_to_edit}, state}
+    end
   end
 
   def handle_call(:regenerate, _from, %{status: status} = state)
@@ -749,6 +778,22 @@ defmodule Longpi.Agent.Session do
 
   # Drops everything after the last user message, in memory and in storage, so
   # the next turn regenerates from that point.
+  # Like truncate_to_last_user, but drops the last user message TOO — the
+  # edit flow replaces it with fresh text.
+  defp truncate_before_last_user(state) do
+    [system | rest] = state.messages
+
+    case last_index(rest, &(&1.role == :user)) do
+      nil ->
+        :error
+
+      idx ->
+        kept = Enum.take(rest, idx)
+        delete_persisted_after(state, idx - 1)
+        {:ok, %{state | messages: [system | kept], persisted_count: idx}}
+    end
+  end
+
   defp truncate_to_last_user(state) do
     [system | rest] = state.messages
 
