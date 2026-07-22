@@ -16,8 +16,64 @@ defmodule Longpi.Extensions do
     Application.get_env(:longpi, :global_extensions_dir) || Path.expand("~/.longpi/extensions")
   end
 
-  @doc "The global packages config file (`~/.longpi/packages.json`)."
-  def global_packages_path, do: Path.expand("~/.longpi/packages.json")
+  @doc """
+  The global packages config file (`~/.longpi/packages.json`). Overridable via
+  `config :longpi, :global_packages_path` so tests don't read the real one.
+  """
+  def global_packages_path do
+    Application.get_env(:longpi, :global_packages_path) ||
+      Path.expand("~/.longpi/packages.json")
+  end
+
+  @doc """
+  Whether a Bun extension host is needed for this workspace at all: true only
+  when some extension entry exists (global or project `*.ts`/`*.js` file, a
+  `subdir/index.ts|js`, or a configured packages.json). Sessions skip spawning
+  the Bun process entirely otherwise — the common no-extensions case costs
+  nothing.
+  """
+  @spec any_for?(String.t()) :: boolean()
+  def any_for?(cwd) do
+    dirs = [global_dir(), Path.join(cwd, ".longpi/extensions")]
+
+    packages = [
+      global_packages_path(),
+      Path.join(cwd, ".longpi/packages.json")
+    ]
+
+    Enum.any?(dirs, &dir_has_extension?/1) or Enum.any?(packages, &packages_configured?/1)
+  end
+
+  # Mirrors host.ts discovery: one level deep — *.ts/*.js files or
+  # subdir/index.ts|index.js.
+  defp dir_has_extension?(dir) do
+    case File.ls(dir) do
+      {:ok, entries} ->
+        Enum.any?(entries, fn entry ->
+          path = Path.join(dir, entry)
+
+          cond do
+            String.ends_with?(entry, [".ts", ".js"]) -> File.regular?(path)
+            File.dir?(path) -> File.regular?(Path.join(path, "index.ts")) or
+                                 File.regular?(Path.join(path, "index.js"))
+            true -> false
+          end
+        end)
+
+      {:error, _} ->
+        false
+    end
+  end
+
+  defp packages_configured?(path) do
+    with {:ok, body} <- File.read(path),
+         {:ok, %{"packages" => packages}} when is_map(packages) and map_size(packages) > 0 <-
+           Jason.decode(body) do
+      true
+    else
+      _ -> false
+    end
+  end
 
   @doc "Extension files/dirs in the global directory, as `[%{name, dir?}]`."
   @spec list_global() :: [map()]

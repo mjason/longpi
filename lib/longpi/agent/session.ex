@@ -197,24 +197,32 @@ defmodule Longpi.Agent.Session do
 
   @impl true
   def handle_continue(:load_extensions, state) do
+    {:noreply, start_ext_host(state)}
+  end
+
+  # Starts the Bun host when this session wants extensions AND the workspace
+  # actually has any (start_for is lazy — no extensions, no Bun process).
+  # `start_for` returns as soon as the host is spawned; waiting for it to
+  # finish loading its modules (Bun cold start + imports) would block the
+  # session — and thus the channel join reading history. Do the wait in a
+  # task and fold the tools/commands in when they arrive, so opening a
+  # conversation is never gated on extension load.
+  defp start_ext_host(%{ext_host: nil} = state) do
     if state.ext_enabled and Application.get_env(:longpi, :extensions_enabled, true) do
       case Longpi.Extensions.Host.start_for(state.ctx.cwd) do
         {:ok, host} ->
-          # `start_for` returns as soon as the host is spawned; waiting for it to
-          # finish loading its modules (Bun cold start + imports) would block the
-          # session — and thus the channel join reading history. Do the wait in a
-          # task and fold the tools/commands in when they arrive, so opening a
-          # conversation is never gated on extension load.
           load_extensions_async(host, self())
-          {:noreply, %{state | ext_host: host}}
+          %{state | ext_host: host}
 
         :none ->
-          {:noreply, state}
+          state
       end
     else
-      {:noreply, state}
+      state
     end
   end
+
+  defp start_ext_host(state), do: state
 
   defp load_extensions_async(host, session) do
     Task.start(fn ->
@@ -358,8 +366,14 @@ defmodule Longpi.Agent.Session do
      }, state}
   end
 
-  def handle_call(:reload_extensions, _from, %{ext_host: nil} = state),
-    do: {:reply, {:error, :no_extensions}, state}
+  # No host yet (lazy start found no extensions at init): a manual reload
+  # means "look again" — cold-start the host if extensions exist now.
+  def handle_call(:reload_extensions, _from, %{ext_host: nil} = state) do
+    case start_ext_host(state) do
+      %{ext_host: nil} = state -> {:reply, {:error, :no_extensions}, state}
+      state -> {:reply, {:ok, :starting}, state}
+    end
+  end
 
   def handle_call(:reload_extensions, _from, state) do
     specs = Longpi.Extensions.Host.reload(state.ext_host)
@@ -559,8 +573,11 @@ defmodule Longpi.Agent.Session do
     {:noreply, schedule_ext_reload(state)}
   end
 
+  # The agent just wrote into an extensions dir but no host is running (lazy
+  # start skipped it when the workspace had none) — this is the FIRST
+  # extension, so cold-start the host now.
   def handle_info(:auto_reload_extensions, %{ext_host: nil} = state),
-    do: {:noreply, %{state | ext_reload_timer: nil}}
+    do: {:noreply, start_ext_host(%{state | ext_reload_timer: nil})}
 
   def handle_info(:auto_reload_extensions, state) do
     reload_extensions_async(state.ext_host, self())

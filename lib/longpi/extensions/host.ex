@@ -27,15 +27,14 @@ defmodule Longpi.Extensions.Host do
   """
   @spec start_for(String.t()) :: {:ok, pid()} | :none
   def start_for(cwd) do
-    case find_bun() do
-      {:ok, _bun} ->
-        case GenServer.start_link(__MODULE__, cwd) do
-          {:ok, pid} -> {:ok, pid}
-          _ -> :none
-        end
-
-      :error ->
-        :none
+    with true <- Longpi.Extensions.any_for?(cwd),
+         {:ok, _bun} <- find_bun(),
+         {:ok, pid} <- GenServer.start_link(__MODULE__, cwd) do
+      {:ok, pid}
+    else
+      # No extensions/packages anywhere for this workspace (the common case),
+      # no Bun on PATH, or the host failed to boot: run without a Bun process.
+      _ -> :none
     end
   end
 
