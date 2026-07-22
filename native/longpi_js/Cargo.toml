@@ -13,6 +13,7 @@ rquickjs = { version = "0.12", features = ["full-async"] }
 tokio = { version = "1", features = ["rt", "macros", "time", "process", "sync", "io-util"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2"] }
 getrandom = "0.2"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 # TypeScript type-stripping (extensions are authored in TS; QuickJS runs JS).
 oxc_allocator = "0.90"

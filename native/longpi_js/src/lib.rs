@@ -16,8 +16,11 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use futures_util::FutureExt;
 
 use rquickjs::{
     prelude::{Async, Func},
@@ -42,6 +45,12 @@ const CAPABILITY_TIMEOUT_SECS: u64 = 120;
 // (which registers the waiter) and `capability_reply` (a NIF on another
 // scheduler that fulfils it).
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<String>>>>;
+
+// A mutex lock that recovers a poisoned lock instead of panicking — a panic
+// while another thread held it must not cascade into a second panic here.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 // ── TypeScript stripping (oxc) ──────────────────────────────────────────
 
@@ -156,11 +165,20 @@ fn start(env: Env, id: u64) -> NifResult<ResourceArc<Instance>> {
     std::thread::Builder::new()
         .name(format!("longpi-js-{id}"))
         .spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
+            let Ok(rt) = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .expect("tokio runtime");
-            rt.block_on(run_instance(id, owner, rx, interrupt_thread, pending_thread));
+            else {
+                return;
+            };
+            // A fatal panic on this thread is contained here (never the BEAM);
+            // the owning host then degrades gracefully via its call timeouts.
+            let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                rt.block_on(run_instance(id, owner, rx, interrupt_thread, pending_thread));
+            }));
+            if result.is_err() {
+                eprintln!("[longpi-js:{id}] runtime thread panicked and stopped");
+            }
         })
         .map_err(|e| rustler::Error::Term(Box::new(e.to_string())))?;
 
@@ -177,7 +195,7 @@ fn start(env: Env, id: u64) -> NifResult<ResourceArc<Instance>> {
 /// JSON, waking the `longpi.run` call that is awaiting it.
 #[rustler::nif]
 fn capability_reply(instance: ResourceArc<Instance>, req_id: u64, result: String) -> rustler::Atom {
-    if let Some(sender) = instance.pending.lock().unwrap().remove(&req_id) {
+    if let Some(sender) = lock(&instance.pending).remove(&req_id) {
         let _ = sender.send(result);
     }
     atoms::ok()
@@ -296,54 +314,31 @@ async fn run_instance(
 
     while let Some(cmd) = rx.recv().await {
         interrupt.store(false, Ordering::SeqCst);
-        match cmd {
-            Command::Load { extensions, env } => {
-                let errors = load_extensions(&ctx, &registry, extensions, env).await;
-                let (tools, commands) = registry_summary(&registry);
-                send_to(&owner, move |e| {
-                    (
-                        atoms::js_loaded(),
-                        id,
-                        tools,
-                        commands,
-                        errors,
-                    )
-                        .encode(e)
-                });
-            }
-            Command::CallTool {
-                call_id,
-                name,
-                args_json,
-                env,
-            } => {
-                apply_env(&ctx, &env).await;
-                let (ok, content) = call_registered(&ctx, &registry, Kind::Tool, &name, &args_json).await;
-                send_to(&owner, move |e| {
-                    let content = binary_term(e, content.as_bytes());
-                    (atoms::js_result(), id, call_id, ok, content).encode(e)
-                });
-            }
-            Command::CallCommand {
-                call_id,
-                name,
-                arg,
-            } => {
-                let arg_json = serde_arg(&arg);
-                let (ok, content) = call_registered(&ctx, &registry, Kind::Command, &name, &arg_json).await;
-                send_to(&owner, move |e| {
-                    let content = binary_term(e, content.as_bytes());
-                    (atoms::js_result(), id, call_id, ok, content).encode(e)
-                });
-            }
-            Command::FireEvent {
-                event,
-                payload_json,
-            } => {
-                fire_event_handlers(&ctx, &registry, &event, &payload_json).await;
-            }
-            Command::Stop => break,
+        if matches!(cmd, Command::Stop) {
+            break;
         }
+
+        // A call that must be answered, so a panic mid-command doesn't leave
+        // the caller hanging until its timeout.
+        let reply_id = cmd.reply_id();
+
+        // Isolate each command: a panic (a resumed rquickjs callback panic, or
+        // a bug in ours) is caught here so it kills only this call, never the
+        // instance thread — the runtime stays usable for the next command.
+        let outcome = AssertUnwindSafe(handle_command(id, owner, &ctx, &registry, cmd))
+            .catch_unwind()
+            .await;
+
+        if outcome.is_err() {
+            eprintln!("[longpi-js:{id}] command panicked; instance kept alive");
+            if let Some(call_id) = reply_id {
+                send_to(&owner, move |e| {
+                    let content = binary_term(e, b"extension runtime error (panic)");
+                    (atoms::js_result(), id, call_id, false, content).encode(e)
+                });
+            }
+        }
+
         rt.idle().await;
     }
 
@@ -352,6 +347,70 @@ async fn run_instance(
     registry.borrow_mut().clear();
     drop(ctx);
     rt.idle().await;
+}
+
+impl Command {
+    fn reply_id(&self) -> Option<u64> {
+        match self {
+            Command::CallTool { call_id, .. } | Command::CallCommand { call_id, .. } => {
+                Some(*call_id)
+            }
+            _ => None,
+        }
+    }
+}
+
+// Processes one command and sends its result message(s). Panics here are
+// caught by the caller (per-command isolation).
+async fn handle_command(
+    id: u64,
+    owner: LocalPid,
+    ctx: &AsyncContext,
+    registry: &Rc<RefCell<Registry>>,
+    cmd: Command,
+) {
+    match cmd {
+        Command::Load { extensions, env } => {
+            let errors = load_extensions(ctx, registry, extensions, env).await;
+            let (tools, commands) = registry_summary(registry);
+            send_to(&owner, move |e| {
+                (atoms::js_loaded(), id, tools, commands, errors).encode(e)
+            });
+        }
+        Command::CallTool {
+            call_id,
+            name,
+            args_json,
+            env,
+        } => {
+            apply_env(ctx, &env).await;
+            let (ok, content) = call_registered(ctx, registry, Kind::Tool, &name, &args_json).await;
+            send_to(&owner, move |e| {
+                let content = binary_term(e, content.as_bytes());
+                (atoms::js_result(), id, call_id, ok, content).encode(e)
+            });
+        }
+        Command::CallCommand {
+            call_id,
+            name,
+            arg,
+        } => {
+            let arg_json = serde_arg(&arg);
+            let (ok, content) =
+                call_registered(ctx, registry, Kind::Command, &name, &arg_json).await;
+            send_to(&owner, move |e| {
+                let content = binary_term(e, content.as_bytes());
+                (atoms::js_result(), id, call_id, ok, content).encode(e)
+            });
+        }
+        Command::FireEvent {
+            event,
+            payload_json,
+        } => {
+            fire_event_handlers(ctx, registry, &event, &payload_json).await;
+        }
+        Command::Stop => {}
+    }
 }
 
 impl Registry {
@@ -650,13 +709,14 @@ async fn fire_event_handlers(
     let payload_json = payload_json.to_string();
     rquickjs::async_with!(ctx => |ctx| {
         for handler in handlers {
-            if let Ok(func) = handler.restore(&ctx) {
-                let payload = ctx.json_parse(payload_json.clone()).unwrap_or_else(|_| Value::new_undefined(ctx.clone()));
-                let ctx_obj = Object::new(ctx.clone()).unwrap();
-                if let Ok(result) = func.call::<_, Value>((payload, ctx_obj)) {
-                    if let Some(promise) = result.as_promise() {
-                        let _ = promise.clone().into_future::<Value>().await;
-                    }
+            let Ok(func) = handler.restore(&ctx) else { continue };
+            let Ok(ctx_obj) = Object::new(ctx.clone()) else { continue };
+            let payload = ctx
+                .json_parse(payload_json.clone())
+                .unwrap_or_else(|_| Value::new_undefined(ctx.clone()));
+            if let Ok(result) = func.call::<_, Value>((payload, ctx_obj)) {
+                if let Some(promise) = result.as_promise() {
+                    let _ = promise.clone().into_future::<Value>().await;
                 }
             }
         }
@@ -808,7 +868,7 @@ async fn broker_run(
 ) -> String {
     let req_id = counter.fetch_add(1, Ordering::SeqCst);
     let (tx, rx) = oneshot::channel();
-    pending.lock().unwrap().insert(req_id, tx);
+    lock(pending).insert(req_id, tx);
 
     send_to(&owner, move |e| {
         let cap = binary_term(e, b"run");
@@ -819,7 +879,7 @@ async fn broker_run(
     match tokio::time::timeout(std::time::Duration::from_secs(CAPABILITY_TIMEOUT_SECS), rx).await {
         Ok(Ok(result)) => result,
         _ => {
-            pending.lock().unwrap().remove(&req_id);
+            lock(pending).remove(&req_id);
             "{\"status\":124,\"stdout\":\"\",\"stderr\":\"run broker timed out\"}".to_string()
         }
     }
