@@ -189,22 +189,24 @@ function ManagementPanel({
       </aside>
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-start gap-3 border-b border-border px-8 py-5">
+        <header className="flex items-center gap-3 border-b border-border px-8 py-5">
           <div className="min-w-0">
             <h1 className="text-lg font-semibold">{t(section.label)}</h1>
             <p className="mt-0.5 text-sm text-muted-foreground">{t(section.description)}</p>
           </div>
           <div className="flex-1" />
-          <LanguageToggle />
-          <ThemeToggle />
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <X className="size-4" /> {t("manage.close")}
-          </Button>
+          <div className="flex items-center gap-1">
+            <LanguageToggle />
+            <ThemeToggle />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-4" /> {t("manage.close")}
+            </Button>
+          </div>
         </header>
 
         <ScrollArea className="flex-1">
