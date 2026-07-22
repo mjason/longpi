@@ -5,11 +5,15 @@ defmodule Longpi.Agent.Permissions do
 
     * `:read_only` - only read-type tools run automatically; anything that
       writes or executes asks for approval
-    * `:auto` - reads and workspace edits run automatically; `bash` (arbitrary
-      commands) asks
+    * `:auto` - reads and workspace edits run automatically; `bash` AND any
+      extension tool (arbitrary code via the QuickJS host / `longpi.run`) ask
     * `:full` - everything runs automatically, no prompts
 
   Stored in the `"approval_level"` setting; defaults to `:auto`.
+
+  A tool's `source` (`:builtin` | `:extension`) is part of the decision: under
+  `:auto`, extension tools are treated like `bash` — they can fetch, write, and
+  run programs, so they get the same approval gate rather than auto-running.
   """
 
   alias Longpi.Agent.Settings
@@ -39,12 +43,18 @@ defmodule Longpi.Agent.Permissions do
     Settings.put(level_key(), Atom.to_string(level))
   end
 
-  @doc "Permission for a tool under the current level: `:allow` or `:ask`."
-  def mode(tool_name), do: mode(level(), tool_name)
+  @doc """
+  Permission for a tool under the current level: `:allow` or `:ask`.
 
-  def mode(:full, _tool), do: :allow
-  def mode(:auto, "bash"), do: :ask
-  def mode(:auto, _tool), do: :allow
-  def mode(:read_only, tool) when tool in @read_tools, do: :allow
-  def mode(:read_only, _tool), do: :ask
+  `source` (`:builtin` | `:extension`) matters under `:auto`, where extension
+  tools are gated like `bash`.
+  """
+  def mode(tool_name, source \\ :builtin), do: mode_at(level(), tool_name, source)
+
+  defp mode_at(:full, _tool, _source), do: :allow
+  defp mode_at(:auto, "bash", _source), do: :ask
+  defp mode_at(:auto, _tool, :extension), do: :ask
+  defp mode_at(:auto, _tool, _source), do: :allow
+  defp mode_at(:read_only, tool, _source) when tool in @read_tools, do: :allow
+  defp mode_at(:read_only, _tool, _source), do: :ask
 end

@@ -164,7 +164,20 @@ defmodule Longpi.Agent.PromptAssemblyTest do
       assert after_add =~ "Deep research specialist"
     end
 
-    test "extension specs merge in and win on name", %{ctx: ctx} do
+    test "extension specs merge in under new names", %{ctx: ctx} do
+      ext = %Longpi.Agent.ToolSpec{
+        name: "web_search",
+        description: "Search the web.",
+        schema: %{"type" => "object"},
+        run: fn _args, _ctx -> {:ok, "ext"} end,
+        source: :extension
+      }
+
+      toolbox = PromptAssembly.toolbox(toolbox_inputs(ctx, %{extension_specs: [ext]}))
+      assert %{source: :extension} = toolbox["web_search"]
+    end
+
+    test "an extension may not shadow a built-in tool", %{ctx: ctx} do
       ext = %Longpi.Agent.ToolSpec{
         name: "read",
         description: "Extension override of read.",
@@ -174,9 +187,8 @@ defmodule Longpi.Agent.PromptAssemblyTest do
       }
 
       toolbox = PromptAssembly.toolbox(toolbox_inputs(ctx, %{extension_specs: [ext]}))
-      read = toolbox["read"]
-      assert read.source == :extension
-      assert read.description == "Extension override of read."
+      # The built-in read is kept; the extension's shadowing version is ignored.
+      assert %{source: :builtin} = toolbox["read"]
     end
   end
 

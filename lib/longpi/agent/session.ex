@@ -20,6 +20,13 @@ defmodule Longpi.Agent.Session do
 
   use GenServer, restart: :temporary
 
+  require Logger
+
+  # Slash commands the app handles itself (channel routes compact/rename/reload;
+  # the client handles model/help). An extension command with one of these names
+  # can never be reached, so it's dropped with a warning rather than shown dead.
+  @builtin_commands ~w(compact model reload rename help)
+
   alias Longpi.Agent.{
     Compactor,
     ConversationMessage,
@@ -417,7 +424,7 @@ defmodule Longpi.Agent.Session do
 
   def handle_call(:reload_extensions, _from, state) do
     specs = Longpi.Extensions.Host.reload(state.ext_host)
-    commands = Longpi.Extensions.Host.commands(state.ext_host)
+    commands = sanitize_commands(Longpi.Extensions.Host.commands(state.ext_host))
     state = %{state | extension_specs: specs, ext_commands: commands}
     state = %{state | toolbox: assemble_toolbox(state)}
     # Push the fresh command list so the composer's slash menu updates live.
@@ -596,7 +603,7 @@ defmodule Longpi.Agent.Session do
 
   @impl true
   def handle_info({:extensions_loaded, host, specs, commands}, %{ext_host: host} = state) do
-    state = %{state | extension_specs: specs, ext_commands: commands}
+    state = %{state | extension_specs: specs, ext_commands: sanitize_commands(commands)}
     state = %{state | toolbox: assemble_toolbox(state)}
 
     # Push the now-available slash commands to any connected channel.
@@ -908,6 +915,25 @@ defmodule Longpi.Agent.Session do
     Enum.map(state.extension_specs, &%{name: &1.name, description: &1.description})
   end
 
+  # Drop extension slash commands whose names collide with built-in commands —
+  # routing would shadow them, so they'd be dead entries in the menu. Warn so
+  # the extension author knows to rename.
+  defp sanitize_commands(commands) do
+    Enum.reject(commands, fn cmd ->
+      name = cmd["name"] || cmd[:name]
+
+      if name in @builtin_commands do
+        Logger.warning(
+          "extension command #{inspect(name)} collides with a built-in command; ignoring it"
+        )
+
+        true
+      else
+        false
+      end
+    end)
+  end
+
   defp assemble_toolbox(state) do
     PromptAssembly.toolbox(%{
       builtin_toolbox: state.builtin_toolbox,
@@ -1192,14 +1218,16 @@ defmodule Longpi.Agent.Session do
     # and tool set reflect the latest settings, subagent roles, and extensions.
     state = assemble_prompt(state)
 
+    toolbox = state.toolbox
+
     config = %{
       llm: state.llm,
       model: state.model,
       reasoning_effort: reasoning_effort_atom(state.reasoning_effort),
-      toolbox: state.toolbox,
+      toolbox: toolbox,
       ctx: state.ctx,
       sink: fn event -> send(session, {:turn_event, event}) end,
-      authorize: fn call -> authorize(session, call) end
+      authorize: fn call -> authorize(session, tool_source(toolbox, call.name), call) end
     }
 
     # The LLM sees the compacted context ([system, summary, recent]); the full
@@ -1314,8 +1342,16 @@ defmodule Longpi.Agent.Session do
 
   # Runs in the Turn task. For `:ask` tools it asks the Session to broadcast an
   # approval request, then blocks until the user (or a timeout) decides.
-  defp authorize(session, call) do
-    case Longpi.Agent.Permissions.mode(call.name) do
+  # A tool's source (:builtin | :extension) gates it differently under :auto.
+  defp tool_source(toolbox, name) do
+    case toolbox do
+      %{^name => %{source: source}} -> source
+      _ -> :builtin
+    end
+  end
+
+  defp authorize(session, source, call) do
+    case Longpi.Agent.Permissions.mode(call.name, source) do
       :allow ->
         :allow
 

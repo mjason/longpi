@@ -9,6 +9,8 @@ defmodule Longpi.Agent.Toolbox do
   back as `{:error, text}` written for the model to read and correct.
   """
 
+  require Logger
+
   alias Longpi.Agent.{Tools, ToolSpec}
 
   @default_modules [
@@ -32,11 +34,36 @@ defmodule Longpi.Agent.Toolbox do
   end
 
   @doc """
-  Merges extension-provided specs in, extension winning on name (matching pi:
-  an extension tool overrides a built-in of the same name).
+  Merges more specs into the toolbox with a collision policy:
+
+    * an extension tool may NOT shadow a built-in (or subagent) tool — the
+      built-in is kept and the collision is logged. This stops an extension
+      (especially a global one) from silently replacing `bash`/`edit`/`read`
+      etc. with arbitrary code that would then run under the built-in's name.
+    * a later extension tool overriding an earlier extension of the same name
+      wins (last loaded), but the duplicate is logged.
+    * non-extension specs (the subagent tool family) merge as before.
   """
   @spec with_extensions(t(), [ToolSpec.t()]) :: t()
-  def with_extensions(toolbox, specs), do: Map.merge(toolbox, index(specs))
+  def with_extensions(toolbox, specs) do
+    Enum.reduce(specs, toolbox, fn %ToolSpec{name: name} = spec, acc ->
+      case acc do
+        %{^name => %ToolSpec{source: :builtin}} when spec.source == :extension ->
+          Logger.warning(
+            "extension tool #{inspect(name)} shadows a built-in tool; ignoring the extension's version"
+          )
+
+          acc
+
+        %{^name => %ToolSpec{source: :extension}} when spec.source == :extension ->
+          Logger.warning("duplicate extension tool #{inspect(name)}; the last one loaded wins")
+          Map.put(acc, name, spec)
+
+        _ ->
+          Map.put(acc, name, spec)
+      end
+    end)
+  end
 
   @spec specs(t()) :: [ToolSpec.t()]
   def specs(toolbox), do: Map.values(toolbox)

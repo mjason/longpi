@@ -29,4 +29,23 @@ defmodule Longpi.Agent.PermissionsTest do
     assert Permissions.mode("write") == :allow
     assert Permissions.mode("read") == :allow
   end
+
+  test "auto: extension tools ask (they can fetch/write/run programs)" do
+    Permissions.put_level(:auto)
+    # Same gate as bash — an extension tool is arbitrary code, not a plain read.
+    assert Permissions.mode("web_search", :extension) == :ask
+    assert Permissions.mode("read", :builtin) == :allow
+    # Defaulting source to :builtin keeps the existing name-only behavior.
+    assert Permissions.mode("read") == :allow
+  end
+
+  test "read_only: extension tools ask" do
+    Permissions.put_level(:read_only)
+    assert Permissions.mode("web_search", :extension) == :ask
+  end
+
+  test "full: extension tools still run without prompts" do
+    Permissions.put_level(:full)
+    assert Permissions.mode("web_search", :extension) == :allow
+  end
 end
