@@ -198,8 +198,9 @@ defmodule Longpi.Agent.LLM.ReqLLMClient do
   defp to_req_llm_message(%{role: :assistant, content: content}), do: Context.assistant(safe(content))
 
   defp to_req_llm_message(%{role: :tool} = message) do
-    # A tool that returned a UI tree stores the tree (the client renders it);
-    # the model gets a flattened, readable text version instead of the vdom dump.
+    # A tool that returned a `longpi.ui({text, view})` envelope stores both (the
+    # client renders `view`); the model gets the author-provided `text`, never
+    # the vdom.
     content =
       case Longpi.Agent.ExtensionUI.model_text(message.content) do
         {:ok, text} -> text

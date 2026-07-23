@@ -221,6 +221,42 @@ defmodule Longpi.Extensions.HostTest do
     assert {:ok, "#1"} = Host.call_tool(host, "typed", %{"n" => 5})
   end
 
+  test "a .tsx tool returns a longpi.ui envelope: explicit text + a view tree", %{cwd: cwd} do
+    write_ext(cwd, "status.tsx", """
+    export default function (longpi: any) {
+      longpi.registerTool({
+        name: "home_status",
+        description: "Shows a status table.",
+        parameters: { type: "object", properties: {} },
+        execute() {
+          const rows = [["温度", "unavailable"], ["湿度", "45%"]];
+          return longpi.ui({
+            text: `2 sensors — ${rows.map((r) => r.join(": ")).join("; ")}`,
+            view: (
+              <Card title="家庭状态">
+                <Table columns={["实体", "状态"]} rows={rows} />
+              </Card>
+            ),
+          });
+        },
+      });
+    }
+    """)
+
+    {:ok, host} = Host.start_for(cwd)
+    assert {:ok, result} = Host.call_tool(host, "home_status", %{})
+
+    # The stored result carries BOTH halves. The client will render `view`...
+    assert %{"__longpi_ui__" => true, "text" => text, "view" => view} = Jason.decode!(result)
+    assert view["type"] == "Card"
+    assert view["props"]["title"] == "家庭状态"
+    assert hd(view["children"])["type"] == "Table"
+
+    # ...while the model receives only the author-provided text, never the tree.
+    assert text == "2 sensors — 温度: unavailable; 湿度: 45%"
+    assert {:ok, ^text} = Longpi.Agent.ExtensionUI.model_text(result)
+  end
+
   test "no extensions anywhere → :none (no guest boots)", %{cwd: cwd} do
     File.rm_rf!(Path.join(cwd, ".longpi/extensions"))
     assert :none = Host.start_for(cwd)

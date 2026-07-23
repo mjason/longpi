@@ -527,13 +527,13 @@ globalThis.structuredClone = globalThis.structuredClone ||
 globalThis.queueMicrotask = globalThis.queueMicrotask || ((fn) => Promise.resolve().then(fn));
 
 // Extension UI: authored in TSX, compiled to classic-JSX `h(...)` calls (oxc).
-// `h` builds a plain, serializable tree that the client renders with a fixed
-// whitelist of our components — no code runs in the browser. Component names
-// are string constants so `<Table .../>` compiles to `h(Table, …)` = a "Table"
-// node; return the tree from a tool to render it instead of raw JSON.
+// `h` builds a plain, serializable node tree that the client renders with a
+// fixed whitelist of our components — no code runs in the browser. Component
+// names are string constants so `<Table .../>` compiles to `h(Table, …)` = a
+// "Table" node. Return `longpi.ui({ text, view })` from a tool: `text` is the
+// data the model reads, `view` is the tree the client renders.
 globalThis.Fragment = "Fragment";
 globalThis.h = (type, props, ...children) => ({
-  __longpi_ui__: true,
   type: String(type),
   props: props || {},
   children: children.flat(Infinity).filter((c) => c != null && c !== false && c !== true),
@@ -672,6 +672,10 @@ globalThis.__makeLongpi = (registerTool, registerCommand, on) => ({
   registerCommand,
   on,
   run: async (cmd, args = [], opts = {}) => JSON.parse(await __run(JSON.stringify({ cmd: String(cmd), args, opts }))),
+  // A tool result carrying BOTH the model-facing text (`text`) and a UI tree
+  // (`view`, built from TSX/`h`). The model reads `text`; the client renders
+  // `view`. Return this from `execute` to show a custom UI.
+  ui: (result) => ({ __longpi_ui__: true, text: String((result && result.text) || ""), view: result && result.view }),
 });
 "#;
 

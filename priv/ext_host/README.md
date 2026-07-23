@@ -96,10 +96,16 @@ See `examples/web-search.ts` for the canonical API-with-secret pattern.
 
 ## Custom result UI (optional)
 
-A tool can return a small UI tree instead of plain text — authored in **TSX**
+A tool can render a rich result instead of plain text — authored in **TSX**
 (name the extension `.tsx`), compiled to a serializable tree the app renders
 with its own components. Nothing runs in the browser; it's data mapped to a
-fixed component whitelist. Return JSX from `execute`:
+fixed component whitelist.
+
+Return `longpi.ui({ text, view })` — **both halves, explicitly**:
+
+- `text` — what the **model** reads. Write the concise, authoritative summary
+  yourself; the model never sees the UI tree.
+- `view` — the JSX the **user** sees, rendered by the app.
 
 ```tsx
 export default function (longpi: any) {
@@ -108,18 +114,25 @@ export default function (longpi: any) {
     description: "Show a home-status table.",
     parameters: { type: "object", properties: {} },
     execute() {
-      return (
-        <Card title="家庭状态">
-          <Table columns={["实体", "状态"]} rows={[["温度", "unavailable"], ["湿度", "45%"]]} />
-        </Card>
-      );
+      const rows = [["温度", "unavailable"], ["湿度", "45%"]];
+      return longpi.ui({
+        text: `2 sensors — ${rows.map((r) => r.join(": ")).join("; ")}`,
+        view: (
+          <Card title="家庭状态">
+            <Table columns={["实体", "状态"]} rows={rows} />
+          </Card>
+        ),
+      });
     },
   });
 }
 ```
 
-Available components (return plain text for anything else; unknown components
-degrade to their inner text):
+The model reads `text` and the user sees `view`; the two are independent, so a
+table can render richly for the user while the model gets a clean one-line
+summary. (Return a plain string when you don't need a custom UI.)
+
+Available `view` components (unknown components degrade to their inner text):
 
 - `Stack` / `Row` (props: `gap` = sm|md|lg) — vertical / horizontal layout
 - `Text` (props: `muted`, `bold`, `small`), `Heading`, `Code`
@@ -127,10 +140,6 @@ degrade to their inner text):
 - `Stat` (props: `label`, `value`) — a labeled number
 - `Card` (props: `title`)
 - `Table` (props: `columns: string[]`, `rows: string[][]`)
-
-Returning a UI does not hide the data from the model: it automatically receives
-a plain-text version of the tree (a table becomes text rows), so it can still
-reason over the result. The rich UI is just for the user.
 
 ## Checklist for a good extension
 

@@ -3,36 +3,24 @@ defmodule Longpi.Agent.ExtensionUITest do
 
   alias Longpi.Agent.ExtensionUI
 
-  defp ui_node(map), do: Jason.encode!(Map.put(map, "__longpi_ui__", true))
+  # What `longpi.ui({ text, view })` serializes to: both halves, explicitly.
+  defp envelope(text, view),
+    do: Jason.encode!(%{"__longpi_ui__" => true, "text" => text, "view" => view})
 
-  test "flattens a Table to a readable text table for the model" do
+  test "returns the author-provided text, never the vdom view" do
     content =
-      ui_node(%{
+      envelope("9 sensors online; temperature unavailable", %{
         "type" => "Table",
-        "props" => %{"columns" => ["实体", "状态"], "rows" => [["温度", "unavailable"], ["湿度", "45%"]]},
+        "props" => %{"columns" => ["实体", "状态"], "rows" => [["温度", "unavailable"]]},
         "children" => []
       })
 
-    assert {:ok, text} = ExtensionUI.model_text(content)
-    assert text =~ "实体 | 状态"
-    assert text =~ "温度 | unavailable"
-    assert text =~ "湿度 | 45%"
-    refute text =~ "__longpi_ui__"
+    assert {:ok, "9 sensors online; temperature unavailable"} = ExtensionUI.model_text(content)
   end
 
-  test "flattens a Card with a title and nested content" do
-    content =
-      ui_node(%{
-        "type" => "Card",
-        "props" => %{"title" => "家庭状态"},
-        "children" => [
-          %{"__longpi_ui__" => true, "type" => "Stat", "props" => %{"label" => "在线", "value" => 9}, "children" => []}
-        ]
-      })
-
-    assert {:ok, text} = ExtensionUI.model_text(content)
-    assert text =~ "家庭状态"
-    assert text =~ "在线: 9"
+  test "missing text yields an empty string, not a crash" do
+    content = Jason.encode!(%{"__longpi_ui__" => true, "view" => %{"type" => "Card"}})
+    assert {:ok, ""} = ExtensionUI.model_text(content)
   end
 
   test "passes through a plain (non-UI) result" do

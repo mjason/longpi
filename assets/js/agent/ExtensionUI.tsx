@@ -4,9 +4,10 @@
 // oxc-compiled TSX) interpreted here into a fixed whitelist of components, so
 // there's no code execution or arbitrary markup, only text into our own UI.
 //
-// Contract: a tool result string that parses to a node
-// `{ __longpi_ui__: true, type, props, children }` (children are nodes or
-// strings). The sandbox's `h()` stamps `__longpi_ui__` on each node.
+// Contract: a tool that called `longpi.ui({ text, view })` returns a string
+// that parses to `{ __longpi_ui__: true, text, view }`, where `view` is a node
+// `{ type, props, children }` (children are nodes or strings). We render `view`;
+// `text` is what the model reads (handled server-side).
 
 import type { ReactNode } from "react";
 
@@ -28,8 +29,9 @@ export function parseExtensionUI(result: unknown): UINode | null {
   if (!trimmed.startsWith("{") || !trimmed.includes(UI_ENVELOPE)) return null;
   try {
     const parsed = JSON.parse(trimmed);
-    if (parsed && parsed[UI_ENVELOPE] === true && typeof parsed.type === "string") {
-      return parsed as UINode;
+    const view = parsed?.[UI_ENVELOPE] === true ? parsed.view : null;
+    if (view && typeof view.type === "string") {
+      return view as UINode;
     }
     return null;
   } catch {

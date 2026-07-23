@@ -5,10 +5,16 @@ import { ExtensionUI, parseExtensionUI } from "./ExtensionUI";
 import { renderBuiltinResult } from "./BuiltinToolUI";
 
 describe("parseExtensionUI", () => {
-  it("recognizes a UI envelope and rejects plain results", () => {
-    const node = { __longpi_ui__: true, type: "Text", props: {}, children: ["hi"] };
-    expect(parseExtensionUI(JSON.stringify(node))).toMatchObject({ type: "Text" });
+  it("extracts the view from a longpi.ui envelope and rejects plain results", () => {
+    const envelope = {
+      __longpi_ui__: true,
+      text: "hi",
+      view: { type: "Text", props: {}, children: ["hi"] },
+    };
+    expect(parseExtensionUI(JSON.stringify(envelope))).toMatchObject({ type: "Text" });
 
+    // A bare node (no envelope) is not a UI result — the author must use longpi.ui.
+    expect(parseExtensionUI(JSON.stringify({ __longpi_ui__: true, type: "Text" }))).toBeNull();
     expect(parseExtensionUI("just a string")).toBeNull();
     expect(parseExtensionUI(JSON.stringify({ matched: 9 }))).toBeNull();
     expect(parseExtensionUI(42)).toBeNull();
