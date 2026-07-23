@@ -64,7 +64,8 @@ defmodule Longpi.Agent.SystemPrompt do
       `longpi.ui({ text, view })` to give the model `text` and the user a small
       TSX UI as `view` (a table/card/stat — name the file `.tsx`); the guide's
       "Custom result UI" section lists the components
-    - Examples: {{ext_examples}} (e.g. web-search.ts — a tool with an API key)
+    - Examples: {{ext_examples}} (e.g. web-search.ts — a tool with an API key;
+      ui-dashboard.tsx — a tool returning `longpi.ui({ text, view })`)
 
     Create the extension with your built-in write/edit tools, at
     `<cwd>/.longpi/extensions/<name>.ts` (this workspace) or

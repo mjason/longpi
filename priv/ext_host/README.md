@@ -141,6 +141,9 @@ Available `view` components (unknown components degrade to their inner text):
 - `Card` (props: `title`)
 - `Table` (props: `columns: string[]`, `rows: string[][]`)
 
+See `examples/ui-dashboard.tsx` for a complete UI tool (data + view, with an
+error branch).
+
 ## Checklist for a good extension
 
 1. One file, default-exported factory, tools registered with clear
