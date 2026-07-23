@@ -59,3 +59,8 @@ config :longpi, :global_extensions_dir, Path.join(System.tmp_dir!(), "longpi_tes
 config :longpi,
        :subagents_global_dir,
        Path.join(System.tmp_dir!(), "longpi_test_global_agents_#{System.pid()}")
+
+# Skill discovery must not read the developer's real ~/.longpi/skills.
+config :longpi,
+       :skills_global_dir,
+       Path.join(System.tmp_dir!(), "longpi_test_global_skills_#{System.pid()}")

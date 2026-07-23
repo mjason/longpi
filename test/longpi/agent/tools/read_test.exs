@@ -62,4 +62,14 @@ defmodule Longpi.Agent.Tools.ReadTest do
     assert byte_size(content) < 60_000
     assert content =~ "exceeded 50000 bytes"
   end
+
+  test "reports a binary/image file as metadata, not garbage", %{tmp_dir: dir, ctx: ctx} do
+    png = <<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0x10, 0x80>>
+    File.write!(Path.join(dir, "logo.png"), png)
+
+    assert {:ok, content} = Read.run(%{path: "logo.png"}, ctx)
+    assert content =~ "PNG image"
+    assert content =~ "#{byte_size(png)} bytes"
+    refute content =~ <<0xFF>>
+  end
 end

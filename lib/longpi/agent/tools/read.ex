@@ -42,9 +42,33 @@ defmodule Longpi.Agent.Tools.Read do
         {:error, "file not found: #{args.path}"}
 
       true ->
-        {:ok, path |> File.read!() |> window(args[:offset], args[:limit]) |> cap_bytes()}
+        content = File.read!(path)
+
+        if String.valid?(content) do
+          {:ok, content |> window(args[:offset], args[:limit]) |> cap_bytes()}
+        else
+          {:ok, binary_notice(content)}
+        end
     end
   end
+
+  # A binary (non-text) file would come back as mojibake if returned as text.
+  # Report its kind and size instead — inline image viewing needs a backend
+  # whose tool results carry image blocks (Anthropic-native), which the
+  # OpenAI-compatible path does not.
+  defp binary_notice(content) do
+    "[binary file — #{kind(content)}, #{byte_size(content)} bytes — not shown as text]"
+  end
+
+  defp kind(<<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A, _::binary>>), do: "PNG image"
+  defp kind(<<0xFF, 0xD8, 0xFF, _::binary>>), do: "JPEG image"
+  defp kind(<<"GIF8", _::binary>>), do: "GIF image"
+  defp kind(<<"RIFF", _::32, "WEBP", _::binary>>), do: "WebP image"
+  defp kind(<<"%PDF-", _::binary>>), do: "PDF document"
+  defp kind(<<0x1F, 0x8B, _::binary>>), do: "gzip archive"
+  defp kind(<<"PK", 0x03, 0x04, _::binary>>), do: "zip archive"
+  defp kind(<<0x7F, "ELF", _::binary>>), do: "ELF binary"
+  defp kind(_), do: "binary data"
 
   # Keep the returned text under the byte ceiling, cutting at a valid UTF-8
   # boundary so the model never receives mojibake.

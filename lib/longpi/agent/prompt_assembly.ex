@@ -21,7 +21,7 @@ defmodule Longpi.Agent.PromptAssembly do
   scan), which is what makes the behaviour straightforward to test.
   """
 
-  alias Longpi.Agent.{Message, ProjectContext, Subagents, SystemPrompt, ToolSpec, Toolbox}
+  alias Longpi.Agent.{Message, ProjectContext, Skills, Subagents, SystemPrompt, ToolSpec, Toolbox}
 
   @subagent_tool_modules [
     Longpi.Agent.Tools.WaitAgent,
@@ -77,9 +77,26 @@ defmodule Longpi.Agent.PromptAssembly do
 
     base
     |> maybe_append_tools(kind, Map.get(inputs, :tools, []))
+    |> append_skills(Skills.discover(inputs.ctx.cwd))
     |> append_role(inputs.agent_def)
     |> append_project_context(ProjectContext.load(inputs.ctx.cwd))
     |> Message.system()
+  end
+
+  # Agent Skills — a menu the model reads to know what's available; the full
+  # instructions live in each SKILL.md and are loaded on demand with the read
+  # tool (equivalent to pi's `/skill:name` expansion, without a new command).
+  defp append_skills(base, []), do: base
+
+  defp append_skills(base, skills) do
+    list =
+      Enum.map_join(skills, "\n", fn s ->
+        "- #{s.name}: #{s.description} (full instructions: #{s.path})"
+      end)
+
+    base <>
+      "\n\n## Available skills\n\nWhen a task matches a skill below, read its file " <>
+      "for the full instructions and follow them:\n\n" <> list
   end
 
   # Repo/directory instruction files (AGENTS.md / CLAUDE.md), pi's project_context.

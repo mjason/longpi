@@ -83,6 +83,13 @@ export default function (longpi) {
 }
 ```
 
+`longpi.on(event, handler)` observes agent activity (fire-and-forget; handlers
+can be async). Available events:
+
+- `turn_start` / `turn_end` — a turn began / finished (`turn_end` payload has `reason`).
+- `tool_call` — a tool is being run: `{ id, name, args }`.
+- `tool_result` — a tool finished: `{ id, name, content, error }`.
+
 See `examples/web-search.js` for the canonical API-with-secret pattern.
 
 ## Checklist for a good extension

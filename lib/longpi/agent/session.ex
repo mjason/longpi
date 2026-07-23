@@ -288,6 +288,24 @@ defmodule Longpi.Agent.Session do
   defp fire_ext_event(%{ext_host: host}, event, payload),
     do: Longpi.Extensions.Host.fire_event(host, event, payload)
 
+  # Let extensions observe tool activity (`longpi.on("tool_call"|"tool_result")`).
+  # Fired after the fact — off the tool-execution hot path, fire-and-forget —
+  # so an extension can log/telemeter without gating the turn. (Modify/block
+  # hooks would need synchronous interception; deliberately not offered here.)
+  defp fire_tool_hook(state, {:tool_call, call}),
+    do: fire_ext_event(state, "tool_call", %{id: call.id, name: call.name, args: call.args})
+
+  defp fire_tool_hook(state, {:tool_result, %{call: call, content: content, error?: error?}}),
+    do:
+      fire_ext_event(state, "tool_result", %{
+        id: call.id,
+        name: call.name,
+        content: content,
+        error: error?
+      })
+
+  defp fire_tool_hook(_state, _event), do: :ok
+
   defp load_conversation(nil), do: {nil, []}
 
   defp load_conversation(conversation_id) do
@@ -637,6 +655,7 @@ defmodule Longpi.Agent.Session do
   end
 
   def handle_info({:turn_event, event}, state) do
+    fire_tool_hook(state, event)
     state = notify(state, event)
 
     case event do
