@@ -198,7 +198,15 @@ defmodule Longpi.Agent.LLM.ReqLLMClient do
   defp to_req_llm_message(%{role: :assistant, content: content}), do: Context.assistant(safe(content))
 
   defp to_req_llm_message(%{role: :tool} = message) do
-    Context.tool_result(message.tool_call_id, message.name, safe(message.content))
+    # A tool that returned a UI tree stores the tree (the client renders it);
+    # the model gets a flattened, readable text version instead of the vdom dump.
+    content =
+      case Longpi.Agent.ExtensionUI.model_text(message.content) do
+        {:ok, text} -> text
+        :passthrough -> safe(message.content)
+      end
+
+    Context.tool_result(message.tool_call_id, message.name, content)
   end
 
   # Never let non-UTF-8 bytes reach the provider request builder — a JSON encode

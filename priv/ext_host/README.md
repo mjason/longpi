@@ -128,6 +128,10 @@ degrade to their inner text):
 - `Card` (props: `title`)
 - `Table` (props: `columns: string[]`, `rows: string[][]`)
 
+Returning a UI does not hide the data from the model: it automatically receives
+a plain-text version of the tree (a table becomes text rows), so it can still
+reason over the result. The rich UI is just for the user.
+
 ## Checklist for a good extension
 
 1. One file, default-exported factory, tools registered with clear
