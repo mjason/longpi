@@ -14,15 +14,17 @@ Discovered per session, project-local winning over global on name conflicts
 - **Project:** `<cwd>/.longpi/extensions/` — extensions for one workspace.
 - **Global:** `~/.longpi/extensions/` — shared across every conversation.
 
-One level deep in an `extensions/` dir: a `*.js` / `*.mjs` file, or a
-subdirectory with an `index.js`. Newly written or edited files are picked up
-automatically — the system handles reloading for you.
+One level deep in an `extensions/` dir: a `*.ts` / `*.js` / `*.mjs` file, or a
+subdirectory with an `index.ts` / `index.js`. TypeScript is preferred (types are
+stripped automatically); plain JavaScript works too. Newly written or edited
+files are picked up automatically — the system handles reloading for you.
 
 ## The runtime (read this before writing code)
 
-Each conversation gets an embedded **QuickJS** engine. Write modern JavaScript
-or TypeScript (ES2020+: modules, async/await, optional chaining, classes).
-TypeScript type annotations are stripped automatically before the code runs.
+Each conversation gets an embedded **QuickJS** engine. Write modern TypeScript
+(ES2020+: modules, async/await, optional chaining, classes) — type annotations
+are stripped automatically before the code runs, so author in `.ts` for the
+type hints. Plain JavaScript works too.
 
 Available globals and host capabilities:
 
@@ -52,8 +54,8 @@ is the escape hatch when JavaScript and the globals above are not enough.
 An extension is a module with a **default-exported factory** that receives the
 `longpi` API and registers capabilities:
 
-```js
-export default function (longpi) {
+```ts
+export default function (longpi: any) {
   longpi.registerTool({
     name: "my_tool",                 // snake_case, unique
     description: "What the model reads to decide when to use this.",
@@ -62,7 +64,7 @@ export default function (longpi) {
       properties: { text: { type: "string", description: "Input text." } },
       required: ["text"],
     },
-    async execute(args, ctx) {        // ctx.cwd = the conversation's workspace
+    async execute(args: { text: string }, ctx: { cwd: string }) {  // ctx.cwd = the workspace
       const res = await fetch("https://api.example.com", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -90,7 +92,7 @@ can be async). Available events:
 - `tool_call` — a tool is being run: `{ id, name, args }`.
 - `tool_result` — a tool finished: `{ id, name, content, error }`.
 
-See `examples/web-search.js` for the canonical API-with-secret pattern.
+See `examples/web-search.ts` for the canonical API-with-secret pattern.
 
 ## Checklist for a good extension
 
