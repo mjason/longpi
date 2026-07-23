@@ -116,6 +116,36 @@ defmodule Longpi.Agent.TurnTest do
     assert result_text =~ "secret-payload"
   end
 
+  test "a tool result with invalid UTF-8 is scrubbed (would otherwise crash JSON)", %{
+    config: config
+  } do
+    bad = "<html>" <> <<0xE5, 0xE5>> <> "上海"
+    refute String.valid?(bad)
+
+    spec = %Longpi.Agent.ToolSpec{
+      name: "grab",
+      description: "fetches bytes",
+      schema: %{"type" => "object"},
+      run: fn _args, _ctx -> {:ok, bad} end,
+      source: :extension
+    }
+
+    config = %{config | toolbox: Toolbox.with_extensions(Toolbox.new(), [spec])}
+    call = %{id: "tc_b", name: "grab", args: %{}}
+
+    LLMMock
+    |> expect(:stream, fn _, _, _, _, _ -> {:ok, %{text: "", tool_calls: [call]}} end)
+    |> expect(:stream, fn _, messages, _, _, _ ->
+      tool = List.last(messages)
+      assert String.valid?(tool.content)
+      {:ok, %{text: "ok", tool_calls: []}}
+    end)
+
+    assert {:ok, _} = Turn.run(config, [Message.user("grab it")])
+    assert_received {:ev, {:tool_result, %{content: result}}}
+    assert String.valid?(result)
+  end
+
   test "unknown tool becomes an error result and the loop continues", %{config: config} do
     call = %{id: "tc_x", name: "teleport", args: %{}}
 

@@ -191,10 +191,10 @@ defmodule LongpiWeb.ConversationChannel do
     do: {"tool_call", %{id: call.id, name: call.name, args: call.args}}
 
   defp serialize_event({:tool_result, %{call: call, content: content, error?: error?}}),
-    do: {"tool_result", %{id: call.id, name: call.name, content: content, error: error?}}
+    do: {"tool_result", %{id: call.id, name: call.name, content: safe_text(content), error: error?}}
 
   defp serialize_event({:tool_output, %{id: id, chunk: chunk}}),
-    do: {"tool_output", %{id: id, chunk: chunk}}
+    do: {"tool_output", %{id: id, chunk: safe_text(chunk)}}
 
   defp serialize_event({:approval_request, call}),
     do: {"approval_request", %{id: call.id, name: call.name, args: call.args}}
@@ -265,7 +265,10 @@ defmodule LongpiWeb.ConversationChannel do
   defp serialize_message(message) do
     %{
       role: message.role,
-      content: message[:content] || "",
+      # Scrub invalid UTF-8: a tool result persisted before it was sanitized
+      # (e.g. raw GBK/binary output) would otherwise crash JSON encoding of this
+      # push and brick the conversation on every join.
+      content: safe_text(message[:content] || ""),
       attachments: message[:attachments] || [],
       tool_calls: message[:tool_calls] || [],
       tool_call_id: message[:tool_call_id],
@@ -273,6 +276,9 @@ defmodule LongpiWeb.ConversationChannel do
       error: message[:error?] || false
     }
   end
+
+  defp safe_text(text) when is_binary(text), do: String.replace_invalid(text)
+  defp safe_text(text), do: text
 
   # Keep only well-formed attachments, capped, with just the fields we use — the
   # payload is untrusted browser input that gets persisted and sent to the model.

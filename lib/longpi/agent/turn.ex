@@ -70,14 +70,23 @@ defmodule Longpi.Agent.Turn do
     sink.({:tool_call, call})
 
     # Per-call progress channel: tools (e.g. bash) stream output live to the UI.
+    # Scrub each chunk: a command like `curl` on a GBK/binary page yields bytes
+    # that aren't valid UTF-8, which would crash JSON serialization downstream.
     ctx =
-      Map.put(ctx, :progress, fn chunk -> sink.({:tool_output, %{id: call.id, chunk: chunk}}) end)
+      Map.put(ctx, :progress, fn chunk ->
+        sink.({:tool_output, %{id: call.id, chunk: String.replace_invalid(chunk)}})
+      end)
 
     {content, error?} =
       case authorize(config, call) do
         :allow -> invoke(toolbox, call, ctx)
         :deny -> {"Permission denied: the user did not approve running #{call.name}.", true}
       end
+
+    # Tool output can contain non-UTF-8 bytes (binary files, GBK/Latin-1 web
+    # pages, raw curl output). Keep only valid UTF-8 so the result is safe to
+    # persist, broadcast, and send to the model.
+    content = String.replace_invalid(content)
 
     sink.({:tool_result, %{call: call, content: content, error?: error?}})
 
