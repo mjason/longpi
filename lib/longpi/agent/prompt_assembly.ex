@@ -21,7 +21,7 @@ defmodule Longpi.Agent.PromptAssembly do
   scan), which is what makes the behaviour straightforward to test.
   """
 
-  alias Longpi.Agent.{Message, Subagents, SystemPrompt, ToolSpec, Toolbox}
+  alias Longpi.Agent.{Message, ProjectContext, Subagents, SystemPrompt, ToolSpec, Toolbox}
 
   @subagent_tool_modules [
     Longpi.Agent.Tools.WaitAgent,
@@ -40,11 +40,18 @@ defmodule Longpi.Agent.PromptAssembly do
           required(:ctx) => map(),
           # A subagent role whose instructions append to the resolved base.
           required(:agent_def) => Subagents.Def.t() | nil,
-          # Currently-loaded extension tools, so the model can answer "what
-          # extensions do I have?" authoritatively instead of guessing at the
-          # filesystem. Optional; defaults to none.
-          optional(:extension_tools) => [%{name: String.t(), description: String.t()}]
+          # The full tool inventory for this turn (built-ins + subagent family +
+          # extensions), as `%{name, description, source}`. Rendered as an
+          # itemized "Available tools" list so the model has a clear, current
+          # inventory — and answers "what extensions do I have?" from fact
+          # rather than scanning the filesystem. Optional; defaults to none.
+          optional(:tools) => [%{name: String.t(), description: String.t(), source: atom()}]
         }
+
+  # Preferred ordering for the itemized tool list: exploration, then mutation,
+  # then bash, then the subagent family. Anything else (extensions) comes after,
+  # alphabetically.
+  @tool_order ~w(read grep find ls edit write bash spawn_agent wait_agent list_agents send_agent close_agent)
 
   @typedoc "Inputs for `toolbox/1`."
   @type toolbox_inputs :: %{
@@ -60,30 +67,92 @@ defmodule Longpi.Agent.PromptAssembly do
   @doc "The system `Message`, re-resolved from the current template/settings."
   @spec system_message(system_inputs()) :: Message.t()
   def system_message(inputs) do
-    base = inputs.system_prompt_override || SystemPrompt.resolve(inputs.ctx, inputs.conversation_override)
+    # A hard override (tests) or a user's custom prompt (conversation/global) is
+    # used verbatim; only the built-in default is augmented with the tool list.
+    {kind, base} =
+      case inputs.system_prompt_override do
+        override when is_binary(override) and override != "" -> {:custom, override}
+        _ -> SystemPrompt.resolve_tagged(inputs.ctx, inputs.conversation_override)
+      end
 
     base
-    |> append_extensions(Map.get(inputs, :extension_tools, []))
+    |> maybe_append_tools(kind, Map.get(inputs, :tools, []))
     |> append_role(inputs.agent_def)
+    |> append_project_context(ProjectContext.load(inputs.ctx.cwd))
     |> Message.system()
   end
 
-  # Tell the model exactly which extension tools are loaded right now, so a
-  # question like "what extensions do I have?" is answered from fact rather
-  # than a fragile filesystem scan (which the model was getting wrong — it
-  # globbed `*.js` and missed `.ts` extensions). Nothing is appended when no
-  # extensions are loaded.
-  defp append_extensions(base, tools) when is_list(tools) and tools != [] do
-    list = Enum.map_join(tools, "\n", &"- #{&1.name}: #{&1.description}")
+  # Repo/directory instruction files (AGENTS.md / CLAUDE.md), pi's project_context.
+  # Applied to custom prompts too — the user's prompt and the project's rules are
+  # separate concerns.
+  defp append_project_context(base, []), do: base
+
+  defp append_project_context(base, files) do
+    blocks =
+      Enum.map_join(files, "\n\n", fn f ->
+        "<project_instructions path=\"#{f.path}\">\n#{f.content}\n</project_instructions>"
+      end)
 
     base <>
-      "\n\n# Loaded extensions\n\n" <>
-      "You currently have these extension tools available (already loaded — call " <>
-      "them directly). When asked what extensions or custom tools you have, answer " <>
-      "from this list; do not go looking through the filesystem:\n\n" <> list
+      "\n\n<project_context>\n\nProject-specific instructions and guidelines " <>
+      "(follow these for work in this workspace):\n\n" <> blocks <> "\n\n</project_context>"
   end
 
-  defp append_extensions(base, _tools), do: base
+  defp maybe_append_tools(base, :default, tools), do: append_tools(base, tools)
+  defp maybe_append_tools(base, :custom, _tools), do: base
+
+  @doc """
+  Ordered `%{name, description, source}` summaries for a toolbox — the input to
+  the itemized "Available tools" list in the system message.
+  """
+  @spec tool_summaries(Toolbox.t()) :: [%{name: String.t(), description: String.t(), source: atom()}]
+  def tool_summaries(toolbox) do
+    toolbox
+    |> Toolbox.specs()
+    |> Enum.map(&%{name: &1.name, description: &1.description, source: &1.source})
+    |> Enum.sort_by(&tool_rank/1)
+  end
+
+  defp tool_rank(%{name: name}) do
+    case Enum.find_index(@tool_order, &(&1 == name)) do
+      nil -> {1, name}
+      idx -> {0, idx}
+    end
+  end
+
+  # An itemized inventory of every tool available this turn — pi's model: the
+  # model reads a clear list of what it has (name + one-line snippet), so it
+  # reaches for the right tool instead of a shell utility that may be absent.
+  # The list is re-derived each turn, so extensions that load/unload stay
+  # current, and "what extensions do I have?" is answered from fact.
+  defp append_tools(base, tools) when is_list(tools) and tools != [] do
+    list = Enum.map_join(tools, "\n", &"- #{&1.name}: #{snippet(&1.description)}")
+    base <> "\n\n## Available tools\n\nCall these directly by name:\n\n" <> list <> ext_note(tools)
+  end
+
+  defp append_tools(base, _tools), do: base
+
+  defp ext_note(tools) do
+    if Enum.any?(tools, &(Map.get(&1, :source) == :extension)) do
+      "\n\nSome of the tools above come from extensions. When asked what " <>
+        "extensions or custom tools you have, answer from this list rather than " <>
+        "scanning the filesystem."
+    else
+      ""
+    end
+  end
+
+  # A concise one-liner for the list — the first sentence of the tool's full
+  # description (the full text still rides in the API tool schema).
+  defp snippet(description) do
+    description
+    |> to_string()
+    |> String.replace(~r/\s+/, " ")
+    |> String.split(~r/(?<=[.。])\s+/, parts: 2)
+    |> List.first()
+    |> to_string()
+    |> String.trim()
+  end
 
   # A subagent role extends (not replaces) the base prompt — pi's
   # --append-system-prompt model.

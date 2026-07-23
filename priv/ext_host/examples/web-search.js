@@ -6,9 +6,8 @@
 // Secrets (stored in the app db and injected into the host on every call — no
 // shell `export` needed).
 //
-// Extensions run in an embedded QuickJS host: plain modern
-// JavaScript, no Node/npm APIs. `fetch`, `process.env`, and `longpi.run` are
-// provided by the host.
+// Extensions run in an embedded QuickJS host: modern JavaScript with `fetch`,
+// `process.env`, and `longpi.run` provided by the host.
 //
 // This is the canonical pattern for an extension that calls an external API
 // with a secret key: read the key from `process.env`, fail clearly when it is

@@ -33,4 +33,14 @@ defmodule Longpi.Agent.Tools.LsTest do
     assert {:error, message} = Ls.run(%{path: "file.txt"}, ctx)
     assert message =~ "not a directory" or message =~ "file.txt"
   end
+
+  test "caps entries at the limit with a truncation note", %{tmp_dir: dir, ctx: ctx} do
+    sub = Path.join(dir, "many")
+    File.mkdir_p!(sub)
+    for i <- 1..25, do: File.write!(Path.join(sub, "f#{i}.txt"), "x")
+
+    assert {:ok, out} = Ls.run(%{path: "many", limit: 10}, ctx)
+    assert length(String.split(out, "\n")) == 11
+    assert out =~ "showing 10 of 25 entries"
+  end
 end

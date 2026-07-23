@@ -12,7 +12,9 @@ defmodule Longpi.Agent.Tools.Bash do
   @behaviour Longpi.Agent.Tool
 
   @default_timeout_ms 120_000
-  @max_timeout_ms 600_000
+  # 30 min ceiling — long enough for real builds/installs/test suites (the old
+  # 10 min cap killed legitimate long jobs).
+  @max_timeout_ms 1_800_000
 
   @impl true
   def name, do: "bash"
@@ -30,13 +32,21 @@ defmodule Longpi.Agent.Tools.Bash do
       command: [type: :string, required: true, doc: "The command to execute"],
       timeout_ms: [
         type: :pos_integer,
-        doc: "Kill the command after this many milliseconds (default 120000, max 600000)"
+        doc: "Kill the command after this many milliseconds (default 120000, max 1800000)"
       ]
     ]
   end
 
   @impl true
   def run(args, ctx) do
+    if not File.dir?(ctx.cwd) do
+      {:error, "working directory does not exist: #{ctx.cwd}"}
+    else
+      run_command(args, ctx)
+    end
+  end
+
+  defp run_command(args, ctx) do
     ref = make_ref()
 
     opts = [

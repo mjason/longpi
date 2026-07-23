@@ -8,14 +8,20 @@ defmodule Longpi.Agent.Tools.Ls do
   @impl true
   def name, do: "ls"
 
+  @default_limit 500
+
   @impl true
   def description do
-    "List the entries of a directory. Directories are shown with a trailing slash."
+    "List the entries of a directory. Directories are shown with a trailing " <>
+      "slash. Returns at most 500 entries unless limit is set."
   end
 
   @impl true
   def parameter_schema do
-    [path: [type: :string, doc: "Directory to list (default: cwd)"]]
+    [
+      path: [type: :string, doc: "Directory to list (default: cwd)"],
+      limit: [type: :pos_integer, doc: "Maximum entries to return (default 500)"]
+    ]
   end
 
   @impl true
@@ -30,19 +36,32 @@ defmodule Longpi.Agent.Tools.Ls do
         {:error, "not a directory: #{display(args)}"}
 
       true ->
-        {:ok, list(path)}
+        {:ok, list(path, Map.get(args, :limit, @default_limit))}
     end
   end
 
-  defp list(path) do
-    case path |> File.ls!() |> Enum.sort() do
+  defp list(path, limit) do
+    # Case-insensitive sort reads more naturally than raw codepoint order.
+    names = path |> File.ls!() |> Enum.sort_by(&String.downcase/1)
+
+    case names do
       [] ->
         "(empty directory)"
 
       names ->
-        Enum.map_join(names, "\n", fn name ->
-          if File.dir?(Path.join(path, name)), do: name <> "/", else: name
-        end)
+        shown = Enum.take(names, limit)
+
+        body =
+          Enum.map_join(shown, "\n", fn name ->
+            if File.dir?(Path.join(path, name)), do: name <> "/", else: name
+          end)
+
+        if length(names) > limit do
+          body <>
+            "\n[truncated: showing #{limit} of #{length(names)} entries; raise limit or narrow the path]"
+        else
+          body
+        end
     end
   end
 

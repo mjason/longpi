@@ -54,6 +54,8 @@ defmodule Longpi.Agent.Tools.Grep do
 
   defp put_path(payload, _args, _ctx), do: payload
 
+  @max_bytes 50_000
+
   defp format(%{"matches" => []}), do: "No matches found."
 
   defp format(%{"matches" => matches} = result) do
@@ -64,10 +66,24 @@ defmodule Longpi.Agent.Tools.Grep do
         %{"path" => p, "line" => l, "text" => t} -> "#{p}-#{l}- #{t}"
       end)
 
-    if result["limit_reached"] do
-      body <> "\n[truncated at #{result["count"]} match limit; narrow the pattern or path]"
-    else
-      body
-    end
+    body =
+      if result["limit_reached"] do
+        body <> "\n[truncated at #{result["count"]} match limit; narrow the pattern or path]"
+      else
+        body
+      end
+
+    cap_bytes(body)
+  end
+
+  defp cap_bytes(text) when byte_size(text) <= @max_bytes, do: text
+
+  defp cap_bytes(text) do
+    <<head::binary-size(@max_bytes), _::binary>> = text
+    trim_to_valid(head) <> "\n[truncated: output exceeded #{@max_bytes} bytes; narrow the pattern or path]"
+  end
+
+  defp trim_to_valid(bin) do
+    if String.valid?(bin), do: bin, else: trim_to_valid(binary_part(bin, 0, byte_size(bin) - 1))
   end
 end

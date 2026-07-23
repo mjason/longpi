@@ -112,7 +112,7 @@ defmodule Longpi.Agent.SessionPromptRefreshTest do
       :sys.replace_state(session, fn state -> %{state | extension_specs: [spec]} end)
 
       {system, tools} = run_turn(session, "现在有什么扩展呢")
-      assert system =~ "# Loaded extensions"
+      assert system =~ "## Available tools"
       assert system =~ "web_search: Search the web with Tavily."
       assert "web_search" in tools
     end

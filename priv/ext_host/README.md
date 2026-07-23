@@ -20,29 +20,32 @@ automatically — the system handles reloading for you.
 
 ## The runtime (read this before writing code)
 
-Extensions run in **QuickJS**, not Node or a browser. Write modern JavaScript
-or TypeScript (ES2020+ syntax: modules, async/await, optional chaining are all
-fine). TypeScript type annotations are stripped automatically before the code
-runs — types are erased, never checked. What you have:
+Each conversation gets an embedded **QuickJS** engine. Write modern JavaScript
+or TypeScript (ES2020+: modules, async/await, optional chaining, classes).
+TypeScript type annotations are stripped automatically before the code runs.
+
+Available globals and host capabilities:
 
 - `fetch(url, options)` — HTTP(S), brokered by the app (timeouts and size
-  limits enforced outside the sandbox). `options`: `method`, `headers`,
-  `body`. The response has `ok`, `status`, `headers.get(name)`,
-  `await res.text()`, `await res.json()`.
-- `process.env.<NAME>` — secrets stored under Settings → Extensions →
-  Secrets, injected fresh on every call; keys belong there, code reads them
-  from the environment.
+  limits enforced outside the sandbox). `options`: `method`, `headers`, `body`
+  (a string). The response has `ok`, `status`, `statusText`,
+  `headers.get(name)`, `await res.text()`, `await res.json()`, and for binary
+  payloads `await res.arrayBuffer()` / `await res.bytes()`.
+- `process.env.<NAME>` — secrets stored under Settings → Extensions → Secrets,
+  injected fresh on every call; keys belong there, code reads them from the
+  environment.
 - `await longpi.run(cmd, args, opts)` — run a program installed on the machine
   (python3, a Go binary, git, …) and get `{ status, stdout, stderr }`. It's
-  async, so `await` it. This is the escape hatch when JS alone is not enough.
-- `console.log(...)` — goes to the server log (stderr), for debugging.
+  async, so `await` it.
+- `console.log(...)` / `console.error(...)` — go to the server log, for
+  debugging.
+- Standard globals are present: `crypto.randomUUID()`, `TextEncoder` /
+  `TextDecoder`, `structuredClone`, `atob` / `btoa`, `setTimeout` /
+  `setInterval` / `clearTimeout` / `queueMicrotask`.
 
-That list is the complete runtime: plain QuickJS plus those four host
-capabilities. Anything from the Node/npm world (`fs`, `Buffer`, `require`,
-package imports) and timers live outside the sandbox — when a task calls for
-them, delegate to a real program on the system with `longpi.run`. TypeScript
-is fine (annotations are stripped), but the *runtime* is still QuickJS: TS
-types buy you nothing at run time and Node/npm APIs remain unavailable.
+Reach for `longpi.run` whenever a task needs the filesystem, an external
+library, or a system tool: it delegates to a real program on the machine, which
+is the escape hatch when JavaScript and the globals above are not enough.
 
 ## Writing an extension
 

@@ -83,26 +83,37 @@ defmodule Longpi.Agent.PromptAssemblyTest do
       assert msg.content == "HARD"
     end
 
-    test "lists loaded extension tools so the model answers from fact", %{ctx: ctx} do
+    test "lists tools itemized, with the first sentence as the snippet", %{ctx: ctx} do
       tools = [
-        %{name: "web_search", description: "Search the web with Tavily."},
-        %{name: "jira", description: "Query Jira issues."}
+        %{name: "read", description: "Read a file. Supports ranges.", source: :builtin},
+        %{name: "web_search", description: "Search the web with Tavily.", source: :extension}
       ]
 
-      msg = PromptAssembly.system_message(system_inputs(ctx, %{extension_tools: tools}))
-      assert msg.content =~ "# Loaded extensions"
+      msg = PromptAssembly.system_message(system_inputs(ctx, %{tools: tools}))
+      assert msg.content =~ "## Available tools"
+      # First sentence only becomes the snippet.
+      assert msg.content =~ "read: Read a file."
+      refute msg.content =~ "Supports ranges"
       assert msg.content =~ "web_search: Search the web with Tavily."
-      assert msg.content =~ "jira: Query Jira issues."
-      assert msg.content =~ "do not go looking through the filesystem"
     end
 
-    test "no extensions section when none are loaded", %{ctx: ctx} do
-      msg = PromptAssembly.system_message(system_inputs(ctx, %{extension_tools: []}))
-      refute msg.content =~ "Loaded extensions"
+    test "adds the extension note only when an extension tool is present", %{ctx: ctx} do
+      with_ext = [%{name: "jira", description: "Query Jira.", source: :extension}]
+      builtin_only = [%{name: "read", description: "Read a file.", source: :builtin}]
 
-      # Also absent when the key is omitted entirely.
+      assert PromptAssembly.system_message(system_inputs(ctx, %{tools: with_ext})).content =~
+               "answer from this list"
+
+      refute PromptAssembly.system_message(system_inputs(ctx, %{tools: builtin_only})).content =~
+               "answer from this list"
+    end
+
+    test "no tools section when the list is empty or omitted", %{ctx: ctx} do
+      msg = PromptAssembly.system_message(system_inputs(ctx, %{tools: []}))
+      refute msg.content =~ "## Available tools"
+
       msg2 = PromptAssembly.system_message(system_inputs(ctx))
-      refute msg2.content =~ "Loaded extensions"
+      refute msg2.content =~ "## Available tools"
     end
 
     test "a subagent role appends its instructions to the resolved base", %{ctx: ctx} do

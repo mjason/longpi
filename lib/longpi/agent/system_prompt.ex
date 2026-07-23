@@ -11,11 +11,20 @@ defmodule Longpi.Agent.SystemPrompt do
   alias Longpi.Agent.Settings
 
   @doc "Resolves the prompt for `ctx`, honoring an optional conversation override."
-  def resolve(ctx, conversation_override \\ nil) do
+  def resolve(ctx, conversation_override \\ nil), do: elem(resolve_tagged(ctx, conversation_override), 1)
+
+  @doc """
+  Like `resolve/2`, but tags the source: `{:default, text}` when the built-in
+  template is used, `{:custom, text}` when a conversation or global override
+  wins. The caller uses this to decide whether to augment the prompt (e.g. the
+  itemized tool list is added only to the default — a custom prompt is the
+  user's own and is used verbatim).
+  """
+  def resolve_tagged(ctx, conversation_override \\ nil) do
     cond do
-      present?(conversation_override) -> interpolate(conversation_override, ctx)
-      present?(Settings.get("system_prompt")) -> interpolate(Settings.get("system_prompt"), ctx)
-      true -> default(ctx)
+      present?(conversation_override) -> {:custom, interpolate(conversation_override, ctx)}
+      present?(Settings.get("system_prompt")) -> {:custom, interpolate(Settings.get("system_prompt"), ctx)}
+      true -> {:default, default(ctx)}
     end
   end
 
@@ -29,15 +38,13 @@ defmodule Longpi.Agent.SystemPrompt do
 
     Working directory: {{cwd}}
 
-    You have tools to read files, search file contents (grep) and file names
-    (find), write and edit files, and run shell commands (bash). Search with the
-    grep and find tools — they use a fast, .gitignore-aware engine and return
-    clean results. Use bash for building, running tests, git, and executing
-    programs. Additional custom tools may be available from the project's
-    extensions. Prefer inspecting the workspace over guessing. Make the smallest
-    change that accomplishes the task, then verify it (run tests or the relevant
-    command) before declaring success. Report failures honestly, including the
-    actual output.
+    Your available tools are listed below. Search file contents with the grep
+    tool and file names with the find tool; read files with the read tool;
+    create and modify files with the write and edit tools; use bash for
+    building, running tests, git, and executing programs. Prefer inspecting the
+    workspace over guessing. Make the smallest change that accomplishes the
+    task, then verify it (run tests or the relevant command) before declaring
+    success. Report failures honestly, including the actual output.
 
     ## Extending yourself (self-evolution)
 

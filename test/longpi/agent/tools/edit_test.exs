@@ -47,7 +47,7 @@ defmodule Longpi.Agent.Tools.EditTest do
     args = %{path: path, old_string: "def beta", new_string: "def beta"}
 
     assert {:error, message} = Edit.run(args, ctx)
-    assert message =~ "different"
+    assert message =~ "identical"
   end
 
   test "errors on missing file", %{ctx: ctx} do
@@ -55,5 +55,39 @@ defmodule Longpi.Agent.Tools.EditTest do
 
     assert {:error, message} = Edit.run(args, ctx)
     assert message =~ "ghost.ex"
+  end
+
+  # ── Layered matching ──
+
+  test "matches across CRLF line endings when old_string is LF-only", %{ctx: ctx, tmp_dir: dir} do
+    path = Path.join(dir, "crlf.txt")
+    File.write!(path, "alpha\r\nbeta\r\ngamma\r\n")
+
+    args = %{path: path, old_string: "alpha\nbeta", new_string: "ALPHA\nBETA"}
+    assert {:ok, msg} = Edit.run(args, ctx)
+    assert msg =~ "CRLF"
+    # The file keeps CRLF endings.
+    assert File.read!(path) == "ALPHA\r\nBETA\r\ngamma\r\n"
+  end
+
+  test "tolerates trailing whitespace differences (fuzzy line match)", %{ctx: ctx, tmp_dir: dir} do
+    path = Path.join(dir, "ws.ex")
+    # File has trailing spaces the model won't reproduce.
+    File.write!(path, "def a do   \n  :ok  \nend\n")
+
+    args = %{path: path, old_string: "def a do\n  :ok\nend", new_string: "def a do\n  :yes\nend"}
+    assert {:ok, msg} = Edit.run(args, ctx)
+    assert msg =~ "normalization"
+    assert File.read!(path) =~ ":yes"
+  end
+
+  test "reports a no-op edit rather than silently writing", %{ctx: ctx, tmp_dir: dir} do
+    path = Path.join(dir, "noop.ex")
+    File.write!(path, "foo\n")
+    # old (trailing space) fuzzy-matches "foo", but the replacement equals what's
+    # already there, so the file wouldn't change.
+    args = %{path: path, old_string: "foo ", new_string: "foo"}
+    assert {:error, message} = Edit.run(args, ctx)
+    assert message =~ "unchanged"
   end
 end

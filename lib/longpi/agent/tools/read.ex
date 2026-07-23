@@ -6,6 +6,10 @@ defmodule Longpi.Agent.Tools.Read do
   alias Longpi.Agent.Tool
 
   @default_limit 2000
+  # Byte ceiling on returned content, independent of the line cap — a file with
+  # very long lines (minified JS, JSON, base64) is one "line" but can be
+  # megabytes, so the line cap alone won't protect the context window.
+  @max_bytes 50_000
 
   @impl true
   def name, do: "read"
@@ -38,8 +42,23 @@ defmodule Longpi.Agent.Tools.Read do
         {:error, "file not found: #{args.path}"}
 
       true ->
-        {:ok, window(File.read!(path), args[:offset], args[:limit])}
+        {:ok, path |> File.read!() |> window(args[:offset], args[:limit]) |> cap_bytes()}
     end
+  end
+
+  # Keep the returned text under the byte ceiling, cutting at a valid UTF-8
+  # boundary so the model never receives mojibake.
+  defp cap_bytes(text) when byte_size(text) <= @max_bytes, do: text
+
+  defp cap_bytes(text) do
+    <<head::binary-size(@max_bytes), _::binary>> = text
+
+    trim_to_valid(head) <>
+      "\n[truncated: output exceeded #{@max_bytes} bytes; use offset/limit to page, or grep to search]"
+  end
+
+  defp trim_to_valid(bin) do
+    if String.valid?(bin), do: bin, else: trim_to_valid(binary_part(bin, 0, byte_size(bin) - 1))
   end
 
   defp window(content, nil, nil) do

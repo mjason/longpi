@@ -55,4 +55,11 @@ defmodule Longpi.Agent.Tools.ReadTest do
     assert {:error, message} = Read.run(%{path: dir}, ctx)
     assert message =~ "directory"
   end
+
+  test "caps a huge single line by bytes (line cap alone wouldn't)", %{tmp_dir: dir, ctx: ctx} do
+    File.write!(Path.join(dir, "min.js"), String.duplicate("x", 200_000))
+    assert {:ok, content} = Read.run(%{path: "min.js"}, ctx)
+    assert byte_size(content) < 60_000
+    assert content =~ "exceeded 50000 bytes"
+  end
 end

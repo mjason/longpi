@@ -903,16 +903,12 @@ defmodule Longpi.Agent.Session do
   defp assemble_prompt(state) do
     [_stale_system | history] = state.messages
 
-    inputs =
-      Map.put(state.prompt_inputs, :extension_tools, extension_tool_summaries(state))
-
-    system = PromptAssembly.system_message(inputs)
+    # Assemble the toolbox first so the system message can list the full,
+    # current inventory (built-ins + subagent family + extensions).
     toolbox = assemble_toolbox(state)
+    inputs = Map.put(state.prompt_inputs, :tools, PromptAssembly.tool_summaries(toolbox))
+    system = PromptAssembly.system_message(inputs)
     %{state | messages: [system | history], toolbox: toolbox}
-  end
-
-  defp extension_tool_summaries(state) do
-    Enum.map(state.extension_specs, &%{name: &1.name, description: &1.description})
   end
 
   # Drop extension slash commands whose names collide with built-in commands —
