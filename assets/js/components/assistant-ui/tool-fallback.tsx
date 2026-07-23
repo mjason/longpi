@@ -26,7 +26,13 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ToolDiff, isDiffTool } from "@/components/assistant-ui/tool-diff";
 import { ExtensionUI, parseExtensionUI } from "@/agent/ExtensionUI";
-import { renderBuiltinResult } from "@/agent/BuiltinToolUI";
+import { hasBuiltinResult, renderBuiltinResult } from "@/agent/BuiltinToolUI";
+
+/** True when a tool's result renders as a custom UI (built-in or extension). */
+function hasCustomResultUI(toolName: string, result: unknown): boolean {
+  if (result === undefined) return false;
+  return hasBuiltinResult(toolName, result) || parseExtensionUI(result) != null;
+}
 
 const ANIMATION_DURATION = 200;
 
@@ -565,13 +571,23 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   // File-changing tools render their args as a diff, shown open by default so
   // the change is visible without a click.
   const showDiff = isDiffTool(toolName);
+  // A result with a custom UI (built-in bash/ls, or an extension's `view`) is
+  // worth seeing — expand it instead of hiding the UI behind a collapsed row.
+  const hasUI = hasCustomResultUI(toolName, result);
 
-  const [open, setOpen] = useState(isRequiresAction || showDiff);
+  const [open, setOpen] = useState(isRequiresAction || showDiff || hasUI);
   const [prevRequiresAction, setPrevRequiresAction] =
     useState(isRequiresAction);
   if (isRequiresAction !== prevRequiresAction) {
     setPrevRequiresAction(isRequiresAction);
     if (isRequiresAction) setOpen(true);
+  }
+  // The result arrives after the row first renders (tool was running), so open
+  // once when a UI appears; the user can still collapse it afterward.
+  const [prevHasUI, setPrevHasUI] = useState(hasUI);
+  if (hasUI !== prevHasUI) {
+    setPrevHasUI(hasUI);
+    if (hasUI) setOpen(true);
   }
 
   return (

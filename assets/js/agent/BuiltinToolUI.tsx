@@ -8,14 +8,19 @@ import { File, Folder } from "lucide-react";
 
 import { cn } from "../lib/utils";
 
+/** Whether a built-in tool has a custom result view (cheap, no element built). */
+export function hasBuiltinResult(toolName: string, result: unknown): boolean {
+  return typeof result === "string" && (toolName === "bash" || toolName === "ls");
+}
+
 /** A custom result view for a built-in tool, or null to use the default. */
 export function renderBuiltinResult(toolName: string, result: unknown): ReactNode | null {
-  if (typeof result !== "string") return null;
+  if (!hasBuiltinResult(toolName, result)) return null;
   switch (toolName) {
     case "bash":
-      return <BashResult text={result} />;
+      return <BashResult text={result as string} />;
     case "ls":
-      return <LsResult text={result} />;
+      return <LsResult text={result as string} />;
     default:
       return null;
   }
