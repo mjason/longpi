@@ -100,7 +100,7 @@ defmodule Longpi.Agent.Turn do
   defp extension_write?(%{name: name, args: args}, ctx) when name in ["write", "edit"] do
     path = Longpi.Agent.Tool.resolve_path(Map.get(args, "path", ""), ctx)
 
-    String.ends_with?(path, [".ts", ".js", ".mjs"]) and
+    String.ends_with?(path, [".tsx", ".ts", ".jsx", ".js", ".mjs"]) and
       (String.contains?(path, "/.longpi/extensions/") or
          String.starts_with?(path, Path.expand("~/.longpi/extensions")))
   end

@@ -58,6 +58,23 @@ defmodule Longpi.Agent.TurnTest do
     assert File.exists?(ext_path)
   end
 
+  test "writing a .tsx UI extension also signals :extensions_changed", %{config: config, dir: dir} do
+    ext_path = Path.join(dir, ".longpi/extensions/panel.tsx")
+
+    call = %{
+      id: "c1",
+      name: "write",
+      args: %{"path" => ext_path, "content" => "export default function(){}"}
+    }
+
+    LLMMock
+    |> expect(:stream, fn _, _, _, _, _ -> {:ok, %{text: "", tool_calls: [call]}} end)
+    |> expect(:stream, fn _, _, _, _, _ -> {:ok, %{text: "done", tool_calls: []}} end)
+
+    Turn.run(config, [Message.user("add a UI extension")])
+    assert_received {:ev, :extensions_changed}
+  end
+
   test "a non-extension write does not signal :extensions_changed", %{config: config, dir: dir} do
     call = %{id: "c1", name: "write", args: %{"path" => Path.join(dir, "notes.txt"), "content" => "hi"}}
 

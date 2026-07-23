@@ -27,8 +27,8 @@ defmodule Longpi.Extensions do
     Enum.any?(dirs, &dir_has_extension?/1)
   end
 
-  # Mirrors the harness's discovery: one level deep — *.ts/*.js/*.mjs files
-  # or subdir/index.ts|index.js.
+  # Mirrors the harness's discovery: one level deep — *.tsx/*.ts/*.jsx/*.js/*.mjs
+  # files or subdir/index.{tsx,ts,jsx,js}.
   defp dir_has_extension?(dir) do
     case File.ls(dir) do
       {:ok, entries} ->
@@ -36,10 +36,16 @@ defmodule Longpi.Extensions do
           path = Path.join(dir, entry)
 
           cond do
-            String.ends_with?(entry, [".ts", ".js", ".mjs"]) -> File.regular?(path)
-            File.dir?(path) -> File.regular?(Path.join(path, "index.ts")) or
-                                 File.regular?(Path.join(path, "index.js"))
-            true -> false
+            String.ends_with?(entry, [".tsx", ".ts", ".jsx", ".js", ".mjs"]) ->
+              File.regular?(path)
+
+            File.dir?(path) ->
+              Enum.any?(["index.tsx", "index.ts", "index.jsx", "index.js"], fn f ->
+                File.regular?(Path.join(path, f))
+              end)
+
+            true ->
+              false
           end
         end)
 
