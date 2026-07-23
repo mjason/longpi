@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useRef, useState } from "react";
+import { memo, useCallback, useLayoutEffect, useRef, useState } from "react";
 import {
   AlertCircleIcon,
   CheckIcon,
@@ -37,6 +37,45 @@ function hasCustomResultUI(toolName: string, result: unknown): boolean {
 const ANIMATION_DURATION = 200;
 
 const pressable = "active:scale-[0.98]";
+
+/** Height past which a raw args/result block collapses (px). */
+const COLLAPSE_PX = 256;
+
+/**
+ * Caps tall raw text (a long bash command, a big result dump) at a fixed height
+ * with a fade + "Show more" toggle, so it doesn't stretch the transcript. It
+ * measures the rendered height, so a single very-long wrapped line collapses too
+ * — line-counting would miss that. Short blocks render untouched.
+ */
+function CollapsibleBox({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+
+  useLayoutEffect(() => {
+    if (ref.current) setOverflowing(ref.current.scrollHeight > COLLAPSE_PX + 8);
+  });
+
+  return (
+    <div>
+      <div ref={ref} className={cn("relative", !expanded && overflowing && "max-h-64 overflow-hidden")}>
+        {children}
+        {overflowing && !expanded && (
+          <div className="from-background pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t to-transparent" />
+        )}
+      </div>
+      {overflowing && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="text-muted-foreground hover:text-foreground mt-1 rounded text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 export type ToolFallbackRootProps = Omit<
   React.ComponentProps<typeof Collapsible>,
@@ -254,9 +293,11 @@ function ToolFallbackArgs({
       className={cn("aui-tool-fallback-args", className)}
       {...props}
     >
-      <pre className="aui-tool-fallback-args-value bg-muted/50 text-foreground/90 rounded-md p-2.5 text-xs whitespace-pre-wrap">
-        {argsText}
-      </pre>
+      <CollapsibleBox>
+        <pre className="aui-tool-fallback-args-value bg-muted/50 text-foreground/90 rounded-md p-2.5 text-xs whitespace-pre-wrap">
+          {argsText}
+        </pre>
+      </CollapsibleBox>
     </div>
   );
 }
@@ -294,9 +335,11 @@ function ToolFallbackResult({
           <ExtensionUI node={uiNode} />
         </div>
       ) : (
-        <pre className="aui-tool-fallback-result-content bg-muted/50 text-foreground/90 mt-1 rounded-md p-2.5 text-xs whitespace-pre-wrap">
-          {typeof result === "string" ? result : JSON.stringify(result, null, 2)}
-        </pre>
+        <CollapsibleBox>
+          <pre className="aui-tool-fallback-result-content bg-muted/50 text-foreground/90 mt-1 rounded-md p-2.5 text-xs whitespace-pre-wrap">
+            {typeof result === "string" ? result : JSON.stringify(result, null, 2)}
+          </pre>
+        </CollapsibleBox>
       )}
     </div>
   );
