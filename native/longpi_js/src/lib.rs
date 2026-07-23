@@ -54,16 +54,17 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 // ── TypeScript stripping (oxc) ──────────────────────────────────────────
 
-fn strip_ts(source: &str) -> Result<String, String> {
+fn strip_ts(source: &str, jsx: bool) -> Result<String, String> {
     use oxc_allocator::Allocator;
     use oxc_codegen::Codegen;
     use oxc_parser::Parser;
     use oxc_semantic::SemanticBuilder;
     use oxc_span::SourceType;
-    use oxc_transformer::{TransformOptions, Transformer};
+    use oxc_transformer::{JsxRuntime, TransformOptions, Transformer};
 
     let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, source, SourceType::ts()).parse();
+    let source_type = if jsx { SourceType::tsx() } else { SourceType::ts() };
+    let parsed = Parser::new(&allocator, source, source_type).parse();
     if !parsed.errors.is_empty() {
         return Err(parsed
             .errors
@@ -74,8 +75,19 @@ fn strip_ts(source: &str) -> Result<String, String> {
     }
     let mut program = parsed.program;
     let scoping = SemanticBuilder::new().build(&program).semantic.into_scoping();
-    let path = std::path::Path::new("extension.ts");
-    let _ = Transformer::new(&allocator, path, &TransformOptions::default())
+
+    // Extension UI is authored in TSX; compile JSX to classic `h(...)` calls
+    // (the sandbox's hyperscript that builds a serializable UI tree). `.ts`
+    // stays a plain type-strip.
+    let mut options = TransformOptions::default();
+    if jsx {
+        options.jsx.runtime = JsxRuntime::Classic;
+        options.jsx.pragma = Some("h".to_string());
+        options.jsx.pragma_frag = Some("Fragment".to_string());
+    }
+
+    let path = std::path::Path::new(if jsx { "extension.tsx" } else { "extension.ts" });
+    let _ = Transformer::new(&allocator, path, &options)
         .build_with_scoping(scoping, &mut program);
     Ok(Codegen::new().build(&program).code)
 }
@@ -282,7 +294,7 @@ fn stop(instance: ResourceArc<Instance>) -> rustler::Atom {
 
 #[rustler::nif(schedule = "DirtyCpu")]
 fn strip_ts_nif(source: String) -> Result<String, String> {
-    strip_ts(&source)
+    strip_ts(&source, false)
 }
 
 /// Decode raw file bytes to UTF-8: pass through when already valid UTF-8, else
@@ -513,6 +525,22 @@ globalThis.structuredClone = globalThis.structuredClone ||
   ((v) => v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
 
 globalThis.queueMicrotask = globalThis.queueMicrotask || ((fn) => Promise.resolve().then(fn));
+
+// Extension UI: authored in TSX, compiled to classic-JSX `h(...)` calls (oxc).
+// `h` builds a plain, serializable tree that the client renders with a fixed
+// whitelist of our components — no code runs in the browser. Component names
+// are string constants so `<Table .../>` compiles to `h(Table, …)` = a "Table"
+// node; return the tree from a tool to render it instead of raw JSON.
+globalThis.Fragment = "Fragment";
+globalThis.h = (type, props, ...children) => ({
+  __longpi_ui__: true,
+  type: String(type),
+  props: props || {},
+  children: children.flat(Infinity).filter((c) => c != null && c !== false && c !== true),
+});
+["Stack", "Row", "Text", "Heading", "Badge", "Stat", "Card", "Code", "Table"].forEach((name) => {
+  globalThis[name] = name;
+});
 
 // setTimeout/setInterval are built on the async __sleep primitive. Callbacks
 // fire while the runtime is driven (during a tool/command/event invocation);
@@ -759,7 +787,8 @@ async fn load_extensions(
 
     let mut errors = Vec::new();
     for (i, (name, source)) in extensions.into_iter().enumerate() {
-        let js = match strip_ts(&source) {
+        let jsx = name.ends_with(".tsx") || name.ends_with(".jsx");
+        let js = match strip_ts(&source, jsx) {
             Ok(js) => js,
             Err(_) => source, // let QuickJS surface the real syntax error
         };

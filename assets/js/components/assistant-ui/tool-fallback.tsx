@@ -25,6 +25,8 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ToolDiff, isDiffTool } from "@/components/assistant-ui/tool-diff";
+import { ExtensionUI, parseExtensionUI } from "@/agent/ExtensionUI";
+import { renderBuiltinResult } from "@/agent/BuiltinToolUI";
 
 const ANIMATION_DURATION = 200;
 
@@ -147,6 +149,8 @@ function ToolFallbackTrigger({
       data-slot="tool-fallback-trigger"
       className={cn(
         "aui-tool-fallback-trigger group/trigger text-muted-foreground hover:text-foreground flex w-fit origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] active:scale-[0.98]",
+        // Soft, keyboard-only focus ring (no hard blue box on click).
+        "rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/35",
         className,
       )}
       {...props}
@@ -253,12 +257,20 @@ function ToolFallbackArgs({
 
 function ToolFallbackResult({
   result,
+  toolName,
   className,
   ...props
 }: React.ComponentProps<"div"> & {
   result?: unknown;
+  toolName?: string;
 }) {
   if (result === undefined) return null;
+
+  // Custom result views, in order: a hand-written UI for a built-in tool
+  // (bash/ls), then an extension-supplied UI tree (TSX → sandbox `h()` → JSON),
+  // else the raw text/JSON.
+  const builtin = toolName ? renderBuiltinResult(toolName, result) : null;
+  const uiNode = builtin ? null : parseExtensionUI(result);
 
   return (
     <div
@@ -269,9 +281,17 @@ function ToolFallbackResult({
       <p className="aui-tool-fallback-result-header text-muted-foreground text-xs font-medium">
         Result:
       </p>
-      <pre className="aui-tool-fallback-result-content bg-muted/50 text-foreground/90 mt-1 rounded-md p-2.5 text-xs whitespace-pre-wrap">
-        {typeof result === "string" ? result : JSON.stringify(result, null, 2)}
-      </pre>
+      {builtin ? (
+        builtin
+      ) : uiNode ? (
+        <div className="mt-1">
+          <ExtensionUI node={uiNode} />
+        </div>
+      ) : (
+        <pre className="aui-tool-fallback-result-content bg-muted/50 text-foreground/90 mt-1 rounded-md p-2.5 text-xs whitespace-pre-wrap">
+          {typeof result === "string" ? result : JSON.stringify(result, null, 2)}
+        </pre>
+      )}
     </div>
   );
 }
@@ -578,7 +598,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
             respondToApproval={respondToApproval}
           />
         )}
-        {!isCancelled && <ToolFallbackResult result={result} />}
+        {!isCancelled && <ToolFallbackResult result={result} toolName={toolName} />}
       </ToolFallbackContent>
     </ToolFallbackRoot>
   );

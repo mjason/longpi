@@ -94,6 +94,40 @@ can be async). Available events:
 
 See `examples/web-search.ts` for the canonical API-with-secret pattern.
 
+## Custom result UI (optional)
+
+A tool can return a small UI tree instead of plain text — authored in **TSX**
+(name the extension `.tsx`), compiled to a serializable tree the app renders
+with its own components. Nothing runs in the browser; it's data mapped to a
+fixed component whitelist. Return JSX from `execute`:
+
+```tsx
+export default function (longpi: any) {
+  longpi.registerTool({
+    name: "home_status",
+    description: "Show a home-status table.",
+    parameters: { type: "object", properties: {} },
+    execute() {
+      return (
+        <Card title="家庭状态">
+          <Table columns={["实体", "状态"]} rows={[["温度", "unavailable"], ["湿度", "45%"]]} />
+        </Card>
+      );
+    },
+  });
+}
+```
+
+Available components (return plain text for anything else; unknown components
+degrade to their inner text):
+
+- `Stack` / `Row` (props: `gap` = sm|md|lg) — vertical / horizontal layout
+- `Text` (props: `muted`, `bold`, `small`), `Heading`, `Code`
+- `Badge` (props: `text`, `tone` = success|danger|warning)
+- `Stat` (props: `label`, `value`) — a labeled number
+- `Card` (props: `title`)
+- `Table` (props: `columns: string[]`, `rows: string[][]`)
+
 ## Checklist for a good extension
 
 1. One file, default-exported factory, tools registered with clear

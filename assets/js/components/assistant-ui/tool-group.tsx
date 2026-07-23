@@ -108,6 +108,8 @@ function ToolGroupTrigger({
       data-slot="tool-group-trigger"
       className={cn(
         "aui-tool-group-trigger group/trigger flex origin-left items-center gap-2 text-sm transition-[color,scale] active:scale-[0.98]",
+        // Soft, keyboard-only focus ring (no hard blue box on click).
+        "rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/35",
         "group-data-[variant=ghost]/tool-group-root:text-muted-foreground group-data-[variant=ghost]/tool-group-root:hover:text-foreground group-data-[variant=ghost]/tool-group-root:py-1.5",
         "group-data-[variant=outline]/tool-group-root:w-full group-data-[variant=outline]/tool-group-root:px-4",
         "group-data-[variant=muted]/tool-group-root:w-full group-data-[variant=muted]/tool-group-root:px-4",

@@ -129,11 +129,11 @@ defmodule Longpi.Extensions.Host do
           path = Path.join(dir, entry)
 
           cond do
-            File.regular?(path) and String.ends_with?(entry, [".ts", ".js", ".mjs"]) ->
+            File.regular?(path) and String.ends_with?(entry, [".tsx", ".ts", ".jsx", ".js", ".mjs"]) ->
               [{path, File.read!(path)}]
 
             File.dir?(path) ->
-              Enum.find_value(["index.ts", "index.js"], [], fn index ->
+              Enum.find_value(["index.tsx", "index.ts", "index.jsx", "index.js"], [], fn index ->
                 index_path = Path.join(path, index)
                 if File.regular?(index_path), do: [{index_path, File.read!(index_path)}]
               end)
