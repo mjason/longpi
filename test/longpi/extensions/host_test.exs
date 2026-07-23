@@ -17,6 +17,13 @@ defmodule Longpi.Extensions.HostTest do
     File.write!(Path.join([cwd, ".longpi/extensions", name]), contents)
   end
 
+  # Built-in extensions (e.g. check_extension) ride along with every host, so
+  # tests asserting on the user's own tools filter them out.
+  @builtin_tool_names ["check_extension"]
+  defp user_tool_names(host) do
+    host |> Host.tool_specs() |> Enum.map(& &1.name) |> Enum.reject(&(&1 in @builtin_tool_names))
+  end
+
   test "loads a project extension's tool and executes it in the sandbox", %{cwd: cwd} do
     write_ext(cwd, "hello.js", """
     export default function (longpi) {
@@ -32,7 +39,7 @@ defmodule Longpi.Extensions.HostTest do
     {:ok, host} = Host.start_for(cwd)
     specs = Host.tool_specs(host)
 
-    assert Enum.map(specs, & &1.name) == ["hello"]
+    assert Enum.reject(Enum.map(specs, & &1.name), &(&1 in @builtin_tool_names)) == ["hello"]
     assert %Longpi.Agent.ToolSpec{source: :extension} = hd(specs)
     # ctx.cwd must be the real workspace, not undefined (asserted in full).
     assert {:ok, "Hi Ada from #{cwd}"} == Host.call_tool(host, "hello", %{"name" => "Ada"})
@@ -143,7 +150,7 @@ defmodule Longpi.Extensions.HostTest do
     """)
 
     {:ok, host} = Host.start_for(cwd)
-    assert ["one"] = host |> Host.tool_specs() |> Enum.map(& &1.name)
+    assert user_tool_names(host) == ["one"]
 
     write_ext(cwd, "two.js", """
     export default function (longpi) {
@@ -157,7 +164,7 @@ defmodule Longpi.Extensions.HostTest do
     """)
 
     specs = Host.reload(host)
-    assert specs |> Enum.map(& &1.name) |> Enum.sort() == ["one", "two"]
+    assert specs |> Enum.map(& &1.name) |> Enum.reject(&(&1 in @builtin_tool_names)) |> Enum.sort() == ["one", "two"]
     assert {:ok, "2"} = Host.call_tool(host, "two", %{})
   end
 
@@ -176,7 +183,7 @@ defmodule Longpi.Extensions.HostTest do
     """)
 
     {:ok, host} = Host.start_for(cwd)
-    assert ["fine"] = host |> Host.tool_specs() |> Enum.map(& &1.name)
+    assert user_tool_names(host) == ["fine"]
     assert {:ok, "ok"} = Host.call_tool(host, "fine", %{})
   end
 
@@ -193,7 +200,7 @@ defmodule Longpi.Extensions.HostTest do
     """)
 
     {:ok, host} = Host.start_for(cwd)
-    assert ["legacy"] = host |> Host.tool_specs() |> Enum.map(& &1.name)
+    assert user_tool_names(host) == ["legacy"]
     assert {:ok, "still here"} = Host.call_tool(host, "legacy", %{})
   end
 
@@ -217,7 +224,7 @@ defmodule Longpi.Extensions.HostTest do
     """)
 
     {:ok, host} = Host.start_for(cwd)
-    assert ["typed"] = host |> Host.tool_specs() |> Enum.map(& &1.name)
+    assert user_tool_names(host) == ["typed"]
     assert {:ok, "#1"} = Host.call_tool(host, "typed", %{"n" => 5})
   end
 
@@ -257,9 +264,39 @@ defmodule Longpi.Extensions.HostTest do
     assert {:ok, ^text} = Longpi.Agent.ExtensionUI.model_text(result)
   end
 
-  test "no extensions anywhere → :none (no guest boots)", %{cwd: cwd} do
+  test "no extensions anywhere → :none (built-ins don't boot a host on their own)", %{cwd: cwd} do
     File.rm_rf!(Path.join(cwd, ".longpi/extensions"))
     assert :none = Host.start_for(cwd)
+  end
+
+  test "built-in check_extension loads alongside user extensions and validates syntax", %{cwd: cwd} do
+    # A user extension so a host boots at all; the built-in rides along.
+    write_ext(cwd, "noop.ts", """
+    export default function (longpi) {
+      longpi.registerTool({
+        name: "noop",
+        description: "no-op",
+        parameters: { type: "object", properties: {} },
+        execute() { return "ok"; },
+      });
+    }
+    """)
+
+    good = Path.join(cwd, "good.ts")
+    File.write!(good, "const x: number = 1;\nexport default function (l) {}\n")
+    bad = Path.join(cwd, "bad.ts")
+    File.write!(bad, "const x: number = ;\n")
+
+    {:ok, host} = Host.start_for(cwd)
+    names = host |> Host.tool_specs() |> Enum.map(& &1.name)
+    assert "check_extension" in names
+    assert "noop" in names
+
+    assert {:ok, ok_msg} = Host.call_tool(host, "check_extension", %{"path" => good})
+    assert ok_msg =~ "OK"
+
+    assert {:ok, bad_msg} = Host.call_tool(host, "check_extension", %{"path" => bad})
+    assert bad_msg =~ "Syntax error"
   end
 
   test "setTimeout resolves an awaited promise mid-call", %{cwd: cwd} do

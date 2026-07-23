@@ -116,11 +116,16 @@ defmodule Longpi.Extensions.Host do
   # and evaluates. One level deep: top-level *.ts/*.js/*.mjs and
   # subdir/index.{ts,js}, global dir first so project extensions win on name.
 
+  # Built-in extensions ship with the app and load ONLY once a host is already
+  # running for the user's own extensions — `any_for?/1` (the start decision)
+  # never counts them, so they add no cost to a session with no extensions.
+  # Listed first so a user extension of the same name still wins.
   defp collect_extensions(cwd) do
-    cwd
-    |> extension_dirs()
+    [builtin_dir() | extension_dirs(cwd)]
     |> Enum.flat_map(&collect_dir/1)
   end
+
+  defp builtin_dir, do: Path.join(:code.priv_dir(:longpi), "ext_host/builtin")
 
   defp collect_dir(dir) do
     case File.ls(dir) do

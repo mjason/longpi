@@ -676,6 +676,9 @@ globalThis.__makeLongpi = (registerTool, registerCommand, on) => ({
   // (`view`, built from TSX/`h`). The model reads `text`; the client renders
   // `view`. Return this from `execute` to show a custom UI.
   ui: (result) => ({ __longpi_ui__: true, text: String((result && result.text) || ""), view: result && result.view }),
+  // Parse-check TypeScript/TSX source with the same engine that loads
+  // extensions. Returns { ok, error }.
+  checkSyntax: (source, opts = {}) => JSON.parse(__check_syntax(String(source), !!(opts && opts.jsx))),
 });
 "#;
 
@@ -694,6 +697,17 @@ async fn bind_globals(
         g.set("__log", Func::from(|msg: String| eprintln!("[ext] {msg}"))).ok();
 
         g.set("__uuid", Func::from(|| uuid_v4())).ok();
+
+        // Syntax check: parse with the same oxc pass that loads extensions, so
+        // check_extension reports exactly the errors a real load would hit.
+        g.set(
+            "__check_syntax",
+            Func::from(|source: String, jsx: bool| match strip_ts(&source, jsx) {
+                Ok(_) => "{\"ok\":true,\"error\":null}".to_string(),
+                Err(e) => format!("{{\"ok\":false,\"error\":{}}}", json_string(&e)),
+            }),
+        )
+        .ok();
 
         let http2 = http.clone();
         g.set("__http", Func::from(Async(move |req: String| {

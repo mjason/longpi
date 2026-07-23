@@ -11,7 +11,7 @@ defmodule Longpi.Agent.ToolboxTest do
 
   test "default toolbox exposes the built-in tools" do
     names = Toolbox.new() |> Toolbox.specs() |> Enum.map(& &1.name) |> Enum.sort()
-    assert names == ["bash", "edit", "find", "grep", "ls", "read", "write"]
+    assert names == ["apply_patch", "bash", "edit", "find", "grep", "ls", "read", "write"]
   end
 
   test "extension specs merge in under new names" do

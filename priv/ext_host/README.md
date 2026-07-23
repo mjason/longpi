@@ -153,3 +153,5 @@ error branch).
 3. Return text. Keep outputs concise — they land in the model's context.
 4. Errors: let exceptions propagate (the host reports them as tool errors)
    or return a clear failure string.
+5. After writing or editing the file, run the `check_extension` tool on its
+   path to confirm it parses before relying on it.

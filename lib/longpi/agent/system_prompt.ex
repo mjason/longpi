@@ -71,9 +71,11 @@ defmodule Longpi.Agent.SystemPrompt do
     `<cwd>/.longpi/extensions/<name>.ts` (this workspace) or
     `~/.longpi/extensions/<name>.ts` (every conversation). The system loads it
     for you automatically once written; the new tool is available on your next
-    turn. Read API keys from `process.env.<NAME>` and tell the user to add
-    `<NAME>` under Settings → Extensions → Secrets — the app stores it and
-    injects it into the extension host on every call.
+    turn. After writing or editing an extension, run the `check_extension` tool
+    on its path to confirm it parses (there is no `tsc`/`npx` — this uses the
+    same engine that loads extensions). Read API keys from `process.env.<NAME>`
+    and tell the user to add `<NAME>` under Settings → Extensions → Secrets —
+    the app stores it and injects it into the extension host on every call.
     """
   end
 

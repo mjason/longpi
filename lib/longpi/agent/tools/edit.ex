@@ -8,11 +8,13 @@ defmodule Longpi.Agent.Tools.Edit do
   spaces — the differences models routinely introduce. It must identify a
   unique location unless `replace_all` is set (which replaces every exact
   occurrence). The file's own line endings are preserved on write.
+
+  The matching core lives in `Longpi.Agent.Edit`, shared with `apply_patch`.
   """
 
   @behaviour Longpi.Agent.Tool
 
-  alias Longpi.Agent.Tool
+  alias Longpi.Agent.{Edit, Tool}
 
   @impl true
   def name, do: "edit"
@@ -73,19 +75,13 @@ defmodule Longpi.Agent.Tools.Edit do
   end
 
   defp edit(content, args, path) do
-    case locate(content, args.old_string) do
-      {:ok, {start, len}, tier} ->
-        replacement = adapt_newlines(args.new_string, content)
-
-        updated =
-          binary_part(content, 0, start) <>
-            replacement <> binary_part(content, start + len, byte_size(content) - start - len)
-
+    case Edit.replace(content, args.old_string, args.new_string) do
+      {:ok, updated, tier} ->
         if updated == content do
           {:error, "the edit leaves the file unchanged (old and new match) in #{args.path}"}
         else
           File.write!(path, updated)
-          {:ok, "edited #{args.path}#{tier_note(tier)}"}
+          {:ok, "edited #{args.path}#{Edit.tier_note(tier)}"}
         end
 
       {:ambiguous, n} ->
@@ -102,116 +98,5 @@ defmodule Longpi.Agent.Tools.Edit do
     "old_string not found in #{path}. It must match the file's text — exact, or close enough " <>
       "after normalizing line endings and trailing whitespace. Re-read the file and copy the " <>
       "exact lines, or include more surrounding context."
-  end
-
-  defp tier_note(:exact), do: ""
-  defp tier_note(:crlf), do: " (matched across CRLF line endings)"
-  defp tier_note(:fuzzy), do: " (matched with whitespace/character normalization)"
-
-  # ── Layered matching ────────────────────────────────────────────────
-
-  defp locate(content, old) do
-    case :binary.matches(content, old) do
-      [{pos, len}] -> {:ok, {pos, len}, :exact}
-      [_ | _] = many -> {:ambiguous, length(many)}
-      [] -> locate_crlf(content, old) || locate_fuzzy(content, old) || :not_found
-    end
-  end
-
-  # The file is CRLF but old_string arrived LF-only (or vice versa).
-  defp locate_crlf(content, old) do
-    cond do
-      String.contains?(content, "\r\n") and not String.contains?(old, "\r\n") ->
-        finish_exact(content, String.replace(old, "\n", "\r\n"), :crlf)
-
-      String.contains?(old, "\r\n") ->
-        finish_exact(content, String.replace(old, "\r\n", "\n"), :crlf)
-
-      true ->
-        nil
-    end
-  end
-
-  defp finish_exact(content, old, tier) do
-    case :binary.matches(content, old) do
-      [{pos, len}] -> {:ok, {pos, len}, tier}
-      [_ | _] = many -> {:ambiguous, length(many)}
-      [] -> nil
-    end
-  end
-
-  # Whole-line tolerant match: compare lines with trailing whitespace stripped
-  # and smart quotes / unicode dashes+spaces normalized, then map the matched
-  # window back to the original bytes (keeping the region's final newline).
-  defp locate_fuzzy(content, old) do
-    lines = physical_lines(content)
-    okeys = old |> String.split("\n") |> Enum.map(&line_key/1)
-    n = length(okeys)
-
-    with true <- lines != [] and n > 0 and length(lines) >= n,
-         ckeys = Enum.map(lines, &line_key/1),
-         offsets = line_offsets(lines),
-         starts = matching_windows(ckeys, okeys, n),
-         [i] <- starts do
-      last = i + n - 1
-      last_raw = Enum.at(lines, last)
-      region_end = Enum.at(offsets, last) + byte_size(last_raw) - byte_size(trailing_newline(last_raw))
-      start = Enum.at(offsets, i)
-      {:ok, {start, region_end - start}, :fuzzy}
-    else
-      [_, _ | _] = many -> {:ambiguous, length(many)}
-      _ -> nil
-    end
-  end
-
-  defp matching_windows(ckeys, okeys, n) do
-    for i <- 0..(length(ckeys) - n), Enum.slice(ckeys, i, n) == okeys, do: i
-  end
-
-  # Physical lines, each including its own trailing newline (last may lack one).
-  defp physical_lines(content) do
-    ~r/[^\n]*\n|[^\n]+/ |> Regex.scan(content) |> Enum.map(&hd/1)
-  end
-
-  defp line_offsets(lines) do
-    {_, offsets} =
-      Enum.reduce(lines, {0, []}, fn line, {off, acc} -> {off + byte_size(line), [off | acc]} end)
-
-    Enum.reverse(offsets)
-  end
-
-  defp trailing_newline(line) do
-    cond do
-      String.ends_with?(line, "\r\n") -> "\r\n"
-      String.ends_with?(line, "\n") -> "\n"
-      true -> ""
-    end
-  end
-
-  # Comparison key for a line: drop the trailing newline + trailing whitespace,
-  # NFC-normalize, and fold common typographic variants to ASCII. Leading
-  # whitespace (indentation) is kept, so it still has to match.
-  defp line_key(line) do
-    line
-    |> String.trim_trailing()
-    |> String.normalize(:nfc)
-    |> fold_punctuation()
-  end
-
-  defp fold_punctuation(s) do
-    s
-    |> String.replace(["‘", "’", "‛", "′"], "'")
-    |> String.replace(["“", "”", "‟", "″"], "\"")
-    |> String.replace(["‐", "‑", "‒", "–", "—", "―", "−"], "-")
-    |> String.replace([" ", " ", " ", " ", " ", "　"], " ")
-  end
-
-  # Give the replacement the file's dominant line ending.
-  defp adapt_newlines(new, content) do
-    if String.contains?(content, "\r\n") and not String.contains?(new, "\r\n") do
-      String.replace(new, "\n", "\r\n")
-    else
-      new
-    end
   end
 end

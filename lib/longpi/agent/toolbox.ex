@@ -17,6 +17,7 @@ defmodule Longpi.Agent.Toolbox do
     Tools.Read,
     Tools.Write,
     Tools.Edit,
+    Tools.ApplyPatch,
     Tools.Bash,
     Tools.Grep,
     Tools.Find,
