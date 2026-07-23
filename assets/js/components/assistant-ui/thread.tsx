@@ -69,9 +69,11 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type ComponentType,
   type FC,
   type PropsWithChildren,
+  type ReactNode,
 } from "react";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
@@ -498,6 +500,37 @@ const MessageError: FC = () => {
   );
 };
 
+// A busy turn's tool calls (3+) collapse into a tidy Ghost "N tool calls" row.
+// It opens live while the turn streams (so progress is visible), then
+// auto-collapses once the turn finishes — the fix for a finished run leaving a
+// wall of expanded tool cards. Still toggleable by hand.
+function AutoCollapsingToolGroup({
+  count,
+  running,
+  children,
+}: {
+  count: number;
+  running: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(running);
+  const wasRunning = useRef(running);
+
+  useEffect(() => {
+    if (running !== wasRunning.current) {
+      setOpen(running);
+      wasRunning.current = running;
+    }
+  }, [running]);
+
+  return (
+    <ToolGroupRoot variant="ghost" open={open} onOpenChange={setOpen}>
+      <ToolGroupTrigger count={count} active={running} />
+      <ToolGroupContent>{children}</ToolGroupContent>
+    </ToolGroupRoot>
+  );
+}
+
 const AssistantMessage: FC = () => {
   const {
     ToolFallback: ToolFallbackComponent = ToolFallback,
@@ -540,15 +573,12 @@ const AssistantMessage: FC = () => {
                   return <ToolGroup group={part}>{children}</ToolGroup>;
                 }
                 return (
-                  // Open while running (to show live progress); collapse once the
-                  // turn is done so the finished run is a tidy summary row.
-                  <ToolGroupRoot variant="ghost" defaultOpen={part.status.type === "running"}>
-                    <ToolGroupTrigger
-                      count={part.indices.length}
-                      active={part.status.type === "running"}
-                    />
-                    <ToolGroupContent>{children}</ToolGroupContent>
-                  </ToolGroupRoot>
+                  <AutoCollapsingToolGroup
+                    count={part.indices.length}
+                    running={part.status.type === "running"}
+                  >
+                    {children}
+                  </AutoCollapsingToolGroup>
                 );
               }
               case "group-reasoning": {
