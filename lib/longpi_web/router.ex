@@ -88,6 +88,7 @@ defmodule LongpiWeb.Router do
     get "/rpc/file/raw", ConfigController, :file_raw
     get "/rpc/auth", ConfigController, :auth_status
     post "/rpc/auth", ConfigController, :set_auth
+    get "/rpc/csrf", ConfigController, :csrf
     get "/rpc/users", ConfigController, :list_users
     post "/rpc/users", ConfigController, :put_user
     post "/rpc/users/delete", ConfigController, :delete_user

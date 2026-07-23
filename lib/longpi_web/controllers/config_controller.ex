@@ -7,6 +7,13 @@ defmodule LongpiWeb.ConfigController do
 
   use LongpiWeb, :controller
 
+  # A fresh CSRF token for the current session. The SPA calls this to self-heal
+  # a stale `<meta>` token (open tab across a deploy / cached index) and retry a
+  # POST that got 403'd, instead of forcing a hard reload.
+  def csrf(conn, _params) do
+    json(conn, %{token: Plug.CSRFProtection.get_csrf_token()})
+  end
+
   def tool_catalog(conn, _params) do
     json(conn, %{tools: Longpi.Agent.Prompts.tool_catalog()})
   end
