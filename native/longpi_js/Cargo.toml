@@ -15,6 +15,12 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 getrandom = "0.2"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
+# Charset decoding: encoding_rs (Firefox's codec set — GBK/Big5/Shift-JIS/
+# EUC-KR/windows-*/UTF-16/…) + chardetng (its detector) so non-UTF-8 web pages
+# and files decode to readable UTF-8 instead of mojibake.
+encoding_rs = "0.8"
+chardetng = "0.1"
+
 # TypeScript type-stripping (extensions are authored in TS; QuickJS runs JS).
 oxc_allocator = "0.90"
 oxc_parser = "0.90"

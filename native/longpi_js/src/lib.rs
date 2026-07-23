@@ -285,6 +285,18 @@ fn strip_ts_nif(source: String) -> Result<String, String> {
     strip_ts(&source)
 }
 
+/// Decode raw file bytes to UTF-8: pass through when already valid UTF-8, else
+/// detect a legacy encoding (GBK/Big5/Shift-JIS/EUC-KR/windows-*/…) and decode.
+/// Used by the read tool for non-UTF-8 text files.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn decode_bytes(data: Binary) -> String {
+    let bytes = data.as_slice();
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_string(),
+        Err(_) => detect_and_decode(bytes),
+    }
+}
+
 // ── Instance runtime loop ───────────────────────────────────────────────
 
 async fn run_instance(
@@ -949,6 +961,13 @@ async fn do_http(client: &reqwest::Client, req_json: &str) -> Result<String, Str
     let resp = builder.send().await.map_err(|e| e.to_string())?;
     let status = resp.status().as_u16();
     let status_text = resp.status().canonical_reason().unwrap_or("").to_string();
+    // Capture before the body consumes `resp`: drives text-vs-binary + charset.
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     let mut headers = String::from("{");
     let mut first = true;
     for (k, v) in resp.headers().iter() {
@@ -969,18 +988,63 @@ async fn do_http(client: &reqwest::Client, req_json: &str) -> Result<String, Str
         &bytes[..]
     };
 
-    // Text (valid UTF-8) rides as `body`, the common cheap path. Binary bodies
-    // ride intact as base64 in `bodyB64` so `arrayBuffer()`/`bytes()` aren't
-    // corrupted by a lossy UTF-8 conversion.
-    let (body, body_b64) = match std::str::from_utf8(capped) {
-        Ok(text) => (json_string(text), "null".to_string()),
-        Err(_) => ("\"\"".to_string(), json_string(&base64_encode(capped))),
+    // Text responses (by content-type) are decoded to UTF-8 using the declared
+    // charset, else UTF-8 if valid, else a detected legacy encoding (GBK/Big5/
+    // Shift-JIS/…) — so `res.text()` reads correctly instead of mojibake.
+    // Binary responses ride intact as base64 in `bodyB64` for arrayBuffer().
+    let (body, body_b64) = if is_textual(&content_type) {
+        (json_string(&decode_text(capped, &content_type)), "null".to_string())
+    } else {
+        ("\"\"".to_string(), json_string(&base64_encode(capped)))
     };
 
     Ok(format!(
         "{{\"status\":{status},\"statusText\":{},\"headers\":{headers},\"body\":{body},\"bodyB64\":{body_b64}}}",
         json_string(&status_text),
     ))
+}
+
+fn is_textual(content_type: &str) -> bool {
+    let ct = content_type.to_ascii_lowercase();
+    ct.is_empty()
+        || ct.starts_with("text/")
+        || ct.contains("json")
+        || ct.contains("xml")
+        || ct.contains("javascript")
+        || ct.contains("html")
+        || ct.contains("csv")
+        || ct.contains("charset=")
+}
+
+// Decode bytes to UTF-8: an explicit Content-Type charset wins; otherwise use
+// UTF-8 when the bytes are valid, else detect the encoding (chardetng) — which
+// also recovers pages that lie in a <meta charset> but serve legacy bytes.
+fn decode_text(bytes: &[u8], content_type: &str) -> String {
+    if let Some(label) = charset_label(content_type) {
+        if let Some(enc) = encoding_rs::Encoding::for_label(label.as_bytes()) {
+            return enc.decode(bytes).0.into_owned();
+        }
+    }
+
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_string();
+    }
+
+    detect_and_decode(bytes)
+}
+
+fn detect_and_decode(bytes: &[u8]) -> String {
+    let mut detector = chardetng::EncodingDetector::new();
+    detector.feed(bytes, true);
+    detector.guess(None, true).decode(bytes).0.into_owned()
+}
+
+fn charset_label(content_type: &str) -> Option<String> {
+    let lower = content_type.to_ascii_lowercase();
+    let start = lower.find("charset=")? + "charset=".len();
+    let rest = &content_type[start..];
+    let end = rest.find([';', ' ']).unwrap_or(rest.len());
+    Some(rest[..end].trim().trim_matches('"').to_string())
 }
 
 // Standard base64 (with padding); no external dependency.

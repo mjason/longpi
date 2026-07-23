@@ -15,6 +15,7 @@ defmodule Longpi.Js.Native do
   def stop(_instance), do: :erlang.nif_error(:nif_not_loaded)
   def capability_reply(_instance, _req_id, _result), do: :erlang.nif_error(:nif_not_loaded)
   def strip_ts_nif(_source), do: :erlang.nif_error(:nif_not_loaded)
+  def decode_bytes(_data), do: :erlang.nif_error(:nif_not_loaded)
 end
 
 defmodule Longpi.Js do
@@ -137,5 +138,16 @@ defmodule Longpi.Js do
     Longpi.Js.Native.strip_ts_nif(source)
   rescue
     e in ErlangError -> {:error, inspect(e.original)}
+  end
+
+  @doc """
+  Decodes raw bytes to UTF-8: passes valid UTF-8 through, otherwise detects the
+  encoding (GBK/Big5/Shift-JIS/EUC-KR/windows-*/…) and decodes. Falls back to a
+  lossy scrub if the NIF isn't available.
+  """
+  def decode_bytes(data) when is_binary(data) do
+    Longpi.Js.Native.decode_bytes(data)
+  rescue
+    _ -> String.replace_invalid(data)
   end
 end

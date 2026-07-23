@@ -42,33 +42,37 @@ defmodule Longpi.Agent.Tools.Read do
         {:error, "file not found: #{args.path}"}
 
       true ->
-        content = File.read!(path)
-
-        if String.valid?(content) do
-          {:ok, content |> window(args[:offset], args[:limit]) |> cap_bytes()}
-        else
-          {:ok, binary_notice(content)}
-        end
+        {:ok, decode(File.read!(path)) |> window(args[:offset], args[:limit]) |> cap_bytes()}
     end
   end
 
-  # A binary (non-text) file would come back as mojibake if returned as text.
-  # Report its kind and size instead — inline image viewing needs a backend
-  # whose tool results carry image blocks (Anthropic-native), which the
-  # OpenAI-compatible path does not.
-  defp binary_notice(content) do
-    "[binary file — #{kind(content)}, #{byte_size(content)} bytes — not shown as text]"
+  # UTF-8 as-is; a known binary format (magic bytes) becomes a metadata notice
+  # rather than mojibake; anything else non-UTF-8 is a legacy-encoded text file
+  # (GBK/Big5/Shift-JIS/…) and is decoded to UTF-8.
+  defp decode(content) do
+    cond do
+      String.valid?(content) -> content
+      binary_kind(content) != nil -> binary_notice(content, binary_kind(content))
+      true -> Longpi.Js.decode_bytes(content)
+    end
   end
 
-  defp kind(<<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A, _::binary>>), do: "PNG image"
-  defp kind(<<0xFF, 0xD8, 0xFF, _::binary>>), do: "JPEG image"
-  defp kind(<<"GIF8", _::binary>>), do: "GIF image"
-  defp kind(<<"RIFF", _::32, "WEBP", _::binary>>), do: "WebP image"
-  defp kind(<<"%PDF-", _::binary>>), do: "PDF document"
-  defp kind(<<0x1F, 0x8B, _::binary>>), do: "gzip archive"
-  defp kind(<<"PK", 0x03, 0x04, _::binary>>), do: "zip archive"
-  defp kind(<<0x7F, "ELF", _::binary>>), do: "ELF binary"
-  defp kind(_), do: "binary data"
+  # Inline image viewing needs a backend whose tool results carry image blocks
+  # (Anthropic-native), which the OpenAI-compatible path does not — so a real
+  # binary is reported by kind + size instead.
+  defp binary_notice(content, kind) do
+    "[binary file — #{kind}, #{byte_size(content)} bytes — not shown as text]"
+  end
+
+  defp binary_kind(<<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A, _::binary>>), do: "PNG image"
+  defp binary_kind(<<0xFF, 0xD8, 0xFF, _::binary>>), do: "JPEG image"
+  defp binary_kind(<<"GIF8", _::binary>>), do: "GIF image"
+  defp binary_kind(<<"RIFF", _::32, "WEBP", _::binary>>), do: "WebP image"
+  defp binary_kind(<<"%PDF-", _::binary>>), do: "PDF document"
+  defp binary_kind(<<0x1F, 0x8B, _::binary>>), do: "gzip archive"
+  defp binary_kind(<<"PK", 0x03, 0x04, _::binary>>), do: "zip archive"
+  defp binary_kind(<<0x7F, "ELF", _::binary>>), do: "ELF binary"
+  defp binary_kind(_), do: nil
 
   # Keep the returned text under the byte ceiling, cutting at a valid UTF-8
   # boundary so the model never receives mojibake.

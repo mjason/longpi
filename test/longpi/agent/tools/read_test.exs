@@ -72,4 +72,13 @@ defmodule Longpi.Agent.Tools.ReadTest do
     assert content =~ "#{byte_size(png)} bytes"
     refute content =~ <<0xFF>>
   end
+
+  test "decodes a legacy-encoded (GBK) text file to readable UTF-8", %{tmp_dir: dir, ctx: ctx} do
+    # "中文" in GBK, repeated so the detector is confident.
+    File.write!(Path.join(dir, "gbk.txt"), String.duplicate(<<0xD6, 0xD0, 0xCE, 0xC4>>, 20))
+
+    assert {:ok, content} = Read.run(%{path: "gbk.txt"}, ctx)
+    assert String.valid?(content)
+    assert content =~ "中文"
+  end
 end

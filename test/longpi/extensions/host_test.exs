@@ -308,6 +308,29 @@ defmodule Longpi.Extensions.HostTest do
     assert {:ok, "255,0,254,128"} = Host.call_tool(host, "grab", %{})
   end
 
+  test "fetch decodes a GBK (charset) page to readable UTF-8", %{cwd: cwd} do
+    # "中文" in GBK, repeated, served as text/html;charset=gbk.
+    port = start_http_stub(String.duplicate(<<0xD6, 0xD0, 0xCE, 0xC4>>, 20), "text/html; charset=gbk")
+
+    write_ext(cwd, "cn.js", """
+    export default function (longpi) {
+      longpi.registerTool({
+        name: "grab",
+        description: "Fetches a GBK page.",
+        parameters: { type: "object", properties: {} },
+        async execute() {
+          const res = await fetch("http://127.0.0.1:#{port}/");
+          const text = await res.text();
+          return text.slice(0, 4);
+        },
+      });
+    }
+    """)
+
+    {:ok, host} = Host.start_for(cwd)
+    assert {:ok, "中文中文"} = Host.call_tool(host, "grab", %{})
+  end
+
   test "a lifecycle event handler runs and doesn't wedge the command queue", %{cwd: cwd} do
     write_ext(cwd, "life.js", """
     export default function (longpi) {
