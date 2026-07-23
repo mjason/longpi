@@ -7,11 +7,17 @@ defmodule Longpi.Agent.Subagents do
       name: scout
       description: Fast read-only codebase reconnaissance
       tools: read, grep, find, ls, bash
-      model: anthropic:claude-haiku-4-5
+      model: J
       reasoning_effort: low
       extensions: true
       ---
       (body = system prompt appended to the child session's base prompt)
+
+  `model` accepts a tier alias — J (light/fast), Q (balanced), K (strongest),
+  mapped in the admin UI — or a full spec like `anthropic:claude-haiku-4-5`.
+  A tier bundles a model AND a reasoning level, and the bundle wins over the
+  role's own `reasoning_effort`. Tiers keep role files portable across
+  provider/gateway changes.
 
   Sources, later winning on name collisions:
 

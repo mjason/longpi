@@ -42,6 +42,12 @@ defmodule Longpi.Agent do
       rpc_action :clear_provider_key, :clear_key
       rpc_action :destroy_provider, :destroy
     end
+
+    resource Longpi.Agent.ModelAlias do
+      rpc_action :list_model_aliases, :list
+      rpc_action :put_model_alias, :put
+      rpc_action :destroy_model_alias, :destroy
+    end
   end
 
   resources do
@@ -77,6 +83,12 @@ defmodule Longpi.Agent do
       define :get_provider_by_name, action: :by_name, args: [:name]
       define :list_providers, action: :list
       define :set_provider_key, action: :set_key
+    end
+
+    resource Longpi.Agent.ModelAlias do
+      define :put_model_alias, action: :put
+      define :list_model_aliases, action: :list
+      define :destroy_model_alias, action: :destroy
     end
 
     resource Longpi.Agent.Compaction do

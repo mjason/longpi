@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/agent/i18n";
 import { cn } from "@/lib/utils";
 import { useConversationStore } from "@/agent/store";
+import { CodePreview } from "@/components/assistant-ui/code-preview";
 
 /**
  * A markdown href with no URL scheme (and not an anchor) is a file path.
@@ -154,9 +155,7 @@ const FilePreviewDialog: FC<LinkSafetyModalProps> = ({ url, isOpen, onClose }) =
           )}
           {loaded?.kind === "text" && (
             <>
-              <pre className="whitespace-pre-wrap break-all rounded-lg bg-muted/50 p-3 font-mono text-xs leading-relaxed">
-                {loaded.content}
-              </pre>
+              <CodePreview name={loaded.name} content={loaded.content ?? ""} />
               {loaded.truncated && (
                 <p className="pt-2 text-xs text-muted-foreground">{t("file.truncated")}</p>
               )}

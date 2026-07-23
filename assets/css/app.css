@@ -300,3 +300,11 @@
   from { height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto)); }
   to { height: 0; }
 }
+
+/* Shiki dual-theme flip for the file preview (themes: github-light/-dark).
+   Shiki inlines light colors and carries dark ones in CSS vars. */
+[data-theme="dark"] .code-preview .shiki,
+[data-theme="dark"] .code-preview .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+}

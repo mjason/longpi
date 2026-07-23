@@ -1,7 +1,9 @@
 import {
   type AppendMessage,
+  type AttachmentAdapter,
   CompositeAttachmentAdapter,
   type ExternalStoreThreadListAdapter,
+  type PendingAttachment,
   SimpleImageAttachmentAdapter,
   SimpleTextAttachmentAdapter,
   type ThreadMessageLike,
@@ -13,12 +15,52 @@ import { slashCommandHelp } from "./slashCommands";
 import type { ConversationStore } from "./store";
 import type { MessageAttachment, ThreadItem } from "./types";
 
+// Fallback for files whose MIME type the simple adapters don't list — source
+// code pasted or dropped from a file manager (.tsx, .ex, .rs …) usually arrives
+// with an empty or exotic type. Reads the file as text (code IS text) and
+// inlines it exactly like SimpleTextAttachmentAdapter; genuinely binary data is
+// rejected with a clear message instead of silently doing nothing.
+class AnyTextFileAttachmentAdapter implements AttachmentAdapter {
+  accept = "*";
+
+  async add(state: { file: File }): Promise<PendingAttachment> {
+    // Cheap binary sniff: a NUL byte in the first 8KB means not text.
+    const head = new Uint8Array(await state.file.slice(0, 8192).arrayBuffer());
+    if (head.includes(0)) throw new Error(`${state.file.name}: binary files are not supported`);
+    return {
+      id: crypto.randomUUID(),
+      type: "document",
+      name: state.file.name,
+      contentType: state.file.type || "text/plain",
+      file: state.file,
+      status: { type: "requires-action", reason: "composer-send" },
+    };
+  }
+
+  async send(attachment: PendingAttachment) {
+    return {
+      ...attachment,
+      status: { type: "complete" as const },
+      content: [
+        {
+          type: "text" as const,
+          text: `<attachment name=${attachment.name}>\n${await attachment.file.text()}\n</attachment>`,
+        },
+      ],
+    };
+  }
+
+  async remove() {}
+}
+
 // Official assistant-ui adapters power the composer's attach button: images are
 // encoded to base64 data URLs for the vision model, text files inlined as text.
+// The wildcard adapter last, so pasting/dropping any source file works too.
 // Stateless, so one shared instance is fine.
 const attachmentAdapter = new CompositeAttachmentAdapter([
   new SimpleImageAttachmentAdapter(),
   new SimpleTextAttachmentAdapter(),
+  new AnyTextFileAttachmentAdapter(),
 ]);
 
 /** Pull our wire-format attachments out of an assistant-ui AppendMessage. */

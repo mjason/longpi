@@ -3,10 +3,13 @@ import {
   clearProviderKey,
   createModel,
   destroyModel,
+  destroyModelAlias,
   destroyProvider,
+  listModelAliases,
   listModels,
   listProviders,
   listSettings,
+  putModelAlias,
   putProvider,
   putSetting,
   setProviderKey,
@@ -84,6 +87,53 @@ export async function setModel(id: string, changes: Partial<Pick<ModelRow, "labe
 
 export async function removeModel(id: string) {
   return destroyModel({ identity: id, headers: buildCSRFHeaders() });
+}
+
+// ── Model tiers (aliases) ──────────────────────────────────────────────
+// Named tiers (poker: J = light/fast, Q = balanced, K = strongest, plus
+// user-defined ones) that subagent roles reference instead of model specs.
+
+export type ModelAliasRow = {
+  id: string;
+  name: string;
+  spec: string;
+  note: string | null;
+  reasoningEffort: string | null;
+};
+
+/** The built-in tier names, always shown in the admin UI even when unmapped. */
+export const BUILTIN_TIERS = ["J", "Q", "K"] as const;
+
+/** Reasoning levels a tier can bundle; "" = inherit the session's setting. */
+export const TIER_EFFORTS = ["", "minimal", "low", "medium", "high"] as const;
+
+export async function loadModelAliases(): Promise<ModelAliasRow[]> {
+  const result = await listModelAliases({
+    fields: ["id", "name", "spec", "note", "reasoningEffort"],
+    headers: buildCSRFHeaders(),
+  });
+  return result.success ? (result.data as ModelAliasRow[]) : [];
+}
+
+export async function saveModelAlias(
+  name: string,
+  spec: string,
+  opts: { note?: string | null; reasoningEffort?: string | null } = {},
+) {
+  return putModelAlias({
+    input: {
+      name,
+      spec,
+      note: opts.note ?? null,
+      reasoningEffort: opts.reasoningEffort ?? null,
+    },
+    fields: ["id"],
+    headers: buildCSRFHeaders(),
+  });
+}
+
+export async function removeModelAlias(id: string) {
+  return destroyModelAlias({ identity: id, headers: buildCSRFHeaders() });
 }
 
 export async function loadToolCatalog(): Promise<ToolCatalogEntry[]> {

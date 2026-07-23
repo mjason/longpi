@@ -81,11 +81,7 @@ defmodule Longpi.Agent.Tools.ApplyPatch do
         path = suffix(line, "*** Update File: ")
         {move, rest1} = take_move(rest)
         {body, rest2} = take_section(rest1)
-
-        case parse_hunks(body) do
-          {:ok, hunks} -> parse_ops(rest2, [{:update, path, move, hunks} | acc])
-          {:error, reason} -> {:error, reason}
-        end
+        parse_ops(rest2, [{:update, path, move, parse_hunks(body)} | acc])
 
       true ->
         {:error,
@@ -109,13 +105,10 @@ defmodule Longpi.Agent.Tools.ApplyPatch do
   end
 
   defp parse_hunks(body) do
-    hunks =
-      body
-      |> group_hunks()
-      |> Enum.map(&to_hunk/1)
-      |> Enum.reject(fn {old, new} -> old == "" and new == "" end)
-
-    {:ok, hunks}
+    body
+    |> group_hunks()
+    |> Enum.map(&to_hunk/1)
+    |> Enum.reject(fn {old, new} -> old == "" and new == "" end)
   end
 
   # Split hunk-body lines at `@@` markers into one line-list per hunk.

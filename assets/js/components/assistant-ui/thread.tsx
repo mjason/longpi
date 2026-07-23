@@ -364,6 +364,64 @@ const ComposerImageMarkers: FC = () => {
   return null;
 };
 
+// Spans worth marking in the composer text: pi-style image markers and the
+// "@"-mention file directives. Capture group so split() keeps the matches.
+const COMPOSER_MARK_RE = /(\[Image #\d+\]|:file\[[^\]]*\]\{name=[^}]*\})/g;
+
+/**
+ * The composer textarea with marker highlighting. A backdrop div behind the
+ * (normally-rendered) textarea repeats the text invisibly and paints a tinted
+ * pill behind each marker — the glyphs stay the textarea's own, so any font
+ * metric drift affects only the tint, never the text. Scroll is kept in sync.
+ */
+const ComposerInputHighlighted: FC<{ placeholder: string }> = ({ placeholder }) => {
+  const text = useAuiState((s) => s.composer.text);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const textarea = wrapRef.current?.querySelector("textarea");
+    const backdrop = backdropRef.current;
+    if (!textarea || !backdrop) return;
+    const sync = () => {
+      backdrop.scrollTop = textarea.scrollTop;
+    };
+    sync();
+    textarea.addEventListener("scroll", sync);
+    return () => textarea.removeEventListener("scroll", sync);
+  }, []);
+
+  const parts = text.split(COMPOSER_MARK_RE);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <div
+        ref={backdropRef}
+        aria-hidden
+        className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words px-2.5 py-1 text-base text-transparent"
+      >
+        {parts.map((part, i) =>
+          i % 2 === 1 ? (
+            <span key={i} className="rounded-[4px] bg-primary/10 ring-1 ring-primary/25">
+              {part}
+            </span>
+          ) : (
+            part
+          ),
+        )}
+      </div>
+      <ComposerPrimitive.Input
+        placeholder={placeholder}
+        className="aui-composer-input caret-primary placeholder:text-muted-foreground/80 relative max-h-32 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base outline-none"
+        rows={1}
+        autoFocus
+        enterKeyHint="send"
+        aria-label="Message input"
+      />
+    </div>
+  );
+};
+
 const Composer: FC = () => {
   const { t } = useI18n();
   // "@" file mentions (pi-style): workspace paths from the conversation's cwd.
@@ -397,14 +455,7 @@ const Composer: FC = () => {
           className="border-border/60 data-[dragging=true]:border-ring focus-within:border-border dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 flex w-full flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) shadow-[0_4px_16px_-8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] transition-[border-color,box-shadow] focus-within:shadow-[0_6px_24px_-8px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.05)] data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))] dark:shadow-none"
         >
           <ComposerAttachments />
-          <ComposerPrimitive.Input
-            placeholder={t("composer.placeholder")}
-            className="aui-composer-input caret-primary placeholder:text-muted-foreground/80 max-h-32 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base outline-none"
-            rows={1}
-            autoFocus
-            enterKeyHint="send"
-            aria-label="Message input"
-          />
+          <ComposerInputHighlighted placeholder={t("composer.placeholder")} />
           <ComposerAction />
         </div>
       </ComposerPrimitive.AttachmentDropzone>

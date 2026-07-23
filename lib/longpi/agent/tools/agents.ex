@@ -103,7 +103,12 @@ defmodule Longpi.Agent.Tools.SpawnAgent do
         required: true,
         doc: "Self-contained task description; the subagent sees nothing else"
       ],
-      model: [type: :string, doc: "Override the model spec for this subagent"],
+      model: [
+        type: :string,
+        doc:
+          "Model for this subagent: a tier alias — J (light/fast), Q (balanced), " <>
+            "K (strongest) — or a full model spec. Omit to inherit."
+      ],
       cwd: [type: :string, doc: "Working directory (defaults to yours)"]
     ]
   end

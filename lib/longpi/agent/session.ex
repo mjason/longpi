@@ -25,7 +25,15 @@ defmodule Longpi.Agent.Session do
   # Slash commands the app handles itself (channel routes compact/rename/reload;
   # the client handles model/help). An extension command with one of these names
   # can never be reached, so it's dropped with a warning rather than shown dead.
-  @builtin_commands ~w(compact model reload rename help)
+  @builtin_commands ~w(compact model reload rename help loop)
+
+  # Runaway fuse for self-driven turns (/loop + continue_later combined):
+  # after this many consecutive auto-turns the session stops and waits for a
+  # real user message, which resets the count.
+  @auto_turns_max 30
+  # Ceiling for an explicit /loop's requested iteration count.
+  @loop_max 50
+  @loop_done_marker "LOOP_DONE"
 
   alias Longpi.Agent.{
     Compactor,
@@ -52,6 +60,20 @@ defmodule Longpi.Agent.Session do
 
   @doc "Aborts the running turn, keeping any partial assistant text."
   def interrupt(session), do: GenServer.call(session, :interrupt)
+
+  @doc """
+  Starts an explicit loop: the task is re-fed to the model every turn until it
+  answers with LOOP_DONE, `stop_loop/1` is called, or `iterations` run out.
+  Kicks off the first turn immediately when idle.
+  """
+  def start_loop(session, task, iterations),
+    do: GenServer.call(session, {:start_loop, task, iterations})
+
+  @doc "Stops the loop and clears any scheduled continuation."
+  def stop_loop(session), do: GenServer.call(session, :stop_loop)
+
+  @doc "The running loop as `%{task, remaining, total}`, or nil."
+  def loop_status(session), do: GenServer.call(session, :loop_status)
 
   @doc """
   Re-runs the last turn: drops the previous assistant response (and its tool
@@ -213,7 +235,15 @@ defmodule Longpi.Agent.Session do
        # timer that recycles the process when it's idle with no watchers. The
        # conversation lives in the DB, so a reaped session rebuilds on reopen.
        watchers: %{},
-       idle_timer: nil
+       idle_timer: nil,
+       # Continuation engine. `loop` = the explicit /loop task (nil when off);
+       # `auto_continue` = a note the model scheduled via continue_later for
+       # its next turn; `auto_turns` counts CONSECUTIVE self-driven turns
+       # (either kind) and only a real user message resets it — the runaway
+       # fuse for both paths.
+       loop: nil,
+       auto_continue: nil,
+       auto_turns: 0
      }, {:continue, :load_extensions}}
   end
 
@@ -338,11 +368,46 @@ defmodule Longpi.Agent.Session do
   end
 
   def handle_call({:send_message, text, attachments}, _from, state) do
+    # A real user message resets the self-driven-turn fuse.
+    state = %{state | auto_turns: 0}
     user_message = Message.user(text, attachments)
     state = persist(state, [user_message])
     messages = state.messages ++ [user_message]
     {:reply, :ok, run_turn(%{state | messages: messages}, messages)}
   end
+
+  def handle_call({:schedule_continuation, note}, _from, state) do
+    cond do
+      state.auto_turns >= @auto_turns_max ->
+        {:reply,
+         {:error,
+          "auto-turn limit reached (#{@auto_turns_max} consecutive self-driven turns); " <>
+            "summarize where you are and wait for the user"}, state}
+
+      true ->
+        {:reply, :ok, %{state | auto_continue: note}}
+    end
+  end
+
+  def handle_call({:start_loop, task, iterations}, _from, state) do
+    task = String.trim(to_string(task))
+    n = iterations |> max(1) |> min(@loop_max)
+
+    if task == "" do
+      {:reply, {:error, "loop task must not be empty"}, state}
+    else
+      state = %{state | loop: %{task: task, remaining: n, total: n}, auto_turns: 0}
+      if state.status == :idle, do: send(self(), :continue_now)
+      {:reply, {:ok, n}, state}
+    end
+  end
+
+  def handle_call(:stop_loop, _from, state) do
+    stopped? = state.loop != nil or state.auto_continue != nil
+    {:reply, {:ok, stopped?}, %{state | loop: nil, auto_continue: nil}}
+  end
+
+  def handle_call(:loop_status, _from, state), do: {:reply, state.loop, state}
 
   def handle_call({:edit_last, _text, _attachments}, _from, %{status: status} = state)
       when status in [:running, :compacting] do
@@ -392,7 +457,8 @@ defmodule Longpi.Agent.Session do
     state =
       state
       |> keep_partial_text()
-      |> Map.merge(%{status: :idle, task: nil, partial: []})
+      # Interrupting also stops self-continuation — the user wants the wheel.
+      |> Map.merge(%{status: :idle, task: nil, partial: [], loop: nil, auto_continue: nil})
 
     state = notify(state, {:turn_ended, :interrupted})
     fire_ext_event(state, "turn_end", %{reason: "interrupted"})
@@ -734,6 +800,8 @@ defmodule Longpi.Agent.Session do
         fire_ext_event(state, "turn_end", %{reason: "complete"})
         notify_parent_done(state, :done)
         state = maybe_start_titling(state)
+        state = settle_loop(state, new_messages)
+        if state.auto_continue || state.loop, do: send(self(), :continue_now)
         {:noreply, maybe_start_compaction(state)}
 
       {:error, reason, new_messages} ->
@@ -743,7 +811,41 @@ defmodule Longpi.Agent.Session do
         state = notify(state, {:turn_failed, reason})
         fire_ext_event(state, "turn_end", %{reason: "failed"})
         notify_parent_done(state, {:failed, reason})
-        {:noreply, state}
+        # A failed turn never self-continues — that would loop on the failure.
+        {:noreply, %{state | loop: nil, auto_continue: nil}}
+    end
+  end
+
+  # Self-driven continuation: fires after a completed turn when the model
+  # scheduled a continue_later note or an explicit /loop is active. Skipped
+  # (with everything preserved) if the user got a message in first.
+  def handle_info(:continue_now, %{status: status} = state) when status != :idle,
+    do: {:noreply, state}
+
+  def handle_info(:continue_now, state) do
+    cond do
+      state.auto_turns >= @auto_turns_max ->
+        state = notify(state, {:loop_ended, :limit})
+        {:noreply, %{state | loop: nil, auto_continue: nil}}
+
+      state.auto_continue != nil ->
+        {note, state} = {state.auto_continue, %{state | auto_continue: nil}}
+        inject(state, "[auto-continue #{state.auto_turns + 1}] #{note}")
+
+      match?(%{remaining: r} when r > 0, state.loop) ->
+        %{task: task, remaining: remaining, total: total} = state.loop
+        k = total - remaining + 1
+
+        state = %{state | loop: %{state.loop | remaining: remaining - 1}}
+
+        inject(
+          state,
+          "[loop #{k}/#{total}] Continue working on this task, and reply with " <>
+            "#{@loop_done_marker} once it is fully complete:\n\n#{task}"
+        )
+
+      true ->
+        {:noreply, %{state | loop: nil}}
     end
   end
 
@@ -997,14 +1099,21 @@ defmodule Longpi.Agent.Session do
   defp create_child_conversation(state, agent_def, args) do
     title = args[:task] |> String.split("\n") |> hd() |> String.slice(0, 80)
 
-    Longpi.Agent.create_conversation(%{
-      cwd: args[:cwd] || state.ctx.cwd,
-      model: args[:model] || agent_def.model || state.model,
-      reasoning_effort: agent_def.reasoning_effort || state.reasoning_effort,
-      agent_role: agent_def.name,
-      parent_id: state.conversation_id,
-      title: title
-    })
+    # The model reference may be a tier alias (J/Q/K, admin-mapped) or a full
+    # spec; nil falls through to the role's pin, then the parent's model. A
+    # tier is a complete profile, so its bundled reasoning effort wins over the
+    # role's — picking "K" means the whole K configuration.
+    with {:ok, resolved} <- Longpi.Agent.ModelResolver.resolve(args[:model] || agent_def.model) do
+      Longpi.Agent.create_conversation(%{
+        cwd: args[:cwd] || state.ctx.cwd,
+        model: resolved.spec || state.model,
+        reasoning_effort:
+          resolved.reasoning_effort || agent_def.reasoning_effort || state.reasoning_effort,
+        agent_role: agent_def.name,
+        parent_id: state.conversation_id,
+        title: title
+      })
+    end
   end
 
   defp fetch_subagent(state, handle) do
@@ -1225,6 +1334,41 @@ defmodule Longpi.Agent.Session do
   end
 
   @approval_timeout 5 * 60_000
+
+  # ── Continuation engine (/loop + continue_later) ────────────────────
+
+  # Ends the loop when the assistant declared the task complete.
+  defp settle_loop(%{loop: nil} = state, _new_messages), do: state
+
+  defp settle_loop(state, new_messages) do
+    done? =
+      Enum.any?(new_messages, fn
+        %{role: :assistant, content: text} when is_binary(text) ->
+          String.contains?(text, @loop_done_marker)
+
+        _ ->
+          false
+      end)
+
+    if done? do
+      state = notify(state, {:loop_ended, :done})
+      %{state | loop: nil}
+    else
+      state
+    end
+  end
+
+  # Persists and broadcasts a self-driven user message, then starts the turn.
+  # Unlike send_message (where the client renders its own message optimistically)
+  # nobody typed this, so the history push is the client's only source of truth.
+  defp inject(state, text) do
+    state = %{state | auto_turns: state.auto_turns + 1}
+    user_message = Message.user(text, [])
+    state = persist(state, [user_message])
+    state = %{state | messages: state.messages ++ [user_message]}
+    state = notify(state, {:history, broadcast_history(state)})
+    {:noreply, run_turn(state, state.messages)}
+  end
 
   defp run_turn(state, _messages) do
     session = self()

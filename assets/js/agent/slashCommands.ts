@@ -32,6 +32,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     takesArgs: true,
   },
   {
+    name: "loop",
+    summary: "Loop a task until done, e.g. /loop 10 fix all tests — /loop stop ends it",
+    takesArgs: true,
+  },
+  {
     name: "help",
     summary: "List the available commands",
   },

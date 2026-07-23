@@ -109,6 +109,45 @@ defmodule LongpiWeb.ConversationChannel do
     end
   end
 
+  # /loop [N] <task> — run the task in a self-continuing loop (N iterations,
+  # default 10). /loop stop cancels; /loop reports status.
+  def handle_in("command", %{"name" => "loop"} = payload, socket) do
+    session = socket.assigns.session
+    arg = String.trim(payload["arg"] || "")
+
+    cond do
+      arg == "" ->
+        case Session.loop_status(session) do
+          nil ->
+            {:reply, {:ok, %{content: "Usage: /loop [N] <task> — or /loop stop."}}, socket}
+
+          %{remaining: remaining, total: total} ->
+            {:reply,
+             {:ok, %{content: "Loop running: #{total - remaining}/#{total} turns used."}}, socket}
+        end
+
+      arg == "stop" ->
+        {:ok, stopped?} = Session.stop_loop(session)
+        message = if stopped?, do: "Loop stopped.", else: "No loop running."
+        {:reply, {:ok, %{content: message}}, socket}
+
+      true ->
+        {iterations, task} =
+          case Integer.parse(arg) do
+            {n, " " <> rest} when n > 0 -> {n, rest}
+            _ -> {10, arg}
+          end
+
+        case Session.start_loop(session, task, iterations) do
+          {:ok, n} ->
+            {:reply, {:ok, %{content: "Loop started (up to #{n} turns)."}}, socket}
+
+          {:error, reason} ->
+            {:reply, {:error, %{reason: to_string(reason)}}, socket}
+        end
+    end
+  end
+
   def handle_in("command", %{"name" => "rename"} = payload, socket) do
     case Session.rename(socket.assigns.session, payload["arg"] || "") do
       {:ok, title} ->
@@ -235,6 +274,8 @@ defmodule LongpiWeb.ConversationChannel do
 
   defp serialize_event({:turn_failed, reason}),
     do: {"turn_failed", %{reason: inspect(reason)}}
+
+  defp serialize_event({:loop_ended, reason}), do: {"loop_ended", %{reason: to_string(reason)}}
 
   defp serialize_event(_event), do: nil
 

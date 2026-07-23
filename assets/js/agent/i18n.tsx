@@ -174,11 +174,21 @@ const en = {
   "slash.model": "Switch the model, e.g. /model openai:gpt-5.4",
   "slash.reload": "Reload extensions (pick up newly written ones)",
   "slash.rename": "Rename this conversation, e.g. /rename 部署调优",
+  "slash.loop": "Loop a task until done, e.g. /loop 10 fix all tests — /loop stop ends it",
   "slash.help": "List the available commands",
 
   // Management: settings tabs (General / Providers / Prompts & Tools)
   "settings.approvalLevel": "Approval level",
   "settings.approvalLevelHint": "How much the agent may do without asking you first.",
+  "tiers.title": "Model tiers",
+  "tiers.hint":
+    "Named tiers that subagent roles and tools reference instead of model specs — each bundles a model and a reasoning level; remap here when providers change. J = light & fast, Q = balanced, K = strongest.",
+  "tiers.unmapped": "Not mapped",
+  "tiers.custom.placeholder": "Custom tier name",
+  "tiers.add": "Add tier",
+  "tiers.J": "Light & fast — scouting, summarizing, bulk chores",
+  "tiers.Q": "Balanced — everyday implementation work",
+  "tiers.K": "Strongest — deep reasoning and hard problems",
   "settings.approval.read_only": "Read-only",
   "settings.approval.read_only.hint": "Only reads run automatically; writes and commands ask.",
   "settings.approval.auto": "Auto",
@@ -378,11 +388,21 @@ const zh: Record<I18nKey, string> = {
   "slash.model": "切换模型，如 /model openai:gpt-5.4",
   "slash.reload": "重新加载扩展（加载新写入的扩展）",
   "slash.rename": "重命名当前会话，如 /rename 部署调优",
+  "slash.loop": "循环执行任务直到完成，如 /loop 10 修完所有测试 —— /loop stop 结束",
   "slash.help": "列出可用命令",
 
   // 管理：设置页（通用 / 提供方 / 提示词与工具）
   "settings.approvalLevel": "授权级别",
   "settings.approvalLevelHint": "在不询问你的情况下，agent 可以自行做多少事。",
+  "tiers.title": "模型档位",
+  "tiers.hint":
+    "子代理角色和工具引用档位而不是写死模型名，每个档位打包一个模型和一个推理等级，换 provider 时只需在这里重新映射。J = 轻快、Q = 均衡、K = 最强。",
+  "tiers.unmapped": "未映射",
+  "tiers.custom.placeholder": "自定义档位名",
+  "tiers.add": "添加档位",
+  "tiers.J": "轻快 — 侦察、总结、批量琐事",
+  "tiers.Q": "均衡 — 日常实现工作",
+  "tiers.K": "最强 — 深度推理与难题",
   "settings.approval.read_only": "只读",
   "settings.approval.read_only.hint": "只有读取自动执行；写入和命令都会询问。",
   "settings.approval.auto": "自动",
