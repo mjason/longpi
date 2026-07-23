@@ -39,6 +39,25 @@ defmodule Longpi.Agent.ConversationMessageTest do
              %{role: :user, content: "look", attachments: [@image]}
   end
 
+  test "to_message/1 scrubs invalid UTF-8 in stored content (all roles)" do
+    bad = "page" <> <<0xE5>> <> "上海"
+    refute String.valid?(bad)
+
+    user = ConversationMessage.to_message(%{role: :user, content: bad, attachments: []})
+    assert String.valid?(user.content)
+
+    tool =
+      ConversationMessage.to_message(%{
+        role: :tool,
+        content: bad,
+        tool_call_id: "c1",
+        tool_name: "bash",
+        error: false
+      })
+
+    assert String.valid?(tool.content)
+  end
+
   test "attachments survive a persist + reload cycle as string-keyed maps" do
     conversation = create_conversation!()
 

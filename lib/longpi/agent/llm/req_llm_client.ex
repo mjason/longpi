@@ -183,7 +183,7 @@ defmodule Longpi.Agent.LLM.ReqLLMClient do
   end
 
   defp to_req_llm_message(%{role: :user, content: content}),
-    do: Context.user(normalize_directives(content))
+    do: Context.user(safe(normalize_directives(content)))
 
   defp to_req_llm_message(%{role: :assistant, tool_calls: calls} = message)
        when is_list(calls) and calls != [] do
@@ -192,14 +192,19 @@ defmodule Longpi.Agent.LLM.ReqLLMClient do
         ToolCall.new(call.id, call.name, Jason.encode!(call.args))
       end)
 
-    Context.assistant(message.content || "", tool_calls: req_calls)
+    Context.assistant(safe(message.content || ""), tool_calls: req_calls)
   end
 
-  defp to_req_llm_message(%{role: :assistant, content: content}), do: Context.assistant(content)
+  defp to_req_llm_message(%{role: :assistant, content: content}), do: Context.assistant(safe(content))
 
   defp to_req_llm_message(%{role: :tool} = message) do
-    Context.tool_result(message.tool_call_id, message.name, message.content)
+    Context.tool_result(message.tool_call_id, message.name, safe(message.content))
   end
+
+  # Never let non-UTF-8 bytes reach the provider request builder — a JSON encode
+  # error there fails the whole turn.
+  defp safe(content) when is_binary(content), do: String.replace_invalid(content)
+  defp safe(content), do: content
 
   defp image_label(n, name) when is_binary(name) and name != "", do: "[Image ##{n}: #{name}]"
   defp image_label(n, _name), do: "[Image ##{n}]"

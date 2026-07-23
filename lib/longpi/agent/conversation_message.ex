@@ -129,15 +129,15 @@ defmodule Longpi.Agent.ConversationMessage do
   @doc "Converts a stored row back to the agent-loop message map."
   def to_message(%{role: :user} = record) do
     case record.attachments do
-      [] -> %{role: :user, content: record.content}
-      attachments -> %{role: :user, content: record.content, attachments: attachments}
+      [] -> %{role: :user, content: safe(record.content)}
+      attachments -> %{role: :user, content: safe(record.content), attachments: attachments}
     end
   end
 
   def to_message(%{role: :assistant} = record) do
     %{
       role: :assistant,
-      content: record.content,
+      content: safe(record.content),
       tool_calls: Enum.map(record.tool_calls, &decode_call/1)
     }
   end
@@ -147,10 +147,16 @@ defmodule Longpi.Agent.ConversationMessage do
       role: :tool,
       tool_call_id: record.tool_call_id,
       name: record.tool_name,
-      content: record.content,
+      content: safe(record.content),
       error?: record.error
     }
   end
+
+  # Stored content may predate UTF-8 sanitization (e.g. raw GBK/binary tool
+  # output). Scrub on load so the in-memory history — and everything downstream
+  # (the LLM request build, the channel push) — is valid UTF-8.
+  defp safe(content) when is_binary(content), do: String.replace_invalid(content)
+  defp safe(content), do: content
 
   defp encode_call(call), do: %{"id" => call.id, "name" => call.name, "args" => call.args}
 
