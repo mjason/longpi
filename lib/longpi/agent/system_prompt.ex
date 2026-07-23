@@ -60,7 +60,9 @@ defmodule Longpi.Agent.SystemPrompt do
     - Extension guide: {{ext_guide}} — it defines exactly the APIs the sandbox
       provides (fetch, process.env, longpi.run); the code runs in QuickJS. Author
       in TypeScript (`.ts`) — type annotations are stripped automatically before
-      running; plain JavaScript also works
+      running; plain JavaScript also works. A tool can return plain text OR a
+      small UI (a table/card/stat, authored in TSX — name the file `.tsx`); the
+      guide's "Custom result UI" section lists the components
     - Examples: {{ext_examples}} (e.g. web-search.ts — a tool with an API key)
 
     Create the extension with your built-in write/edit tools, at
