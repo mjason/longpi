@@ -33,7 +33,12 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "loop",
-    summary: "Loop a task until done, e.g. /loop 10 fix all tests — /loop stop ends it",
+    summary: "Loop a task until done, e.g. /loop 10 every 30m check CI — /loop stop ends it",
+    takesArgs: true,
+  },
+  {
+    name: "schedule",
+    summary: "Cron a task, e.g. /schedule 0 23 * * * daily summary — /schedule list",
     takesArgs: true,
   },
   {

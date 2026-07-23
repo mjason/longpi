@@ -5,15 +5,18 @@ import {
   destroyModel,
   destroyModelAlias,
   destroyProvider,
+  destroyScheduledTask,
   listModelAliases,
   listModels,
   listProviders,
+  listScheduledTasks,
   listSettings,
   putModelAlias,
   putProvider,
   putSetting,
   setProviderKey,
   updateModel,
+  updateScheduledTask,
 } from "../ash_rpc";
 
 export type SettingsMap = Record<string, string>;
@@ -134,6 +137,53 @@ export async function saveModelAlias(
 
 export async function removeModelAlias(id: string) {
   return destroyModelAlias({ identity: id, headers: buildCSRFHeaders() });
+}
+
+// ── Scheduled tasks (cron) ─────────────────────────────────────────────
+
+export type ScheduledTaskRow = {
+  id: string;
+  conversationId: string;
+  cron: string;
+  task: string;
+  enabled: boolean;
+  lastRunAt: string | null;
+};
+
+export async function loadScheduledTasks(): Promise<ScheduledTaskRow[]> {
+  const result = await listScheduledTasks({
+    fields: ["id", "conversationId", "cron", "task", "enabled", "lastRunAt"],
+    headers: buildCSRFHeaders(),
+  });
+  return result.success ? (result.data as ScheduledTaskRow[]) : [];
+}
+
+export async function setScheduledTask(
+  id: string,
+  changes: Partial<Pick<ScheduledTaskRow, "enabled" | "cron" | "task">>,
+) {
+  return updateScheduledTask({
+    identity: id,
+    input: changes,
+    fields: ["id"],
+    headers: buildCSRFHeaders(),
+  });
+}
+
+export async function removeScheduledTask(id: string) {
+  return destroyScheduledTask({ identity: id, headers: buildCSRFHeaders() });
+}
+
+/** Server-computed next run time per cron expression (cron math is backend-only). */
+export async function loadCronNexts(crons: string[]): Promise<Record<string, string | null>> {
+  const res = await fetch("/rpc/cron-next", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...buildCSRFHeaders() },
+    body: JSON.stringify({ crons }),
+  });
+  if (!res.ok) return {};
+  const body = await res.json();
+  return body.nexts ?? {};
 }
 
 export async function loadToolCatalog(): Promise<ToolCatalogEntry[]> {

@@ -21,6 +21,9 @@ defmodule Longpi.Application do
       {Task.Supervisor, name: Longpi.Agent.TaskSupervisor},
       {Registry, keys: :unique, name: Longpi.Agent.SessionRegistry},
       {DynamicSupervisor, name: Longpi.Agent.SessionSupervisor, strategy: :one_for_one},
+      # Cron-scheduled tasks: ticks every minute, fires due tasks into their
+      # conversations. After the session supervisor (it starts sessions).
+      Longpi.Agent.Scheduler,
       # Start a worker by calling: Longpi.Worker.start_link(arg)
       # {Longpi.Worker, arg},
       # Start to serve requests, typically the last entry

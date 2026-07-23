@@ -4,7 +4,7 @@ defmodule Longpi.MixProject do
   def project do
     [
       app: :longpi,
-      version: "0.1.52",
+      version: "0.1.53",
       elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -62,6 +62,8 @@ defmodule Longpi.MixProject do
       {:picosat_elixir, "~> 0.2"},
       {:sourceror, "~> 1.8", only: [:dev, :test]},
       {:ash_typescript, "~> 0.17"},
+      # Cron-expression parsing/matching for scheduled tasks (Quantum's core).
+      {:crontab, "~> 1.1"},
       {:usage_rules, "~> 1.0", only: [:dev]},
       {:ash_admin, "~> 1.0"},
       {:ash_authentication_phoenix, "~> 2.0"},

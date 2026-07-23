@@ -48,6 +48,13 @@ defmodule Longpi.Agent do
       rpc_action :put_model_alias, :put
       rpc_action :destroy_model_alias, :destroy
     end
+
+    resource Longpi.Agent.ScheduledTask do
+      rpc_action :list_scheduled_tasks, :list
+      rpc_action :create_scheduled_task, :create
+      rpc_action :update_scheduled_task, :update
+      rpc_action :destroy_scheduled_task, :destroy
+    end
   end
 
   resources do
@@ -89,6 +96,15 @@ defmodule Longpi.Agent do
       define :put_model_alias, action: :put
       define :list_model_aliases, action: :list
       define :destroy_model_alias, action: :destroy
+    end
+
+    resource Longpi.Agent.ScheduledTask do
+      define :create_scheduled_task, action: :create
+      define :list_scheduled_tasks, action: :list
+      define :list_enabled_scheduled_tasks, action: :enabled
+      define :scheduled_tasks_for, action: :for_conversation, args: [:conversation_id]
+      define :update_scheduled_task, action: :update
+      define :destroy_scheduled_task, action: :destroy
     end
 
     resource Longpi.Agent.Compaction do

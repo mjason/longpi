@@ -71,6 +71,7 @@ defmodule LongpiWeb.Router do
     pipe_through [:browser, :require_auth_api]
 
     get "/rpc/tool-catalog", ConfigController, :tool_catalog
+    post "/rpc/cron-next", ConfigController, :cron_next
     get "/rpc/config-defaults", ConfigController, :defaults
     post "/rpc/discover-models", ConfigController, :discover_models
     get "/rpc/sessions", ConfigController, :sessions

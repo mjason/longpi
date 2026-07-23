@@ -18,6 +18,26 @@ defmodule LongpiWeb.ConfigController do
     json(conn, %{tools: Longpi.Agent.Prompts.tool_catalog()})
   end
 
+  # Next run times for a batch of cron expressions (the Schedules admin page
+  # shows them; cron math lives server-side with the scheduler's clock).
+  # Capped and type-filtered: next_run searches up to 10k candidate dates per
+  # expression, so an unbounded hostile list would pin the CPU — and non-string
+  # entries would crash the parser.
+  def cron_next(conn, %{"crons" => crons}) when is_list(crons) do
+    nexts =
+      crons
+      |> Enum.filter(&is_binary/1)
+      |> Enum.take(100)
+      |> Map.new(fn cron ->
+        case Longpi.Agent.Scheduler.next_run(cron) do
+          {:ok, at} -> {cron, NaiveDateTime.to_string(at)}
+          :error -> {cron, nil}
+        end
+      end)
+
+    json(conn, %{nexts: nexts})
+  end
+
   def defaults(conn, _params) do
     json(conn, %{
       system_prompt: Longpi.Agent.SystemPrompt.default_template(),

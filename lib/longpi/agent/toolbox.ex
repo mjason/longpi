@@ -20,6 +20,7 @@ defmodule Longpi.Agent.Toolbox do
     Tools.ApplyPatch,
     Tools.Bash,
     Tools.ContinueLater,
+    Tools.Schedule,
     Tools.Grep,
     Tools.Find,
     Tools.Ls

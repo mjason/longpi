@@ -126,6 +126,16 @@ const en = {
   "manage.embed.desc": "Embed the agent in another app (iframe + token).",
   "manage.conversations": "Conversations",
   "manage.conversations.desc": "Every conversation, with usage and cleanup.",
+  "manage.schedules": "Schedules",
+  "manage.schedules.desc": "Cron schedules across every conversation.",
+  "schedules.hint":
+    "Every conversation's cron schedules. The agent creates them from natural language (or /schedule); toggle, inspect, or delete them here.",
+  "schedules.empty": "No schedules yet — ask the agent, e.g. \"每天晚上11点总结当天工作\".",
+  "schedules.next": "next",
+  "schedules.last": "last",
+  "schedules.never": "not run yet",
+  "schedules.confirmDelete": "Delete this schedule? It will never fire again.",
+  "schedules.create.hint": "Create schedules by asking the agent in its conversation, or with /schedule.",
   "manage.sessions": "Sessions",
   "manage.sessions.desc": "Live agent processes running right now.",
 
@@ -174,7 +184,8 @@ const en = {
   "slash.model": "Switch the model, e.g. /model openai:gpt-5.4",
   "slash.reload": "Reload extensions (pick up newly written ones)",
   "slash.rename": "Rename this conversation, e.g. /rename 部署调优",
-  "slash.loop": "Loop a task until done, e.g. /loop 10 fix all tests — /loop stop ends it",
+  "slash.loop": "Loop a task until done, e.g. /loop 10 every 30m check CI — /loop stop ends it",
+  "slash.schedule": "Cron a task, e.g. /schedule 0 23 * * * daily summary — /schedule list",
   "slash.help": "List the available commands",
 
   // Management: settings tabs (General / Providers / Prompts & Tools)
@@ -344,6 +355,16 @@ const zh: Record<I18nKey, string> = {
   "manage.embed.desc": "把 agent 嵌入其它应用（iframe + token）。",
   "manage.conversations": "会话",
   "manage.conversations.desc": "全部会话，可查看与清理。",
+  "manage.schedules": "定时任务",
+  "manage.schedules.desc": "所有会话的 cron 定时任务。",
+  "schedules.hint":
+    "全部会话的 cron 定时任务。可以在对话里用自然语言（或 /schedule）创建；这里可开关、查看、删除。",
+  "schedules.empty": "还没有定时任务 —— 在对话里直接说，例如“每天晚上11点总结当天工作”。",
+  "schedules.next": "下次",
+  "schedules.last": "上次",
+  "schedules.never": "尚未运行",
+  "schedules.confirmDelete": "删除这个定时任务？之后将不再触发。",
+  "schedules.create.hint": "在会话里让 agent 创建定时任务，或使用 /schedule 命令。",
   "manage.sessions": "运行中",
   "manage.sessions.desc": "当前正在运行的 agent 进程。",
 
@@ -388,7 +409,8 @@ const zh: Record<I18nKey, string> = {
   "slash.model": "切换模型，如 /model openai:gpt-5.4",
   "slash.reload": "重新加载扩展（加载新写入的扩展）",
   "slash.rename": "重命名当前会话，如 /rename 部署调优",
-  "slash.loop": "循环执行任务直到完成，如 /loop 10 修完所有测试 —— /loop stop 结束",
+  "slash.loop": "循环执行任务直到完成，如 /loop 10 every 30m 检查CI —— /loop stop 结束",
+  "slash.schedule": "定时任务(cron)，如 /schedule 0 23 * * * 每日总结 —— /schedule list 查看",
   "slash.help": "列出可用命令",
 
   // 管理：设置页（通用 / 提供方 / 提示词与工具）

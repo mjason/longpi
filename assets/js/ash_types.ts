@@ -4,6 +4,7 @@
 
 
 export type UUID = string;
+export type UtcDateTime = string;
 export type UtcDateTimeUsec = string;
 
 // Conversation Schema
@@ -121,6 +122,36 @@ export type ProviderAttributesOnlySchema = {
   name: string;
   label: string | null;
   baseUrl: string | null;
+  insertedAt: UtcDateTimeUsec;
+  updatedAt: UtcDateTimeUsec;
+};
+
+
+// ScheduledTask Schema
+export type ScheduledTaskResourceSchema = {
+  __type: "Resource";
+  __primitiveFields: "id" | "conversationId" | "cron" | "task" | "enabled" | "lastRunAt" | "insertedAt" | "updatedAt";
+  id: UUID;
+  conversationId: UUID;
+  cron: string;
+  task: string;
+  enabled: boolean;
+  lastRunAt: UtcDateTime | null;
+  insertedAt: UtcDateTimeUsec;
+  updatedAt: UtcDateTimeUsec;
+};
+
+
+
+export type ScheduledTaskAttributesOnlySchema = {
+  __type: "Resource";
+  __primitiveFields: "id" | "conversationId" | "cron" | "task" | "enabled" | "lastRunAt" | "insertedAt" | "updatedAt";
+  id: UUID;
+  conversationId: UUID;
+  cron: string;
+  task: string;
+  enabled: boolean;
+  lastRunAt: UtcDateTime | null;
   insertedAt: UtcDateTimeUsec;
   updatedAt: UtcDateTimeUsec;
 };
@@ -425,6 +456,74 @@ export type ProviderFilterInput = {
 
 
 };
+export type ScheduledTaskFilterInput = {
+  and?: Array<ScheduledTaskFilterInput>;
+  or?: Array<ScheduledTaskFilterInput>;
+  not?: Array<ScheduledTaskFilterInput>;
+
+  id?: {
+    eq?: UUID;
+    notEq?: UUID;
+    in?: Array<UUID>;
+  };
+
+  conversationId?: {
+    eq?: UUID;
+    notEq?: UUID;
+    in?: Array<UUID>;
+  };
+
+  cron?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
+  };
+
+  task?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
+  };
+
+  enabled?: {
+    eq?: boolean;
+    notEq?: boolean;
+  };
+
+  lastRunAt?: {
+    eq?: UtcDateTime;
+    notEq?: UtcDateTime;
+    greaterThan?: UtcDateTime;
+    greaterThanOrEqual?: UtcDateTime;
+    lessThan?: UtcDateTime;
+    lessThanOrEqual?: UtcDateTime;
+    in?: Array<UtcDateTime>;
+    isNil?: boolean;
+  };
+
+  insertedAt?: {
+    eq?: UtcDateTimeUsec;
+    notEq?: UtcDateTimeUsec;
+    greaterThan?: UtcDateTimeUsec;
+    greaterThanOrEqual?: UtcDateTimeUsec;
+    lessThan?: UtcDateTimeUsec;
+    lessThanOrEqual?: UtcDateTimeUsec;
+    in?: Array<UtcDateTimeUsec>;
+  };
+
+  updatedAt?: {
+    eq?: UtcDateTimeUsec;
+    notEq?: UtcDateTimeUsec;
+    greaterThan?: UtcDateTimeUsec;
+    greaterThanOrEqual?: UtcDateTimeUsec;
+    lessThan?: UtcDateTimeUsec;
+    lessThanOrEqual?: UtcDateTimeUsec;
+    in?: Array<UtcDateTimeUsec>;
+  };
+
+
+
+};
 export type SettingFilterInput = {
   and?: Array<SettingFilterInput>;
   or?: Array<SettingFilterInput>;
@@ -486,6 +585,9 @@ export type ModelAliasFilterField = (typeof modelAliasFilterFields)[number];
 export const providerFilterFields = ["id", "name", "label", "baseUrl", "insertedAt", "updatedAt", "configured"] as const;
 export type ProviderFilterField = (typeof providerFilterFields)[number];
 
+export const scheduledTaskFilterFields = ["id", "conversationId", "cron", "task", "enabled", "lastRunAt", "insertedAt", "updatedAt"] as const;
+export type ScheduledTaskFilterField = (typeof scheduledTaskFilterFields)[number];
+
 export const settingFilterFields = ["id", "key", "value", "insertedAt", "updatedAt"] as const;
 export type SettingFilterField = (typeof settingFilterFields)[number];
 
@@ -501,6 +603,9 @@ export type ModelAliasSortField = (typeof modelAliasSortFields)[number];
 
 export const providerSortFields = ["id", "name", "label", "baseUrl", "insertedAt", "updatedAt", "configured"] as const;
 export type ProviderSortField = (typeof providerSortFields)[number];
+
+export const scheduledTaskSortFields = ["id", "conversationId", "cron", "task", "enabled", "lastRunAt", "insertedAt", "updatedAt"] as const;
+export type ScheduledTaskSortField = (typeof scheduledTaskSortFields)[number];
 
 export const settingSortFields = ["id", "key", "value", "insertedAt", "updatedAt"] as const;
 export type SettingSortField = (typeof settingSortFields)[number];

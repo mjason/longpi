@@ -109,8 +109,9 @@ defmodule LongpiWeb.ConversationChannel do
     end
   end
 
-  # /loop [N] <task> — run the task in a self-continuing loop (N iterations,
-  # default 10). /loop stop cancels; /loop reports status.
+  # /loop [N] [every <interval>] <task> — run the task in a self-continuing
+  # loop (N iterations, default 10). `every 30m` waits between turns (a timed
+  # polling loop). /loop stop cancels; /loop reports status.
   def handle_in("command", %{"name" => "loop"} = payload, socket) do
     session = socket.assigns.session
     arg = String.trim(payload["arg"] || "")
@@ -119,7 +120,8 @@ defmodule LongpiWeb.ConversationChannel do
       arg == "" ->
         case Session.loop_status(session) do
           nil ->
-            {:reply, {:ok, %{content: "Usage: /loop [N] <task> — or /loop stop."}}, socket}
+            {:reply,
+             {:ok, %{content: "Usage: /loop [N] [every 30m] <task> — or /loop stop."}}, socket}
 
           %{remaining: remaining, total: total} ->
             {:reply,
@@ -132,19 +134,58 @@ defmodule LongpiWeb.ConversationChannel do
         {:reply, {:ok, %{content: message}}, socket}
 
       true ->
-        {iterations, task} =
+        {iterations, rest} =
           case Integer.parse(arg) do
-            {n, " " <> rest} when n > 0 -> {n, rest}
+            {n, " " <> rest} when n > 0 -> {n, String.trim_leading(rest)}
             _ -> {10, arg}
           end
 
-        case Session.start_loop(session, task, iterations) do
-          {:ok, n} ->
-            {:reply, {:ok, %{content: "Loop started (up to #{n} turns)."}}, socket}
+        {every_ms, task} =
+          case Regex.run(~r/^every\s+(\S+)\s+(.+)$/s, rest) do
+            [_, interval, task] ->
+              case Longpi.Agent.Tools.ContinueLater.parse_delay(interval) do
+                {:ok, ms} when ms > 0 -> {ms, task}
+                _ -> {:error, interval}
+              end
 
-          {:error, reason} ->
-            {:reply, {:error, %{reason: to_string(reason)}}, socket}
+            nil ->
+              {0, rest}
+          end
+
+        case every_ms do
+          :error ->
+            {:reply,
+             {:error, %{reason: "invalid interval #{inspect(task)} — use 30s / 10m / 2h"}},
+             socket}
+
+          _ ->
+            case Session.start_loop(session, task, iterations, every_ms) do
+              {:ok, n} ->
+                suffix = if every_ms > 0, do: ", every #{div(every_ms, 1000)}s", else: ""
+                {:reply, {:ok, %{content: "Loop started (up to #{n} turns#{suffix})."}}, socket}
+
+              {:error, reason} ->
+                {:reply, {:error, %{reason: to_string(reason)}}, socket}
+            end
         end
+    end
+  end
+
+  # /schedule <cron> <task> — cron-fire the task into THIS conversation.
+  # Also: /schedule list, /schedule rm <n>, and a "HH:MM <task>" daily shortcut.
+  def handle_in("command", %{"name" => "schedule"} = payload, socket) do
+    conversation_id = socket.assigns.conversation_id
+    arg = String.trim(payload["arg"] || "")
+
+    cond do
+      arg == "" or arg == "list" ->
+        {:reply, {:ok, %{content: schedule_list(conversation_id)}}, socket}
+
+      String.starts_with?(arg, "rm ") ->
+        {:reply, schedule_remove(conversation_id, String.trim_leading(arg, "rm ")), socket}
+
+      true ->
+        {:reply, schedule_add(conversation_id, arg), socket}
     end
   end
 
@@ -278,6 +319,51 @@ defmodule LongpiWeb.ConversationChannel do
   defp serialize_event({:loop_ended, reason}), do: {"loop_ended", %{reason: to_string(reason)}}
 
   defp serialize_event(_event), do: nil
+
+  # ── /schedule helpers (thin wrappers over Longpi.Agent.Schedules) ───
+
+  defp schedule_list(conversation_id) do
+    case Longpi.Agent.Schedules.list_text(conversation_id) do
+      "No schedules" <> _ ->
+        "No schedules. Usage: /schedule <cron> <task> (e.g. /schedule 0 23 * * * 每日总结), " <>
+          "/schedule 23:00 <task> (daily shortcut), /schedule rm <n>."
+
+      text ->
+        text
+    end
+  end
+
+  defp schedule_remove(conversation_id, index_text) do
+    with {n, ""} <- Integer.parse(String.trim(index_text)),
+         {:ok, message} <- Longpi.Agent.Schedules.remove(conversation_id, n) do
+      {:ok, %{content: message}}
+    else
+      _ -> {:error, %{reason: "Usage: /schedule rm <n> — see /schedule list for numbers"}}
+    end
+  end
+
+  defp schedule_add(conversation_id, arg) do
+    with {:ok, cron, task} <- split_cron(arg),
+         {:ok, message} <- Longpi.Agent.Schedules.add(conversation_id, cron, task) do
+      {:ok, %{content: message}}
+    else
+      {:error, reason} -> {:error, %{reason: to_string(reason)}}
+    end
+  end
+
+  # "23:00 <task>" daily shortcut, or the first five tokens as a cron expression.
+  defp split_cron(arg) do
+    case Regex.run(~r/^(\d{1,2}):(\d{2})\s+(.+)$/s, arg) do
+      [_, hh, mm, task] ->
+        {:ok, "#{String.to_integer(mm)} #{String.to_integer(hh)} * * *", String.trim(task)}
+
+      nil ->
+        case String.split(arg, ~r/\s+/, parts: 6) do
+          [m, h, dom, mon, dow, task] -> {:ok, Enum.join([m, h, dom, mon, dow], " "), String.trim(task)}
+          _ -> {:error, "Usage: /schedule <5-field cron> <task>, or /schedule HH:MM <task>"}
+        end
+    end
+  end
 
   defp serialize_approval(%{call: call, conversation_id: cid, role: role, handle: handle}) do
     %{

@@ -1,5 +1,6 @@
 import {
   Blocks,
+  CalendarClock,
   Boxes,
   Cpu,
   Frame,
@@ -24,6 +25,7 @@ import { UsersSection } from "./sections/UsersSection";
 import { ModelsSection } from "./sections/ModelsSection";
 import { ExtensionsSection } from "./sections/ExtensionsSection";
 import { SessionsSection } from "./sections/SessionsSection";
+import { SchedulesSection } from "./sections/SchedulesSection";
 import { GeneralTab, ProvidersTab, ToolsTab } from "./SettingsDialog";
 
 type SectionId =
@@ -35,7 +37,8 @@ type SectionId =
   | "extensions"
   | "embed"
   | "conversations"
-  | "sessions";
+  | "sessions"
+  | "schedules";
 
 type Section = {
   id: SectionId;
@@ -110,6 +113,14 @@ const SECTIONS: Section[] = [
     icon: MessagesSquare,
     group: "manage.group.data",
     render: () => <ConversationsSection />,
+  },
+  {
+    id: "schedules",
+    label: "manage.schedules",
+    description: "manage.schedules.desc",
+    icon: CalendarClock,
+    group: "manage.group.data",
+    render: () => <SchedulesSection />,
   },
   {
     id: "sessions",
