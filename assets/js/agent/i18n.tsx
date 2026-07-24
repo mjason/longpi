@@ -58,6 +58,7 @@ const en = {
   // Message actions
   "msg.copy": "Copy",
   "msg.regenerate": "Regenerate",
+  "msg.retry": "Retry",
   "msg.more": "More",
   "msg.edit": "Edit",
   "msg.cancel": "Cancel",
@@ -292,6 +293,7 @@ const zh: Record<I18nKey, string> = {
 
   "msg.copy": "复制",
   "msg.regenerate": "重新生成",
+  "msg.retry": "重试",
   "msg.more": "更多",
   "msg.edit": "编辑",
   "msg.cancel": "取消",

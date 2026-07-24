@@ -283,6 +283,49 @@ defmodule Longpi.Agent.SessionLoopTest do
     end
   end
 
+  test "hitting max_iterations self-continues instead of failing (progress kept)", %{
+    session: session
+  } do
+    # First turn: the model calls tools forever (25 iterations exhaust the
+    # budget). Continuation turn: it answers normally.
+    stub(LLMMock, :stream, fn _, messages, _, _, _sink ->
+      continued? =
+        Enum.any?(messages, fn
+          %{role: :user, content: c} -> is_binary(c) and c =~ "[continue]"
+          _ -> false
+        end)
+
+      if continued? do
+        {:ok, %{text: "picked up and finished", tool_calls: []}}
+      else
+        {:ok, %{text: "", tool_calls: [%{id: "c#{System.unique_integer([:positive])}", name: "no_such_tool", args: %{}}]}}
+      end
+    end)
+
+    assert :ok = Session.send_message(session, "huge task")
+
+    wait_for(fn ->
+      Session.status(session) == :idle and
+        Enum.any?(Session.messages(session), fn
+          %{role: :assistant, content: c} -> is_binary(c) and c =~ "picked up and finished"
+          _ -> false
+        end)
+    end)
+
+    messages = Session.messages(session)
+    # No failure note anywhere — the budget stop is a continuation, not an error.
+    refute Enum.any?(messages, fn
+             %{content: c} -> is_binary(c) and c =~ "Turn failed"
+             _ -> false
+           end)
+
+    # The auto-continue prompt was injected and answered.
+    assert Enum.any?(messages, fn
+             %{role: :user, content: c} -> is_binary(c) and c =~ "[continue]"
+             _ -> false
+           end)
+  end
+
   test "continue_later schedules exactly one self-driven follow-up turn", %{session: session} do
     # Turn 1 schedules a continuation via the session call (as the tool would);
     # turn 2 is the injected wake-up and schedules nothing.

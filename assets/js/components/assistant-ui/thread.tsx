@@ -545,6 +545,35 @@ const ComposerAction: FC = () => {
   );
 };
 
+// A failed turn persists a "⚠ Turn failed: …" note as the last assistant
+// message. The hover-only action bar is too hidden for that moment — surface
+// an always-visible Retry that re-runs the last user message (regenerate).
+const FailedTurnRetry: FC = () => {
+  const { t } = useI18n();
+  const regenerate = useConversationStore((s) => s.regenerate);
+  const failed = useAuiState((s) => {
+    const first = s.message.content?.[0];
+    return first?.type === "text" && first.text.startsWith("⚠ Turn failed");
+  });
+  const running = useAuiState((s) => s.thread.isRunning);
+  if (!failed || running) return null;
+  return (
+    <MessagePrimitive.If last>
+      <div className="mt-2">
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5 active:scale-[0.98]"
+          onClick={() => regenerate()}
+        >
+          <RefreshCwIcon className="size-3.5" />
+          {t("msg.retry")}
+        </Button>
+      </div>
+    </MessagePrimitive.If>
+  );
+};
+
 const MessageError: FC = () => {
   return (
     <MessagePrimitive.Error>
@@ -676,6 +705,7 @@ const AssistantMessage: FC = () => {
           }}
         </MessagePrimitive.GroupedParts>
         <MessageError />
+        <FailedTurnRetry />
       </div>
 
       <div

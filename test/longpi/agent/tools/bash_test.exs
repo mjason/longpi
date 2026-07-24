@@ -25,6 +25,19 @@ defmodule Longpi.Agent.Tools.BashTest do
     assert text =~ "exit code: 3"
   end
 
+  test "strips ANSI colors and collapses \\r progress redraws", %{ctx: ctx} do
+    # Simulates uv/npm progress output: colored frames rewritten with \r.
+    cmd = ~S(printf 'plain\n\e[2mnumpy\e[0m ---- 0 B\r\e[2mnumpy\e[0m ---- 16 KiB\r\e[32mnumpy done\e[0m\nnext line\n')
+    assert {:ok, output} = Bash.run(%{command: cmd}, ctx)
+
+    refute output =~ "\e["
+    refute output =~ "[2m"
+    refute output =~ "16 KiB"
+    assert output =~ "plain"
+    assert output =~ "numpy done"
+    assert output =~ "next line"
+  end
+
   test "notes empty output", %{ctx: ctx} do
     assert {:ok, text} = Bash.run(%{command: "true"}, ctx)
     assert text =~ "no output"

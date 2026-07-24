@@ -90,7 +90,7 @@ defmodule Longpi.Agent.Tools.Bash do
 
   defp format(result) do
     body =
-      case String.trim(result.output) do
+      case result.output |> strip_terminal_noise() |> String.trim() do
         "" -> "(no output)"
         output -> output
       end
@@ -105,6 +105,25 @@ defmodule Longpi.Agent.Tools.Bash do
       |> Enum.filter(& &1)
 
     Enum.join([body | notes], "\n")
+  end
+
+  # The shim runs commands under a pty, so tools (uv, npm, cargo) emit ANSI
+  # color codes and \r-redrawn progress frames. Both pollute the model's
+  # context AND render as garbage in the UI ("[2m[32m…") — strip escape
+  # sequences and keep only the FINAL frame of every \r-rewritten line.
+  defp strip_terminal_noise(output) do
+    output
+    # CSI sequences (colors, cursor movement): ESC [ params letter
+    |> String.replace(~r/\e\[[0-9;?]*[A-Za-z]/, "")
+    # OSC sequences (titles, hyperlinks): ESC ] ... BEL or ESC \
+    |> String.replace(~r/\e\][^\a\e]*(\a|\e\\)/, "")
+    # Stray non-CSI escapes
+    |> String.replace(~r/\e[@-Z\\-_]/, "")
+    # pty line endings, then collapse \r redraws to the last frame per line
+    |> String.replace("\r\n", "\n")
+    |> String.split("\n")
+    |> Enum.map(fn line -> line |> String.split("\r") |> List.last() end)
+    |> Enum.join("\n")
   end
 
   defp tail_note(%{tail: tail}) when is_binary(tail) and tail != "",

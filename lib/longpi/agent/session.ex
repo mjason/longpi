@@ -854,6 +854,28 @@ defmodule Longpi.Agent.Session do
         state = schedule_continue(state)
         {:noreply, maybe_start_compaction(state)}
 
+      {:error, :max_iterations, new_messages} when state.auto_turns < @auto_turns_max ->
+        # NOT a failure: the model was mid-task and ran out of the per-turn
+        # tool budget. Persist the progress and self-continue — regenerate
+        # would throw away 25 turns of tool work; picking up where it left
+        # off is what a human would do. The auto-turn fuse still bounds the
+        # total, so a genuinely stuck task ends at the fuse (below clause).
+        state = persist(state, new_messages)
+        state = %{state | messages: state.messages ++ new_messages}
+        state = notify(state, {:history, broadcast_history(state)})
+        state = notify(state, {:turn_ended, :complete})
+        fire_ext_event(state, "turn_end", %{reason: "max_iterations"})
+
+        state = %{
+          state
+          | auto_continue:
+              {"[continue] You hit the per-turn tool-call budget. Pick up exactly " <>
+                 "where you left off and finish the task.", 0}
+        }
+
+        state = schedule_continue(state)
+        {:noreply, maybe_start_compaction(state)}
+
       {:error, reason, new_messages} ->
         # Persist a short failure note too: the turn_failed event is transient,
         # so without it a user who reloads sees their message answered by
