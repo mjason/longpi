@@ -836,6 +836,10 @@ defmodule Longpi.Agent.Session do
         {:noreply, maybe_start_compaction(state)}
 
       {:error, reason, new_messages} ->
+        # Persist a short failure note too: the turn_failed event is transient,
+        # so without it a user who reloads sees their message answered by
+        # nothing at all (the "silent dead turn" report).
+        new_messages = new_messages ++ [failure_note(reason)]
         state = persist(state, new_messages)
         state = %{state | messages: state.messages ++ new_messages}
         state = notify(state, {:history, broadcast_history(state)})
@@ -845,6 +849,13 @@ defmodule Longpi.Agent.Session do
         # A failed turn never self-continues — that would loop on the failure.
         {:noreply, %{state | loop: nil, auto_continue: nil}}
     end
+  end
+
+  # A compact, persisted record of why the turn died — honest context for both
+  # the user (after a reload) and the model (on the next turn).
+  defp failure_note(reason) do
+    text = reason |> inspect() |> String.slice(0, 300)
+    Message.assistant("⚠ Turn failed: #{text}")
   end
 
   # Self-driven continuation: fires after a completed turn (immediately, or
@@ -919,6 +930,9 @@ defmodule Longpi.Agent.Session do
     state = keep_partial_text(state)
     state = cancel_continue_timer(state)
     state = %{state | status: :idle, task: nil, partial: [], loop: nil, auto_continue: nil}
+    note = failure_note({:crashed, reason})
+    state = persist(state, [note])
+    state = %{state | messages: state.messages ++ [note]}
     state = notify(state, {:history, broadcast_history(state)})
     state = notify(state, {:turn_failed, {:crashed, reason}})
     notify_parent_done(state, {:failed, {:crashed, reason}})

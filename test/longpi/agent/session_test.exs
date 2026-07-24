@@ -132,7 +132,12 @@ defmodule Longpi.Agent.SessionTest do
     assert_receive {:agent_event, {:turn_failed, :boom}}, 2_000
     assert Session.status(session) == :idle
 
-    # The user message is kept so the turn can be retried
-    assert %{role: :user, content: "hi"} = session |> Session.messages() |> List.last()
+    # The user message is kept so the turn can be retried, and a persisted
+    # failure note follows it — a reload must show WHY nothing answered.
+    assert [%{role: :user, content: "hi"}, %{role: :assistant, content: note}] =
+             session |> Session.messages() |> Enum.take(-2)
+
+    assert note =~ "Turn failed"
+    assert note =~ "boom"
   end
 end

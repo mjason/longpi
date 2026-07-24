@@ -7,6 +7,15 @@
 # General application configuration
 import Config
 
+# Streaming stall guard: max silence between chunks before the LLM stream is
+# declared dead. req_llm's defaults (30s plain / 300s thinking) meant a hung
+# gateway held a reasoning turn for 5 minutes per attempt — ~15 minutes with
+# retries — with zero user feedback. 90s/180s still tolerates slow first
+# tokens while failing fast enough to matter.
+config :req_llm,
+  stream_receive_timeout: 90_000,
+  thinking_timeout: 180_000
+
 config :ash_typescript,
   output_file: "assets/js/ash_rpc.ts",
   run_endpoint: "/rpc/run",

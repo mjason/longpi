@@ -170,11 +170,17 @@ const Items: FC<ItemsProps> = ({
                 </ComposerPrimitive.Unstable_TriggerPopoverItem>
               );
             })}
-            {items.length === 0 && (
-              <div className="text-muted-foreground px-3 py-2 text-sm">
-                {isLoading ? loadingLabel : emptyLabel}
-              </div>
-            )}
+            {items.length === 0 &&
+              (isLoading ? (
+                <div className="text-muted-foreground px-3 py-2 text-sm">{loadingLabel}</div>
+              ) : (
+                // No match → hide the whole popover (see the root's has-[]
+                // rule) instead of announcing "no match": typing @@secret
+                // markers or an unmatched @query shouldn't pop anything up.
+                <div data-empty-hide className="text-muted-foreground hidden px-3 py-2 text-sm">
+                  {emptyLabel}
+                </div>
+              ))}
           </div>
         </div>
       )}
@@ -215,6 +221,9 @@ const ComposerTriggerPopoverImpl: FC<ComposerTriggerPopoverProps> = ({
       data-slot="composer-trigger-popover"
       className={cn(
         "aui-composer-trigger-popover bg-popover text-popover-foreground absolute start-0 bottom-full z-50 mb-2 w-64 overflow-hidden rounded-xl border-0 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18),0_2px_10px_-2px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] dark:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.5)] dark:ring-white/[0.08]",
+        // An empty (no-match) item list marks itself with data-empty-hide;
+        // hide the panel entirely rather than showing a "no match" box.
+        "has-[[data-empty-hide]]:hidden",
         className,
       )}
       {...props}

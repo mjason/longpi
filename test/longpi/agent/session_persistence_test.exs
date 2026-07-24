@@ -143,10 +143,14 @@ defmodule Longpi.Agent.SessionPersistenceTest do
     :ok = Session.send_message(session, "will fail")
     assert_receive {:agent_event, {:turn_failed, :boom}}, 2_000
 
-    assert [%{role: :user, content: "will fail"}] =
+    # The user message survives for a retry, and the persisted failure note
+    # explains the silence to anyone who reloads.
+    assert [%{role: :user, content: "will fail"}, %{role: :assistant, content: note}] =
              conversation.id
              |> Longpi.Agent.list_messages!()
              |> Enum.map(&Map.take(&1, [:role, :content]))
+
+    assert note =~ "Turn failed"
   end
 
   test "regenerate drops the last reply and re-runs the turn", %{conversation: conversation} do
