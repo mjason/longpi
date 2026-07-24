@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "node e2e/smoke.mjs"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.14.27",
@@ -47,6 +48,7 @@
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
     "jsdom": "^29.1.1",
+    "playwright": "^1.61.1",
     "vitest": "^4.1.10"
   }
 }
