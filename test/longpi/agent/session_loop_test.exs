@@ -283,6 +283,71 @@ defmodule Longpi.Agent.SessionLoopTest do
     end
   end
 
+  test "a transient gateway failure auto-retries by continuation and then succeeds", %{
+    session: session
+  } do
+    stub(LLMMock, :stream, fn _, messages, _, _, _sink ->
+      retried? =
+        Enum.any?(messages, fn
+          %{role: :user, content: c} -> is_binary(c) and c =~ "[auto-retry"
+          _ -> false
+        end)
+
+      if retried? do
+        {:ok, %{text: "recovered after the outage", tool_calls: []}}
+      else
+        {:error, %{status: 503, reason: "No available accounts"}}
+      end
+    end)
+
+    assert :ok = Session.send_message(session, "do the thing")
+
+    wait_for(fn ->
+      Session.status(session) == :idle and
+        Enum.any?(Session.messages(session), fn
+          %{role: :assistant, content: c} -> is_binary(c) and c =~ "recovered after the outage"
+          _ -> false
+        end)
+    end)
+
+    texts = session |> Session.messages() |> Enum.map(& &1[:content])
+    # The failure was recorded honestly AND retried without the user.
+    assert Enum.any?(texts, &(is_binary(&1) and &1 =~ "Turn failed"))
+    assert Enum.any?(texts, &(is_binary(&1) and &1 =~ "[auto-retry 1/2]"))
+  end
+
+  test "auto-retry gives up after the cap and leaves the manual Retry path", %{
+    session: session
+  } do
+    stub(LLMMock, :stream, fn _, _, _, _, _sink ->
+      {:error, %{status: 503, reason: "still down"}}
+    end)
+
+    assert :ok = Session.send_message(session, "doomed by gateway")
+
+    # Attempt 0 fails -> retry 1 fails -> retry 2 fails -> gives up.
+    wait_for(fn ->
+      Session.status(session) == :idle and
+        Enum.count(Session.messages(session), fn
+          %{role: :assistant, content: c} -> is_binary(c) and c =~ "Turn failed"
+          _ -> false
+        end) == 3
+    end)
+
+    Process.sleep(200)
+    # No further injections after the cap: exactly 2 auto-retry prompts exist.
+    retries =
+      session
+      |> Session.messages()
+      |> Enum.count(fn
+        %{role: :user, content: c} -> is_binary(c) and c =~ "[auto-retry"
+        _ -> false
+      end)
+
+    assert retries == 2
+    assert Session.status(session) == :idle
+  end
+
   test "hitting max_iterations self-continues instead of failing (progress kept)", %{
     session: session
   } do

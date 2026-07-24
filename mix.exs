@@ -4,7 +4,7 @@ defmodule Longpi.MixProject do
   def project do
     [
       app: :longpi,
-      version: "0.1.71",
+      version: "0.1.72",
       elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,

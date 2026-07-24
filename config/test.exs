@@ -65,3 +65,4 @@ config :longpi,
        :skills_global_dir,
        Path.join(System.tmp_dir!(), "longpi_test_global_skills_#{System.pid()}")
 config :longpi, scheduler_enabled: false
+config :longpi, turn_retry_delay_ms: 50

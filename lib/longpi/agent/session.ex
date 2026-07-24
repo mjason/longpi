@@ -33,6 +33,9 @@ defmodule Longpi.Agent.Session do
   @auto_turns_max 30
   # Ceiling for an explicit /loop's requested iteration count.
   @loop_max 50
+  # Transient turn failures (gateway 5xx/timeouts/stream drops) auto-retry
+  # this many times with backoff before giving up to the manual Retry button.
+  @turn_auto_retries 2
   @loop_done_marker "LOOP_DONE"
 
   alias Longpi.Agent.{
@@ -262,7 +265,10 @@ defmodule Longpi.Agent.Session do
        loop: nil,
        auto_continue: nil,
        auto_turns: 0,
-       continue_timer: nil
+       continue_timer: nil,
+       # Consecutive transient turn failures — drives auto-retry with backoff;
+       # cleared by a successful turn or a real user message.
+       turn_retries: 0
      }, {:continue, :load_extensions}}
   end
 
@@ -389,7 +395,7 @@ defmodule Longpi.Agent.Session do
   def handle_call({:send_message, text, attachments}, _from, state) do
     # A real user message resets the self-driven-turn fuse and takes over any
     # pending timed wake-up (a surviving loop re-arms after this turn).
-    state = state |> cancel_continue_timer() |> Map.put(:auto_turns, 0)
+    state = state |> cancel_continue_timer() |> Map.merge(%{auto_turns: 0, turn_retries: 0})
     user_message = Message.user(text, attachments)
     state = persist(state, [user_message])
     messages = state.messages ++ [user_message]
@@ -851,7 +857,7 @@ defmodule Longpi.Agent.Session do
         notify_parent_done(state, :done)
         state = maybe_start_titling(state)
         state = settle_loop(state, new_messages)
-        state = schedule_continue(state)
+        state = schedule_continue(%{state | turn_retries: 0})
         {:noreply, maybe_start_compaction(state)}
 
       {:error, :max_iterations, new_messages} when state.auto_turns < @auto_turns_max ->
@@ -886,11 +892,33 @@ defmodule Longpi.Agent.Session do
         state = notify(state, {:history, broadcast_history(state)})
         state = notify(state, {:turn_failed, reason})
         fire_ext_event(state, "turn_end", %{reason: "failed"})
-        notify_parent_done(state, {:failed, reason})
-        # A failed turn never self-continues — that would loop on the failure.
-        {:noreply, %{state | loop: nil, auto_continue: nil}}
+
+        if retryable_turn?(reason) and state.turn_retries < @turn_auto_retries and
+             state.auto_turns < @auto_turns_max do
+          # Transient (gateway 5xx / timeout / stream drop): retry BY
+          # CONTINUATION after a backoff — progress above is kept, unlike
+          # regenerate. The retry cap + auto-turn fuse stop a dead gateway
+          # from burning turns; the manual Retry button remains the fallback.
+          attempt = state.turn_retries + 1
+
+          state = %{
+            state
+            | turn_retries: attempt,
+              auto_continue:
+                {"[auto-retry #{attempt}/#{@turn_auto_retries}] The previous attempt " <>
+                   "failed (#{humanize_reason(reason)}). Retry and continue the task, " <>
+                   "reusing any progress above.", retry_delay(attempt)}
+          }
+
+          {:noreply, schedule_continue(state)}
+        else
+          notify_parent_done(state, {:failed, reason})
+          # A dead-end failure never self-continues — that would loop on it.
+          {:noreply, %{state | loop: nil, auto_continue: nil}}
+        end
     end
   end
+
 
   # Self-driven continuation: fires after a completed turn (immediately, or
   # via the delayed timer for timed loops / delayed continue_later). Skipped
@@ -1497,6 +1525,19 @@ defmodule Longpi.Agent.Session do
   end
 
   # ── Continuation engine (/loop + continue_later) ────────────────────
+
+  # Failures worth retrying without the user: upstream/gateway trouble, not
+  # logic errors. Crashes and unknown atoms stay manual.
+  defp retryable_turn?(%{status: status}) when status >= 500 or status == 429, do: true
+  defp retryable_turn?(%{reason: nested}) when is_map(nested), do: retryable_turn?(nested)
+
+  defp retryable_turn?(%{reason: text}) when is_binary(text),
+    do: text =~ ~r/status: (5\d\d|429)/ or text =~ "timeout"
+
+  defp retryable_turn?(reason), do: Longpi.Agent.Retry.transient?(reason)
+
+  defp retry_delay(attempt),
+    do: Application.get_env(:longpi, :turn_retry_delay_ms, 15_000) * attempt
 
   # A compact, persisted record of why the turn died — honest context for both
   # the user (after a reload) and the model (on the next turn).
