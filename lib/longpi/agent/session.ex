@@ -78,6 +78,13 @@ defmodule Longpi.Agent.Session do
   def loop_status(session), do: GenServer.call(session, :loop_status)
 
   @doc """
+  The RUNNING turn's streamed events so far, in wire format (oldest first) —
+  a client joining mid-turn replays them to reconstruct the live view.
+  Empty when idle.
+  """
+  def live_events(session), do: GenServer.call(session, :live_events)
+
+  @doc """
   Re-runs the last turn: drops the previous assistant response (and its tool
   calls) back to the last user message and generates a fresh reply.
   """
@@ -176,6 +183,13 @@ defmodule Longpi.Agent.Session do
        status: :idle,
        task: nil,
        partial: [],
+       # Live-turn replay buffer: the streamed events of the RUNNING turn,
+       # folded (adjacent deltas merged, tool output accumulated per call) so
+       # a client that joins mid-turn — a refresh, another tab, the mobile
+       # shell — replays them and lands on the exact live view instead of a
+       # blank pane until the turn ends. Newest first; capped by live_bytes.
+       live: [],
+       live_bytes: 0,
        ctx: ctx,
        llm: opts[:llm] || Application.fetch_env!(:longpi, :llm_client),
        model:
@@ -428,6 +442,9 @@ defmodule Longpi.Agent.Session do
 
   def handle_call(:loop_status, _from, state), do: {:reply, state.loop, state}
 
+  def handle_call(:live_events, _from, state),
+    do: {:reply, serialize_live(state.live), state}
+
   def handle_call({:edit_last, _text, _attachments}, _from, %{status: status} = state)
       when status in [:running, :compacting] do
     {:reply, {:error, :busy}, state}
@@ -484,7 +501,7 @@ defmodule Longpi.Agent.Session do
       |> keep_partial_text()
       # Interrupting also stops self-continuation — the user wants the wheel.
       |> cancel_continue_timer()
-      |> Map.merge(%{status: :idle, task: nil, partial: [], loop: nil, auto_continue: nil})
+      |> Map.merge(%{status: :idle, task: nil, partial: [], live: [], live_bytes: 0, loop: nil, auto_continue: nil})
 
     state = notify(state, {:turn_ended, :interrupted})
     fire_ext_event(state, "turn_end", %{reason: "interrupted"})
@@ -754,6 +771,7 @@ defmodule Longpi.Agent.Session do
   def handle_info({:turn_event, event}, state) do
     fire_tool_hook(state, event)
     state = notify(state, event)
+    state = buffer_live(state, event)
 
     case event do
       {:text_delta, text} -> {:noreply, %{state | partial: [state.partial | text]}}
@@ -815,7 +833,7 @@ defmodule Longpi.Agent.Session do
   # Turn task finished
   def handle_info({ref, result}, %{task: %Task{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
-    state = touch(%{state | status: :idle, task: nil, partial: []})
+    state = touch(%{state | status: :idle, task: nil, partial: [], live: [], live_bytes: 0})
 
     case result do
       {:ok, new_messages} ->
@@ -922,7 +940,7 @@ defmodule Longpi.Agent.Session do
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
     state = keep_partial_text(state)
     state = cancel_continue_timer(state)
-    state = %{state | status: :idle, task: nil, partial: [], loop: nil, auto_continue: nil}
+    state = %{state | status: :idle, task: nil, partial: [], live: [], live_bytes: 0, loop: nil, auto_continue: nil}
     note = failure_note({:crashed, reason})
     state = persist(state, [note])
     state = %{state | messages: state.messages ++ [note]}
@@ -1388,6 +1406,67 @@ defmodule Longpi.Agent.Session do
 
   @approval_timeout 5 * 60_000
 
+  # ── Live-turn replay buffer ─────────────────────────────────────────
+
+  # Cap the buffer so a pathological turn can't balloon the session process;
+  # past it, text-ish accumulation stops (structure events still recorded) and
+  # the eventual history broadcast fills the gap.
+  @live_max_bytes 2_000_000
+
+  defp buffer_live(state, event) do
+    case fold_live(state.live, event) do
+      nil ->
+        state
+
+      {live, added} when state.live_bytes + added <= @live_max_bytes ->
+        %{state | live: live, live_bytes: state.live_bytes + added}
+
+      {_live, _added} ->
+        state
+    end
+  end
+
+  # Newest-first fold: adjacent deltas merge into one entry, tool output
+  # accumulates per call id. Returns {new_live, bytes_added} or nil to skip.
+  defp fold_live([{:text, io} | rest], {:text_delta, text}),
+    do: {[{:text, [io | text]} | rest], byte_size(text)}
+
+  defp fold_live(live, {:text_delta, text}), do: {[{:text, [text]} | live], byte_size(text)}
+
+  defp fold_live([{:thinking, io} | rest], {:thinking_delta, text}),
+    do: {[{:thinking, [io | text]} | rest], byte_size(text)}
+
+  defp fold_live(live, {:thinking_delta, text}),
+    do: {[{:thinking, [text]} | live], byte_size(text)}
+
+  defp fold_live(live, {:tool_call, call}), do: {[{:tool_call, call} | live], 200}
+
+  defp fold_live([{:tool_output, id, io} | rest], {:tool_output, %{id: id, chunk: chunk}}),
+    do: {[{:tool_output, id, [io | chunk]} | rest], byte_size(chunk)}
+
+  defp fold_live(live, {:tool_output, %{id: id, chunk: chunk}}),
+    do: {[{:tool_output, id, [chunk]} | live], byte_size(chunk)}
+
+  defp fold_live(live, {:tool_result, %{call: call, content: content, error?: error?}}),
+    do: {[{:tool_result, call.id, call.name, content, error?} | live], byte_size(content)}
+
+  defp fold_live(_live, _event), do: nil
+
+  # Oldest-first wire format — the exact shapes the channel already pushes, so
+  # the client replays them through the same reducer paths as live events.
+  defp serialize_live(live) do
+    live
+    |> Enum.reverse()
+    |> Enum.map(fn
+      {:text, io} -> %{type: "text_delta", text: IO.iodata_to_binary(io)}
+      {:thinking, io} -> %{type: "thinking_delta", text: IO.iodata_to_binary(io)}
+      {:tool_call, call} -> %{type: "tool_call", id: call.id, name: call.name, args: call.args}
+      {:tool_output, id, io} -> %{type: "tool_output", id: id, chunk: IO.iodata_to_binary(io)}
+      {:tool_result, id, name, content, error?} ->
+        %{type: "tool_result", id: id, name: name, content: content, error: error?}
+    end)
+  end
+
   # ── Continuation engine (/loop + continue_later) ────────────────────
 
   # A compact, persisted record of why the turn died — honest context for both
@@ -1518,7 +1597,7 @@ defmodule Longpi.Agent.Session do
       end)
 
     fire_ext_event(state, "turn_start", %{})
-    touch(%{state | status: :running, task: task, partial: []})
+    touch(%{state | status: :running, task: task, partial: [], live: [], live_bytes: 0})
   end
 
   # ── Context compaction ────────────────────────────────────────────────

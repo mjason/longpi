@@ -35,6 +35,9 @@ defmodule LongpiWeb.ConversationChannel do
 
         reply = %{
           messages: history,
+          # Mid-turn streamed events (folded), so a reload/second tab replays
+          # straight onto the live view instead of a blank pane until turn end.
+          live: Session.live_events(session),
           status: Session.status(session),
           pending_approvals: Session.pending_approvals(session),
           context_usage: Session.context_usage(session),

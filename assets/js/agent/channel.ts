@@ -116,11 +116,37 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
     once(e, p.seq, () => e.dispatch({ type: "turn_failed", reason: p.reason })),
   );
 
+  // Replay mid-turn events from the join reply through the SAME reducer paths
+  // as live pushes — a refresh mid-turn reconstructs text, thinking, and
+  // running tool output exactly.
+  const replayLive = (events: LiveEvent[] | undefined) => {
+    for (const ev of events ?? []) {
+      switch (ev.type) {
+        case "text_delta":
+          e.dispatch({ type: "text_delta", text: ev.text ?? "" });
+          break;
+        case "thinking_delta":
+          e.dispatch({ type: "thinking_delta", text: ev.text ?? "" });
+          break;
+        case "tool_call":
+          e.dispatch({ type: "tool_call", id: ev.id!, name: ev.name!, args: ev.args ?? {} });
+          break;
+        case "tool_output":
+          e.dispatch({ type: "tool_output", id: ev.id!, chunk: ev.chunk ?? "" });
+          break;
+        case "tool_result":
+          e.dispatch({ type: "tool_result", id: ev.id!, content: ev.content ?? "", error: !!ev.error });
+          break;
+      }
+    }
+  };
+
   entry.joined = new Promise((resolve) => {
     channel
       .join()
       .receive("ok", (reply: JoinReply) => {
         e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands, subagents: reply.subagents, subagentApprovals: reply.subagent_approvals });
+        replayLive(reply.live);
         resolve();
       })
       .receive("error", (reply: { reason: string }) => {
@@ -154,6 +180,9 @@ export type SubagentApproval = {
 
 type JoinReply = {
   messages: HistoryMessage[];
+  // Folded stream events of the RUNNING turn, replayed on join (wire shapes
+  // identical to the live push events).
+  live?: LiveEvent[];
   status: string;
   pending_approvals?: string[];
   context_usage?: ContextUsage;
@@ -218,6 +247,17 @@ function capTail(text: string): string {
 // therefore carries `dbPos`, the DB position that "contains" it, which is
 // what fork ("new conversation up to here") truncates at. Index-as-position
 // was wrong and cut AI replies out of forks.
+export type LiveEvent = {
+  type: "text_delta" | "thinking_delta" | "tool_call" | "tool_output" | "tool_result";
+  text?: string;
+  id?: string;
+  name?: string;
+  args?: Record<string, unknown>;
+  chunk?: string;
+  content?: string;
+  error?: boolean;
+};
+
 export function historyToItems(messages: HistoryMessage[], pending: string[] = []): ThreadItem[] {
   const items: ThreadItem[] = [];
   const pendingSet = new Set(pending);
