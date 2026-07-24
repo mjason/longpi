@@ -38,6 +38,7 @@ defmodule Longpi.Agent.ConversationMessage do
         :tool_call_id,
         :tool_name,
         :error,
+        :model,
         :position,
         :conversation_id
       ]
@@ -89,6 +90,13 @@ defmodule Longpi.Agent.ConversationMessage do
       public? true
     end
 
+    # Which model produced this assistant message — a turn can switch models
+    # mid-way (a tool's `model: "J"` declaration), so per-message attribution
+    # is the only accurate record.
+    attribute :model, :string do
+      public? true
+    end
+
     attribute :error, :boolean do
       allow_nil? false
       default false
@@ -122,7 +130,8 @@ defmodule Longpi.Agent.ConversationMessage do
       tool_calls: Enum.map(message[:tool_calls] || [], &encode_call/1),
       tool_call_id: message[:tool_call_id],
       tool_name: message[:name],
-      error: message[:error?] || false
+      error: message[:error?] || false,
+      model: message[:model]
     }
   end
 
@@ -135,11 +144,14 @@ defmodule Longpi.Agent.ConversationMessage do
   end
 
   def to_message(%{role: :assistant} = record) do
-    %{
+    base = %{
       role: :assistant,
       content: safe(record.content),
       tool_calls: Enum.map(record.tool_calls, &decode_call/1)
     }
+
+    # Only present when recorded — older rows predate model attribution.
+    if record.model, do: Map.put(base, :model, record.model), else: base
   end
 
   def to_message(%{role: :tool} = record) do

@@ -400,7 +400,8 @@ defmodule LongpiWeb.ConversationChannel do
       tool_calls: message[:tool_calls] || [],
       tool_call_id: message[:tool_call_id],
       name: message[:name],
-      error: message[:error?] || false
+      error: message[:error?] || false,
+      model: message[:model]
     }
   end
 

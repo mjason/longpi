@@ -56,6 +56,11 @@ defmodule Longpi.Agent.TurnModelSwitchTest do
 
     assert {:ok, messages} = Turn.run(config(toolbox), [%{role: :user, content: "go"}])
     assert List.last(messages).content == "processed cheaply"
+
+    # Per-message model attribution: the first assistant message came from the
+    # session model, the post-switch one from the tier's model.
+    models = for %{role: :assistant, model: m} <- messages, do: m
+    assert models == ["test:strong", "openai:mini"]
   end
 
   test "a tool without a declaration changes nothing" do

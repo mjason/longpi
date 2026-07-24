@@ -25,8 +25,8 @@ defmodule Longpi.Agent.Message do
   def user(text, []), do: user(text)
   def user(text, attachments), do: %{role: :user, content: text, attachments: attachments}
 
-  def assistant(text, tool_calls \\ []),
-    do: %{role: :assistant, content: text, tool_calls: tool_calls}
+  def assistant(text, tool_calls \\ [], model \\ nil),
+    do: %{role: :assistant, content: text, tool_calls: tool_calls, model: model}
 
   def tool_result(call, content, error? \\ false) do
     %{

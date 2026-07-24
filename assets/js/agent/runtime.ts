@@ -209,6 +209,9 @@ export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
   // dbPos (see historyToItems); streamed items without one simply don't
   // offer fork until the history reloads.
   let currentDbPos: number | undefined;
+  // Which model produced the assistant message being assembled (turns can
+  // switch models mid-way via a tool's model declaration).
+  let currentModel: string | undefined;
   const lastUserItemIndex = items.reduce(
     (acc, item, index) => (item.kind === "user" ? index : acc),
     -1,
@@ -229,7 +232,7 @@ export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
         id: `m-${messages.length}`,
         role: "assistant",
         content: assistantParts,
-        metadata: { custom: { lastItemIndex: currentDbPos ?? -1 } },
+        metadata: { custom: { lastItemIndex: currentDbPos ?? -1, model: currentModel } },
         ...(awaitingApproval
           ? { status: { type: "requires-action" as const, reason: "tool-calls" as const } }
           : {}),
@@ -237,6 +240,7 @@ export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
     }
     assistantParts = null;
     currentDbPos = undefined;
+    currentModel = undefined;
   };
 
   let index = -1;
@@ -270,6 +274,7 @@ export function itemsToMessages(items: ThreadItem[]): ThreadMessageLike[] {
 
       case "assistant":
         if (item.dbPos != null) currentDbPos = item.dbPos;
+        if (item.model) currentModel = item.model;
         assistantParts ??= [];
         if (item.text) assistantParts.push({ type: "text", text: item.text });
         break;

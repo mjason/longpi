@@ -676,11 +676,33 @@ const AssistantMessage: FC = () => {
 
       <div
         data-slot="aui_assistant-message-footer"
-        className={cn("ms-2 flex items-center", ACTION_BAR_HEIGHT)}
+        className={cn("ms-2 flex items-center gap-2", ACTION_BAR_HEIGHT)}
       >
         <AssistantActionBar />
+        <MessageModelBadge />
       </div>
     </MessagePrimitive.Root>
+  );
+};
+
+/**
+ * Which model produced this reply. Turns can switch models mid-way (a tool's
+ * `model: "J"` declaration), so the per-message record is the only truthful
+ * attribution. Shown on hover with the action bar — informative, not noisy.
+ */
+const MessageModelBadge: FC = () => {
+  const model = useAuiState(
+    (s) => (s.message.metadata?.custom as { model?: string } | undefined)?.model,
+  );
+  if (!model) return null;
+  return (
+    <span
+      data-slot="aui_assistant-message-model"
+      className="font-mono text-[11px] text-muted-foreground/70 opacity-0 transition-opacity duration-150 group-hover/aimsg:opacity-100"
+      title="Model that generated this reply"
+    >
+      {model.includes(":") ? model.slice(model.indexOf(":") + 1) : model}
+    </span>
   );
 };
 

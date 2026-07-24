@@ -232,7 +232,7 @@ export function historyToItems(messages: HistoryMessage[], pending: string[] = [
       });
     } else if (message.role === "assistant") {
       if (message.content.trim() !== "") {
-        items.push({ kind: "assistant", text: message.content, streaming: false, dbPos });
+        items.push({ kind: "assistant", text: message.content, streaming: false, dbPos, model: message.model ?? undefined });
       }
       for (const call of message.tool_calls ?? []) {
         const awaiting = pendingSet.has(call.id);

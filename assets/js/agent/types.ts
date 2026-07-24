@@ -15,11 +15,12 @@ export type HistoryMessage = {
   tool_call_id: string | null;
   name: string | null;
   error: boolean;
+  model?: string | null;
 };
 
 export type ThreadItem =
   | { kind: "user"; text: string; attachments?: MessageAttachment[]; dbPos?: number }
-  | { kind: "assistant"; text: string; streaming: boolean; dbPos?: number }
+  | { kind: "assistant"; text: string; streaming: boolean; dbPos?: number; model?: string }
   | { kind: "reasoning"; text: string; streaming: boolean }
   | {
       kind: "tool";
