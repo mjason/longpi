@@ -5,6 +5,7 @@ import {
   FolderOpen,
   Layers,
   Loader2,
+  Menu,
   Plus,
   Puzzle,
   Settings,
@@ -64,6 +65,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
+import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet";
 import type { ConversationSummary } from "./types";
 import { UpdateCheck } from "./UpdateCheck";
 
@@ -146,19 +148,22 @@ export default function ChatApp() {
   }, []);
 
   const selected = conversations.find((c) => c.id === conversationId) ?? null;
+  // Mobile: the sidebar lives in a sheet, opened from the hamburger top bar.
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
-  return (
-    <TooltipProvider delayDuration={300}>
-      <div className="flex h-screen bg-background text-foreground">
-        <Sidebar
-          conversations={conversations}
-          selectedId={conversationId ?? null}
-          onSelect={(id) => navigate(`/c/${id}`)}
-          onCreated={(conversation) => {
-            setConversations((prev) => [conversation, ...prev]);
-            navigate(`/c/${conversation.id}`);
-          }}
-          onDelete={async (conversation) => {
+  const sidebarProps = {
+    conversations,
+    selectedId: conversationId ?? null,
+    onSelect: (id: string) => {
+      setDrawerOpen(false);
+      navigate(`/c/${id}`);
+    },
+    onCreated: (conversation: ConversationSummary) => {
+      setConversations((prev) => [conversation, ...prev]);
+      setDrawerOpen(false);
+      navigate(`/c/${conversation.id}`);
+    },
+    onDelete: async (conversation: ConversationSummary) => {
             if (!confirm(t("confirm.deleteConversation", { name: conversationLabel(conversation) })))
               return;
             const result = await destroyConversation({
@@ -176,8 +181,8 @@ export default function ChatApp() {
             if (conversationId && !remaining.some((c) => c.id === conversationId)) {
               navigate(remaining.length > 0 ? `/c/${remaining[0].id}` : "/", { replace: true });
             }
-          }}
-          onDeleteProject={async (project) => {
+    },
+    onDeleteProject: async (project: ProjectGroup) => {
             const count = project.conversations.length;
             if (!confirm(t("confirm.deleteProject", { name: folderName(project.cwd), count })))
               return;
@@ -198,8 +203,36 @@ export default function ChatApp() {
             if (conversationId && !remaining.some((c) => c.id === conversationId)) {
               navigate(remaining.length > 0 ? `/c/${remaining[0].id}` : "/", { replace: true });
             }
-          }}
-        />
+    },
+  };
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <div className="flex h-dvh bg-background text-foreground">
+        <Sidebar {...sidebarProps} />
+        {/* Mobile: the same sidebar inside a left sheet. */}
+        <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <SheetContent side="left" className="w-80 gap-0 p-0 md:hidden">
+            <SheetTitle className="sr-only">Longpi</SheetTitle>
+            <Sidebar {...sidebarProps} variant="sheet" />
+          </SheetContent>
+        </Sheet>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* Mobile top bar: hamburger + wordmark, padded for the notch. */}
+          <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-2 pt-[env(safe-area-inset-top)] [height:calc(3rem+env(safe-area-inset-top))] md:hidden">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Menu"
+              onClick={() => setDrawerOpen(true)}
+            >
+              <Menu className="size-5" />
+            </Button>
+            <span className="min-w-0 truncate text-sm font-medium">
+              {selected ? conversationLabel(selected) : "Longpi"}
+            </span>
+          </div>
         {selected ? (
           <ConversationPane
             key={selected.id}
@@ -238,6 +271,7 @@ export default function ChatApp() {
             </div>
           </main>
         )}
+        </div>
       </div>
     </TooltipProvider>
   );
@@ -250,6 +284,8 @@ function Sidebar(props: {
   onCreated: (conversation: ConversationSummary) => void;
   onDelete: (conversation: ConversationSummary) => void;
   onDeleteProject: (project: ProjectGroup) => void;
+  /** "sheet" renders for the mobile drawer (fills the sheet, no own border). */
+  variant?: "sheet";
 }) {
   const navigate = useNavigate();
   const projects = useMemo(() => groupByProject(props.conversations), [props.conversations]);
@@ -275,7 +311,13 @@ function Sidebar(props: {
   const [createFor, setCreateFor] = useState<{ cwd: string } | null>(null);
 
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-r border-border bg-card/30">
+    <aside
+      className={cn(
+        props.variant === "sheet"
+          ? "flex h-full w-full flex-col pt-[env(safe-area-inset-top)]"
+          : "hidden w-72 shrink-0 flex-col border-r border-border bg-card/30 md:flex",
+      )}
+    >
       <div className="flex h-14 shrink-0 items-center border-b border-border px-4">
         <span className="font-semibold tracking-wide">
           <span className="mr-2 text-primary">π</span>Longpi

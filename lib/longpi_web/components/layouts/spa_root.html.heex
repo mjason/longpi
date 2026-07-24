@@ -6,7 +6,10 @@ SPDX-License-Identifier: MIT
 <html lang="en" data-theme="light" style="color-scheme: light">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="csrf-token" content={get_csrf_token()} />
     <meta name="longpi-version" content={to_string(Application.spec(:longpi, :vsn))} />
     <meta name="auth-enabled" content={to_string(Longpi.Auth.enabled?())} />

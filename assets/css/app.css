@@ -308,3 +308,12 @@
   color: var(--shiki-dark) !important;
   background-color: var(--shiki-dark-bg) !important;
 }
+
+/* Touch devices have no hover: keep the assistant action bar (and the model
+   badge) visible instead of hover-revealed. */
+@media (hover: none) {
+  .aui-assistant-action-bar-root,
+  [data-slot="aui_assistant-message-model"] {
+    opacity: 0.7;
+  }
+}
