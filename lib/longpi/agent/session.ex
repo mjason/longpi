@@ -854,9 +854,33 @@ defmodule Longpi.Agent.Session do
   # A compact, persisted record of why the turn died — honest context for both
   # the user (after a reload) and the model (on the next turn).
   defp failure_note(reason) do
-    text = reason |> inspect() |> String.slice(0, 300)
-    Message.assistant("⚠ Turn failed: #{text}")
+    Message.assistant("⚠ Turn failed: #{humanize_reason(reason)}")
   end
+
+  # Pull the human-readable core out of nested LLM errors: an upstream 503
+  # should read "upstream 503: No available accounts", not a page of inspect'd
+  # %ReqLLM.Error.API.Stream{} structs.
+  defp humanize_reason(%{status: status, reason: message})
+       when is_integer(status) and is_binary(message),
+       do: "upstream #{status}: #{message}"
+
+  defp humanize_reason(%{reason: nested}) when is_map(nested) or is_binary(nested),
+    do: humanize_reason(nested)
+
+  defp humanize_reason(reason) when is_binary(reason) do
+    # Stream errors stringify their cause; dig the status/message back out.
+    with [_, status] <- Regex.run(~r/status: (\d+)/, reason),
+         [_, message] <- Regex.run(~r/reason: \\?"([^"\\]+)/, reason) do
+      "upstream #{status}: #{message}"
+    else
+      _ -> String.slice(reason, 0, 300)
+    end
+  end
+
+  defp humanize_reason(reason) when is_exception(reason),
+    do: Exception.message(reason) |> String.slice(0, 300)
+
+  defp humanize_reason(reason), do: reason |> inspect() |> String.slice(0, 300)
 
   # Self-driven continuation: fires after a completed turn (immediately, or
   # via the delayed timer for timed loops / delayed continue_later). Skipped

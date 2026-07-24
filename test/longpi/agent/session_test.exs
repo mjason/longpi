@@ -140,4 +140,16 @@ defmodule Longpi.Agent.SessionTest do
     assert note =~ "Turn failed"
     assert note =~ "boom"
   end
+
+  test "API failures persist a human-readable note, not an inspect dump", %{session: session} do
+    expect(LLMMock, :stream, fn _, _, _, _, _ ->
+      {:error, %{status: 503, reason: "No available accounts: no available accounts"}}
+    end)
+
+    assert :ok = Session.send_message(session, "hi")
+    assert_receive {:agent_event, {:turn_failed, _}}, 2_000
+
+    %{content: note} = session |> Session.messages() |> List.last()
+    assert note == "⚠ Turn failed: upstream 503: No available accounts: no available accounts"
+  end
 end

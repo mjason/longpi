@@ -613,7 +613,14 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 }) => {
   const isCancelled =
     status?.type === "incomplete" && status.reason === "cancelled";
-  const isRequiresAction = status?.type === "requires-action";
+  // Two signals for "this card needs the user": the derived part status, AND
+  // the raw approval gate our runtime attaches. The status derivation runs
+  // through assistant-ui's message-status inheritance (several links that can
+  // miss); the approval prop is set directly by us, so it's the reliable one —
+  // check both so Allow/Deny is never hidden inside a collapsed card.
+  const awaitingApproval =
+    approval != null && approval.approved === undefined && approval.resolution === undefined;
+  const isRequiresAction = status?.type === "requires-action" || awaitingApproval;
   // File-changing tools render their args as a diff, shown open by default so
   // the change is visible without a click.
   const showDiff = isDiffTool(toolName);
