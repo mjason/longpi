@@ -1,204 +1,390 @@
-# Longpi iOS 壳应用指南(WKWebView 嵌入)
+# Longpi iOS 应用指南 —— 原生导航 + WebView 聊天页
 
-Longpi 的 Web 已做好移动端适配(v0.1.63+):抽屉侧边栏、`h-dvh` 动态视口、
-刘海/底部指示条 safe-area、触摸设备操作栏常显。iOS 端只需要一个薄薄的
-WKWebView 壳。本文给出完整可抄的 Swift 代码与注意事项。
+架构(Hotwire Native 思路的精简版,导航体验 100% 原生):
 
-## 0. 服务端准备
+```
+SwiftUI NavigationStack(原生导航栏/转场/手势)
+ ├── 会话列表页   ← 原生 List(大标题、下拉刷新、swipe 删除)
+ │      数据: GET /api/mobile/conversations?token=...
+ ├── 聊天页       ← WKWebView 加载 /m/c/<id>?token=...(裸对话视图,无 web 顶栏)
+ └── 新建会话     ← 原生 Sheet(目录 + 模型),POST /api/mobile/conversations
+```
 
-- 服务器地址:局域网 `http://192.168.2.129:4080`(HTTP!需要 ATS 例外,见 §2)。
-  公网部署时换成 HTTPS 域名,ATS 例外即可移除。
-- 登录:若管理后台开启了"需要登录",WKWebView 里直接走网页登录即可,
-  cookie 会持久化(见 §4)。另一条路是 embed 模式(`/embed?cwd=...&token=...`,
-  管理后台 → Embed 页有 token 与参数说明),适合单工作区场景;完整 app 用
-  主界面即可。
+服务端已提供(v0.1.64+):
 
-## 1. 工程设置(Xcode)
+| 端点 | 说明 |
+|---|---|
+| `GET /api/mobile/conversations?token=` | 会话列表(新→旧,子代理会话已排除) |
+| `POST /api/mobile/conversations?token=` | `{cwd, model?}` 创建(model 缺省用后台默认) |
+| `DELETE /api/mobile/conversations/:id?token=` | 删除 |
+| `GET /api/mobile/models?token=` | 启用的模型 + 默认模型 |
+| `GET /m/c/:id?token=&theme=dark\|light` | 裸聊天页(WebView 用;token 同时授权 WebSocket) |
 
-1. File → New → Project → iOS App(Interface: SwiftUI,Language: Swift)。
-2. Deployment Target 建议 iOS 16+。
-3. 只支持竖屏可在 Target → General → Deployment Info 里去掉横屏(可选)。
+`token` = 管理后台 → Embed 页的 embedToken。**未开启登录时可省略**。
 
-## 2. Info.plist:局域网 HTTP 的 ATS 例外
+---
 
-服务器是局域网 HTTP,必须放行(否则白屏)。Target → Info 加:
+## 1. 工程与 Info.plist
+
+Xcode → iOS App(SwiftUI,iOS 16+)。Info.plist(局域网 HTTP 必配,否则白屏):
 
 ```xml
 <key>NSAppTransportSecurity</key>
 <dict>
   <key>NSAllowsLocalNetworking</key>
   <true/>
-  <!-- 若通过非 .local 的局域网 IP 访问,补一个域名例外: -->
   <key>NSExceptionDomains</key>
   <dict>
     <key>192.168.2.129</key>
-    <dict>
-      <key>NSExceptionAllowsInsecureHTTPLoads</key>
-      <true/>
-    </dict>
+    <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
   </dict>
 </dict>
-<!-- 语音输入(composer 的麦克风按钮)需要: -->
-<key>NSMicrophoneUsageDescription</key>
-<string>语音输入需要使用麦克风</string>
-<key>NSSpeechRecognitionUsageDescription</key>
-<string>语音输入需要语音识别</string>
-<!-- 附件里拍照/选图(<input type=file>)需要: -->
-<key>NSCameraUsageDescription</key>
-<string>发送照片附件需要使用相机</string>
-<key>NSPhotoLibraryUsageDescription</key>
-<string>发送图片附件需要访问相册</string>
+<key>NSMicrophoneUsageDescription</key><string>语音输入需要使用麦克风</string>
+<key>NSSpeechRecognitionUsageDescription</key><string>语音输入需要语音识别</string>
+<key>NSCameraUsageDescription</key><string>发送照片附件需要使用相机</string>
+<key>NSPhotoLibraryUsageDescription</key><string>发送图片附件需要访问相册</string>
 ```
 
-## 3. 完整的 WebView 壳(SwiftUI + WKWebView)
+## 2. 登录方案:token 即登录(无登录界面)
 
-三个要点:cookie 持久化(登录态)、外链跳 Safari、下拉刷新。直接整体替换
-`ContentView.swift`:
+自用 app 的标准做法(Home Assistant companion 同款):**embedToken 就是凭证**。
+首次启动弹一个原生"连接设置"页(服务器地址 + token),存 Keychain,之后所有
+API 请求与 WebView URL 自动携带 —— 不需要账号密码界面。
+
+为什么不用网页登录 cookie:WKWebView(WKHTTPCookieStore)与原生
+URLSession(HTTPCookieStorage)的 cookie **不互通**,同步它们是 hybrid
+经典大坑;token 方案两边天然一致。
 
 ```swift
-import SwiftUI
-import WebKit
+// Keychain.swift — 最小可用的 Keychain 读写
+import Security
+import Foundation
 
-let LONGPI_URL = URL(string: "http://192.168.2.129:4080/")!
+enum Keychain {
+    static func set(_ value: String, for key: String) {
+        let data = Data(value.utf8)
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                    kSecAttrAccount as String: key]
+        SecItemDelete(query as CFDictionary)
+        var attrs = query
+        attrs[kSecValueData as String] = data
+        SecItemAdd(attrs as CFDictionary, nil)
+    }
 
-struct ContentView: View {
-    var body: some View {
-        WebView(url: LONGPI_URL)
-            .ignoresSafeArea()          // 网页自己处理 safe-area(env() 变量)
-            .background(Color(UIColor.systemBackground))
+    static func get(_ key: String) -> String? {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                    kSecAttrAccount as String: key,
+                                    kSecReturnData as String: true]
+        var out: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
+              let data = out as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 }
 
-struct WebView: UIViewRepresentable {
+// SettingsView.swift — 首启/设置页:服务器 + token
+import SwiftUI
+
+struct SettingsView: View {
+    @AppStorage("serverURL") private var serverURL = "http://192.168.2.129:4080"
+    @State private var token = Keychain.get("embedToken") ?? ""
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("服务器") {
+                    TextField("http://host:4080", text: $serverURL)
+                        .autocapitalization(.none).disableAutocorrection(true)
+                        .keyboardType(.URL)
+                }
+                Section("凭证") {
+                    SecureField("embedToken(管理后台 → Embed)", text: $token)
+                    Text("未开启登录的服务器可留空")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("连接设置")
+            .toolbar {
+                Button("保存") {
+                    Keychain.set(token, for: "embedToken")
+                    dismiss()
+                }
+            }
+        }
+    }
+}
+```
+
+列表页在 `.task { await reload() }` 收到 401 时弹出 `SettingsView` 即可
+(`.sheet(isPresented: $needsSetup) { SettingsView() }`)。
+
+服务端校验行为:`Longpi.Auth` 未开启登录时 API 全放行(token 可空);开启后
+每个请求都验 token,WebView 的 `?token=` 同时授权 WebSocket。token 是全权限
+凭证 —— 走公网务必配 HTTPS 或 Tailscale。
+
+## 3. 配置与 API 客户端
+
+```swift
+// Config.swift
+enum Config {
+    static var base: URL {
+        URL(string: UserDefaults.standard.string(forKey: "serverURL")
+            ?? "http://192.168.2.129:4080")!
+    }
+    static var token: String { Keychain.get("embedToken") ?? "" }
+
+    static func api(_ path: String) -> URL {
+        var comps = URLComponents(url: base.appendingPathComponent(path),
+                                  resolvingAgainstBaseURL: false)!
+        if !token.isEmpty { comps.queryItems = [.init(name: "token", value: token)] }
+        return comps.url!
+    }
+
+    static func chatURL(id: String, dark: Bool) -> URL {
+        var comps = URLComponents(url: base.appendingPathComponent("/m/c/\(id)"),
+                                  resolvingAgainstBaseURL: false)!
+        var items = [URLQueryItem(name: "theme", value: dark ? "dark" : "light")]
+        if !token.isEmpty { items.append(.init(name: "token", value: token)) }
+        comps.queryItems = items
+        return comps.url!
+    }
+}
+
+// Models.swift
+struct Conversation: Identifiable, Decodable, Hashable {
+    let id: String
+    let title: String?
+    let cwd: String
+    let model: String
+
+    var displayTitle: String {
+        if let t = title, !t.isEmpty { return t }
+        return cwd.split(separator: "/").last.map(String.init) ?? cwd
+    }
+    var project: String { cwd.split(separator: "/").last.map(String.init) ?? cwd }
+}
+
+struct ModelChoice: Decodable, Hashable { let spec: String; let label: String? }
+
+// Api.swift
+enum Api {
+    static func conversations() async throws -> [Conversation] {
+        struct R: Decodable { let conversations: [Conversation] }
+        let (data, _) = try await URLSession.shared.data(from: Config.api("/api/mobile/conversations"))
+        return try JSONDecoder().decode(R.self, from: data).conversations
+    }
+
+    static func createConversation(cwd: String, model: String?) async throws -> Conversation {
+        var req = URLRequest(url: Config.api("/api/mobile/conversations"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "content-type")
+        var body: [String: String] = ["cwd": cwd]
+        if let model { body["model"] = model }
+        req.httpBody = try JSONEncoder().encode(body)
+        let (data, _) = try await URLSession.shared.data(for: req)
+        return try JSONDecoder().decode(Conversation.self, from: data)
+    }
+
+    static func deleteConversation(id: String) async throws {
+        var req = URLRequest(url: Config.api("/api/mobile/conversations/\(id)"))
+        req.httpMethod = "DELETE"
+        _ = try await URLSession.shared.data(for: req)
+    }
+
+    static func models() async throws -> (models: [ModelChoice], default: String) {
+        struct R: Decodable { let models: [ModelChoice]; let `default`: String }
+        let (data, _) = try await URLSession.shared.data(from: Config.api("/api/mobile/models"))
+        let r = try JSONDecoder().decode(R.self, from: data)
+        return (r.models, r.default)
+    }
+}
+```
+
+## 4. 会话列表(原生导航的主场)
+
+```swift
+// ConversationListView.swift
+import SwiftUI
+
+struct ConversationListView: View {
+    @State private var conversations: [Conversation] = []
+    @State private var showNew = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(conversations) { c in
+                    NavigationLink(value: c) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(c.displayTitle).font(.body).lineLimit(1)
+                            Text(c.project).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .onDelete { indexSet in
+                    let doomed = indexSet.map { conversations[$0] }
+                    conversations.remove(atOffsets: indexSet)
+                    Task { for c in doomed { try? await Api.deleteConversation(id: c.id) } }
+                }
+            }
+            .navigationTitle("Longpi")
+            .navigationDestination(for: Conversation.self) { c in
+                ChatView(conversation: c)
+            }
+            .toolbar {
+                Button { showNew = true } label: { Image(systemName: "square.and.pencil") }
+            }
+            .refreshable { await reload() }
+            .task { await reload() }
+            .sheet(isPresented: $showNew) {
+                NewConversationSheet { created in
+                    conversations.insert(created, at: 0)
+                }
+            }
+        }
+    }
+
+    func reload() async {
+        if let list = try? await Api.conversations() { conversations = list }
+    }
+}
+```
+
+## 5. 聊天页(WKWebView 装裸对话视图)
+
+原生导航栏显示标题;网页只有对话流(web 顶栏在 `/m/c/:id` 下已移除)。
+
+```swift
+// ChatView.swift
+import SwiftUI
+import WebKit
+
+struct ChatView: View {
+    let conversation: Conversation
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        ChatWebView(url: Config.chatURL(id: conversation.id, dark: scheme == .dark))
+            .ignoresSafeArea(edges: .bottom)   // 网页自己处理底部 safe-area
+            .navigationTitle(conversation.displayTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.visible, for: .navigationBar)
+    }
+}
+
+struct ChatWebView: UIViewRepresentable {
     let url: URL
 
+    // 每个聊天页一个 WebView;cookie/localStorage 全 app 共享(登录态、token 授权)。
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
-        // 登录 cookie / localStorage 持久化(默认 default() 即磁盘存储)。
         config.websiteDataStore = .default()
         config.allowsInlineMediaPlayback = true
-        // 网页里的 window.open / target=_blank 交给壳处理(跳 Safari)。
-        config.preferences.javaScriptCanOpenWindowsAutomatically = false
-
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
-        webView.uiDelegate = context.coordinator
-        webView.allowsBackForwardNavigationGestures = true   // 边缘右滑=返回
-        webView.scrollView.contentInsetAdjustmentBehavior = .never  // 交给网页 env()
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.isOpaque = false
         webView.backgroundColor = .systemBackground
-
-        // 下拉刷新
-        let refresh = UIRefreshControl()
-        refresh.addTarget(context.coordinator,
-                          action: #selector(Coordinator.reload(_:)),
-                          for: .valueChanged)
-        webView.scrollView.refreshControl = refresh
-
         webView.load(URLRequest(url: url))
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {}
-
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
-        @objc func reload(_ sender: UIRefreshControl) {
-            (sender.superview?.superview as? WKWebView)?.reload()
-            sender.endRefreshing()
-        }
-
-        // 站内导航留在 WebView;外部链接(消息里的 http 链接等)跳 Safari。
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        // 消息里的外部链接跳 Safari;本站导航留在页内。
         func webView(_ webView: WKWebView,
-                     decidePolicyFor navigationAction: WKNavigationAction,
+                     decidePolicyFor action: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            guard let target = navigationAction.request.url else {
-                return decisionHandler(.allow)
-            }
-            let sameHost = target.host == LONGPI_URL.host
-            if navigationAction.navigationType == .linkActivated && !sameHost {
+            if action.navigationType == .linkActivated,
+               let target = action.request.url, target.host != Config.base.host {
                 UIApplication.shared.open(target)
                 return decisionHandler(.cancel)
             }
             decisionHandler(.allow)
         }
-
-        // target=_blank(window.open)同样跳 Safari。
-        func webView(_ webView: WKWebView,
-                     createWebViewWith configuration: WKWebViewConfiguration,
-                     for navigationAction: WKNavigationAction,
-                     windowFeatures: WKWindowFeatures) -> WKWebView? {
-            if let target = navigationAction.request.url,
-               target.host != LONGPI_URL.host {
-                UIApplication.shared.open(target)
-            } else if let target = navigationAction.request.url {
-                webView.load(URLRequest(url: target))
-            }
-            return nil
-        }
-
-        // 网页里的 confirm()(删除会话等用到)映射成原生弹窗。
-        func webView(_ webView: WKWebView,
-                     runJavaScriptConfirmPanelWithMessage message: String,
-                     initiatedByFrame frame: WKFrameInfo,
-                     completionHandler: @escaping (Bool) -> Void) {
-            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in completionHandler(false) })
-            alert.addAction(UIAlertAction(title: "确定", style: .default) { _ in completionHandler(true) })
-            topViewController()?.present(alert, animated: true)
-        }
-
-        // alert() 同理。
-        func webView(_ webView: WKWebView,
-                     runJavaScriptAlertPanelWithMessage message: String,
-                     initiatedByFrame frame: WKFrameInfo,
-                     completionHandler: @escaping () -> Void) {
-            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "确定", style: .default) { _ in completionHandler() })
-            topViewController()?.present(alert, animated: true)
-        }
-
-        private func topViewController() -> UIViewController? {
-            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            var top = scenes.first?.keyWindow?.rootViewController
-            while let presented = top?.presentedViewController { top = presented }
-            return top
-        }
     }
 }
 ```
 
-## 4. 各功能在壳里的行为(都已验证的 Web 侧适配)
+## 6. 新建会话 Sheet
 
-| 功能 | 行为 |
-|---|---|
-| 登录态 | `websiteDataStore = .default()` 磁盘持久化;登录一次长期有效 |
-| 侧边栏 | 手机宽度自动变抽屉,左上角汉堡打开;选会话自动关闭 |
-| 刘海/底部条 | 网页用 `env(safe-area-inset-*)` 自行留白(顶栏、composer);壳侧 `.ignoresSafeArea()` + `contentInsetAdjustmentBehavior = .never` 即可 |
-| 键盘 | `h-dvh` 动态视口,键盘弹起时布局收缩,composer 不会被盖 |
-| 附件/拍照 | `<input type=file>` WKWebView 原生支持(需 §2 的相机/相册权限描述) |
-| 语音输入 | composer 麦克风用 Web Speech API,需 §2 的麦克风/语音识别权限 |
-| 外部链接 | 壳的 delegate 跳 Safari,站内路由留在 WebView |
-| 实时流 | Phoenix WebSocket 直接工作;app 退后台 iOS 会断 socket,回前台网页自动重连 |
-| 深浅色 | 网页跟随系统(`data-theme`),无需壳侧处理 |
+```swift
+// NewConversationSheet.swift
+import SwiftUI
 
-## 5. 可选进阶
+struct NewConversationSheet: View {
+    var onCreated: (Conversation) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var cwd = ""
+    @State private var models: [ModelChoice] = []
+    @State private var model = ""
 
-- **单工作区模式**:`LONGPI_URL` 指向
-  `http://<host>/embed?cwd=/path/to/ws&token=<embedToken>`(token 在
-  管理后台 → Embed),得到无侧边栏的单项目视图。
-- **HTTPS/公网**:上 Caddy/Tailscale 后把 URL 换成 https,删除 ATS 例外。
-  Tailscale 方案:iPhone 装 Tailscale,URL 用 `http://<tailscale-ip>:4080`,
-  ATS 用 `NSAllowsLocalNetworking` 即可覆盖。
-- **App 图标**:`priv/static/images/favicon.svg` 的 π 设计可以直接放大重绘成
-  1024×1024 App Icon(深底 #18181b、白 π、绿横杠 #34d399)。
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("/path/to/workspace", text: $cwd)
+                    .autocapitalization(.none).disableAutocorrection(true)
+                    .font(.system(.body, design: .monospaced))
+                Picker("模型", selection: $model) {
+                    ForEach(models, id: \.spec) { m in
+                        Text(m.label ?? m.spec).tag(m.spec)
+                    }
+                }
+            }
+            .navigationTitle("新建会话")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("创建") {
+                        Task {
+                            if let c = try? await Api.createConversation(
+                                cwd: cwd, model: model.isEmpty ? nil : model) {
+                                onCreated(c); dismiss()
+                            }
+                        }
+                    }
+                    .disabled(cwd.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .task {
+                if let r = try? await Api.models() { models = r.models; model = r.default }
+            }
+        }
+    }
+}
 
-## 6. 常见坑
+// App 入口
+@main
+struct LongpiApp: App {
+    var body: some Scene {
+        WindowGroup { ConversationListView() }
+    }
+}
+```
 
-1. **白屏** → 九成是 ATS:确认 §2 的 plist 例外,且 URL 的 IP/域名与例外一致。
-2. **登录后刷新又退出** → 用了 `.nonPersistent()` 数据存储;必须 `.default()`。
-3. **底部输入框贴到 Home 条** → 壳侧不要再加 safe-area padding(网页已处理),
-   保持 `.ignoresSafeArea()`;重复留白反而出现双倍空隙。
-4. **服务器升级后页面行为怪** → 下拉刷新即可(资源带指纹,刷新即取新版;
-   RPC 403 会自动自愈重试)。
+## 7. 行为说明
+
+- **导航**:列表→聊天是真 UINavigationController push(原生转场、边缘返回、
+  导航栏标题),这正是 Hotwire Native 的体验模型。
+- **实时流**:聊天页 WebSocket 在 WebView 内自动连接(`?token=` 已授权
+  session);退后台断开、回前台自动重连。
+- **主题**:`theme=dark|light` 由壳按系统外观传入,WebView 内容与原生 UI 一致。
+- **列表刷新**:从聊天返回列表后标题可能已被 AI 自动命名 —— 下拉刷新即可;
+  想自动化可在 `ChatView.onDisappear` 里触发一次 `reload()`。
+- **附件/语音**:WKWebView 原生支持 `<input type=file>` 与 Web Speech
+  (§1 的权限描述必须配)。
+
+## 8. 常见坑
+
+1. **白屏** → ATS(§1);URL host 必须与例外一致。
+2. **WebSocket 连不上 / 一直转圈** → token 没带上或不对:开着登录时
+   `/m/c/:id` 必须带 `?token=`,检查 `Config.token`。
+3. **登录态丢失** → 必须 `websiteDataStore = .default()`(默认磁盘持久)。
+4. **底部双倍留白** → 壳侧保持 `.ignoresSafeArea(edges: .bottom)` +
+   `contentInsetAdjustmentBehavior = .never`,底部 safe-area 网页已处理。

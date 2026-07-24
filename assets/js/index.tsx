@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import ChatApp from "./agent/ChatApp";
 import { I18nProvider } from "./agent/i18n";
+import MobileChat from "./agent/MobileChat";
 import EmbedApp from "./agent/EmbedApp";
 import { ManagementRoute } from "./agent/ManagementPanel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -29,6 +30,7 @@ createRoot(document.getElementById("app")!).render(
         <Route path="/manage" element={<ManagementRoute />} />
         <Route path="/manage/:section" element={<ManagementRoute />} />
         <Route path="/embed" element={<EmbedApp />} />
+        <Route path="/m/c/:conversationId" element={<MobileChat />} />
       </Routes>
     </BrowserRouter>
     </I18nProvider>

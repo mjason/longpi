@@ -646,6 +646,7 @@ export function ConversationPane({
   onTitled,
   threadList,
   headerExtra,
+  bare,
   onForked,
   onOpenConversation,
 }: {
@@ -656,6 +657,9 @@ export function ConversationPane({
   threadList?: import("@assistant-ui/react").ExternalStoreThreadListAdapter;
   /** Embed mode: extra controls rendered at the right edge of the header. */
   headerExtra?: React.ReactNode;
+  /** Bare mode (native mobile shell): no web header — the native nav bar owns
+   * the title, the page is just the thread. */
+  bare?: boolean;
   /** Where to go after a fork; default reloads onto the new conversation. */
   onForked?: (fork: { id: string; cwd: string; model: string; title: string | null }) => void;
   /** Open another conversation (subagent chips); default opens a new tab. */
@@ -748,6 +752,7 @@ export function ConversationPane({
     <ConversationStoreProvider value={store}>
     <AssistantRuntimeProvider runtime={runtime}>
       <main className="flex min-w-0 flex-1 flex-col">
+        {!bare && (
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
           <div className="min-w-0">
             <h1 className="truncate text-sm font-semibold">{conversationLabel(conversation)}</h1>
@@ -769,6 +774,7 @@ export function ConversationPane({
           )}
           {headerExtra}
         </header>
+        )}
 
         {conversation.parentId && (
           <div className="flex items-center gap-2 border-b border-border bg-primary/5 px-4 py-1.5 text-xs">

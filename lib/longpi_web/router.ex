@@ -55,6 +55,28 @@ defmodule LongpiWeb.Router do
     |> Plug.Conn.put_resp_header("content-security-policy", "base-uri 'self'; frame-ancestors *;")
   end
 
+  # Stateless auth for the native shell's JSON API: every request carries the
+  # embed token (query `?token=` or `x-longpi-token` header). When sign-in is
+  # disabled the API is open, matching the rest of the app.
+  pipeline :mobile_token_auth do
+    plug :verify_mobile_token
+  end
+
+  defp verify_mobile_token(conn, _opts) do
+    presented =
+      conn.params["token"] ||
+        (Plug.Conn.get_req_header(conn, "x-longpi-token") |> List.first())
+
+    if not Longpi.Auth.enabled?() or Longpi.Auth.verify_embed_token(presented) do
+      conn
+    else
+      conn
+      |> Plug.Conn.put_status(401)
+      |> Phoenix.Controller.json(%{error: "invalid or missing token"})
+      |> Plug.Conn.halt()
+    end
+  end
+
   # A valid ?token= authorizes this browser session (RequireAuth honors the
   # flag), so the embed's follow-up fetches ride the session cookie.
   defp embed_token_session(conn, _opts) do
@@ -119,6 +141,20 @@ defmodule LongpiWeb.Router do
     pipe_through [:browser, :embeddable, :require_auth_page]
 
     get "/embed", PageController, :index
+    # Bare conversation view for the native mobile shell (same token model:
+    # ?token= authorizes the WebView's cookie session, websocket included).
+    get "/m/c/:conversation_id", PageController, :index
+  end
+
+  # Native mobile shell API: stateless per-request embed-token auth (a Swift
+  # URLSession has no browser session). JSON only.
+  scope "/api/mobile", LongpiWeb do
+    pipe_through [:api, :mobile_token_auth]
+
+    get "/conversations", MobileApiController, :conversations
+    post "/conversations", MobileApiController, :create_conversation
+    delete "/conversations/:id", MobileApiController, :delete_conversation
+    get "/models", MobileApiController, :models
   end
 
   # Sign-in / sign-out. No self-registration, password reset, confirmation, or
