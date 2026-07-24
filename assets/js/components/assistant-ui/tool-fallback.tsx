@@ -9,6 +9,7 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import {
+  useAuiState,
   useScrollLock,
   useToolCallElapsed,
   type ToolApprovalOption,
@@ -328,19 +329,21 @@ function ToolFallbackResult({
       <p className="aui-tool-fallback-result-header text-muted-foreground text-xs font-medium">
         Result:
       </p>
-      {builtin ? (
-        builtin
-      ) : uiNode ? (
-        <div className="mt-1">
-          <ExtensionUI node={uiNode} />
-        </div>
-      ) : (
-        <CollapsibleBox>
+      {/* EVERY result form is height-capped — bash terminals, ls listings, and
+          extension UI trees flood the transcript just as badly as raw text. */}
+      <CollapsibleBox>
+        {builtin ? (
+          builtin
+        ) : uiNode ? (
+          <div className="mt-1">
+            <ExtensionUI node={uiNode} />
+          </div>
+        ) : (
           <pre className="aui-tool-fallback-result-content bg-muted/50 text-foreground/90 mt-1 rounded-md p-2.5 text-xs whitespace-pre-wrap">
             {typeof result === "string" ? result : JSON.stringify(result, null, 2)}
           </pre>
-        </CollapsibleBox>
-      )}
+        )}
+      </CollapsibleBox>
     </div>
   );
 }
@@ -617,8 +620,14 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   // A result with a custom UI (built-in bash/ls, or an extension's `view`) is
   // worth seeing — expand it instead of hiding the UI behind a collapsed row.
   const hasUI = hasCustomResultUI(toolName, result);
+  // Live turn state: interesting cards open WHILE the turn runs, and every
+  // card folds shut when it ends — the transcript settles to collapsed rows.
+  // History loaded after a reload (not running) starts collapsed too.
+  const threadRunning = useAuiState((s) => s.thread.isRunning);
 
-  const [open, setOpen] = useState(isRequiresAction || showDiff || hasUI);
+  const [open, setOpen] = useState(
+    isRequiresAction || ((showDiff || hasUI) && threadRunning),
+  );
   const [prevRequiresAction, setPrevRequiresAction] =
     useState(isRequiresAction);
   if (isRequiresAction !== prevRequiresAction) {
@@ -630,7 +639,14 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   const [prevHasUI, setPrevHasUI] = useState(hasUI);
   if (hasUI !== prevHasUI) {
     setPrevHasUI(hasUI);
-    if (hasUI) setOpen(true);
+    if (hasUI && threadRunning) setOpen(true);
+  }
+  // Auto-collapse: when the turn finishes, fold the card (unless it's waiting
+  // on an approval). Manual toggling afterwards is untouched.
+  const [prevRunning, setPrevRunning] = useState(threadRunning);
+  if (threadRunning !== prevRunning) {
+    setPrevRunning(threadRunning);
+    if (!threadRunning && !isRequiresAction) setOpen(false);
   }
 
   return (
