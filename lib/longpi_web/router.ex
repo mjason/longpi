@@ -157,6 +157,15 @@ defmodule LongpiWeb.Router do
     get "/models", MobileApiController, :models
   end
 
+  # Pre-auth mobile endpoints: the boot probe and the login exchange —
+  # by definition they run before the app holds a token.
+  scope "/api/mobile", LongpiWeb do
+    pipe_through [:api]
+
+    get "/status", MobileApiController, :status
+    post "/login", MobileApiController, :login
+  end
+
   # Sign-in / sign-out. No self-registration, password reset, confirmation, or
   # magic link — accounts are seeded at boot from LONGPI_USERS
   # (Longpi.Accounts.Seeder), mirroring dala's model.

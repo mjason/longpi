@@ -9,6 +9,48 @@ defmodule LongpiWeb.MobileApiController do
 
   use LongpiWeb, :controller
 
+  @doc """
+  Boot probe for the shell: does this server require login, and does the
+  presented token (if any) already authorize us? Drives the app's flow —
+  `auth_enabled: false` → straight in; `authorized: false` → show login.
+  """
+  def status(conn, params) do
+    enabled = Longpi.Auth.enabled?()
+
+    json(conn, %{
+      auth_enabled: enabled,
+      authorized: not enabled or Longpi.Auth.verify_embed_token(params["token"])
+    })
+  end
+
+  @doc """
+  Native login: email + password → the embed token. The app shows a normal
+  sign-in form and stores the returned token in the Keychain — token stays the
+  transport credential (no WKWebView/URLSession cookie syncing), the password
+  is only ever used here.
+  """
+  def login(conn, %{"email" => email, "password" => password})
+      when is_binary(email) and is_binary(password) do
+    if not Longpi.Auth.enabled?() do
+      json(conn, %{token: nil, auth_enabled: false})
+    else
+      query =
+        Longpi.Accounts.User
+        |> Ash.Query.for_read(:sign_in_with_password, %{email: email, password: password})
+
+      case Ash.read_one(query, authorize?: false) do
+        {:ok, %Longpi.Accounts.User{}} ->
+          json(conn, %{token: Longpi.Auth.embed_token(), auth_enabled: true})
+
+        _ ->
+          conn |> put_status(401) |> json(%{error: "invalid email or password"})
+      end
+    end
+  end
+
+  def login(conn, _params),
+    do: conn |> put_status(422) |> json(%{error: "email and password are required"})
+
   def conversations(conn, _params) do
     conversations =
       Longpi.Agent.list_conversations!()
