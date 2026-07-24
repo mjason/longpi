@@ -15,7 +15,7 @@ defmodule Longpi.Agent.PromptsTest do
   test "tool_catalog lists every built-in tool with default and effective text" do
     catalog = Prompts.tool_catalog()
     names = Enum.map(catalog, & &1.name) |> Enum.sort()
-    assert names == ["apply_patch", "bash", "continue_later", "edit", "find", "grep", "ls", "read", "schedule", "write"]
+    assert names == ["apply_patch", "bash", "continue_later", "edit", "find", "grep", "ls", "name_secret", "read", "schedule", "write"]
 
     for entry <- catalog do
       assert is_binary(entry.default_description)

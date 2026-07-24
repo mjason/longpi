@@ -54,6 +54,10 @@ defmodule LongpiWeb.ConversationChannel do
   @impl true
   def handle_in("send_message", %{"text" => text} = payload, socket) do
     attachments = sanitize_attachments(payload["attachments"])
+    # Out-of-band secrets: @@NAME=value@@ markers are stored server-side and
+    # replaced with placeholders BEFORE the session (history/DB/model) sees the
+    # text — the model learns the name, never the value.
+    {text, _names} = Longpi.Agent.SecretCapture.capture(text)
 
     case Session.send_message(socket.assigns.session, text, attachments) do
       :ok -> {:reply, :ok, socket}
@@ -68,6 +72,7 @@ defmodule LongpiWeb.ConversationChannel do
 
   def handle_in("edit_last", %{"text" => text} = payload, socket) do
     attachments = sanitize_attachments(payload["attachments"])
+    {text, _names} = Longpi.Agent.SecretCapture.capture(text)
 
     case Session.edit_last(socket.assigns.session, text, attachments) do
       :ok -> {:reply, :ok, socket}

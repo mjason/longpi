@@ -35,7 +35,11 @@ Available globals and host capabilities:
   payloads `await res.arrayBuffer()` / `await res.bytes()`.
 - `process.env.<NAME>` — secrets stored under Settings → Extensions → Secrets,
   injected fresh on every call; keys belong there, code reads them from the
-  environment.
+  environment. Users can also provide one in chat as `@@NAME=value@@`: the
+  system stores it server-side and the model only ever sees
+  `[secret NAME saved]` — the value never enters the conversation. A bare
+  `@@=value@@` stores as PENDING_XXXX and the model names it from context via
+  the `name_secret` tool.
 - `await longpi.run(cmd, args, opts)` — run a program installed on the machine
   (python3, a Go binary, git, …) and get `{ status, stdout, stderr }`. It's
   async, so `await` it.

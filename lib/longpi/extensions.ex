@@ -78,8 +78,16 @@ defmodule Longpi.Extensions do
   @spec secret_env() :: %{optional(String.t()) => String.t()}
   def secret_env do
     case Longpi.Agent.list_extension_secrets() do
-      {:ok, secrets} -> Map.new(secrets, &{&1.name, &1.value})
-      _ -> %{}
+      {:ok, secrets} ->
+        # PENDING_* are anonymous captures awaiting a real name via the
+        # name_secret tool — not usable configuration, so keep them out of
+        # the extensions' environment.
+        secrets
+        |> Enum.reject(&Longpi.Agent.SecretCapture.pending?(&1.name))
+        |> Map.new(&{&1.name, &1.value})
+
+      _ ->
+        %{}
     end
   end
 

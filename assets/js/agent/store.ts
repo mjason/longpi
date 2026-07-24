@@ -1,6 +1,7 @@
 import { Channel } from "phoenix";
 import { createContext, useContext } from "react";
 import { createStore, useStore } from "zustand";
+import { maskSecrets } from "./secrets";
 
 import {
   type ConversationAction,
@@ -119,7 +120,10 @@ export function createConversationStore() {
       apply,
 
       send: (text, attachments = []) => {
-        apply({ type: "user_sent", text, attachments });
+        // Optimistic display masks @@NAME=value@@ markers immediately — the
+        // server strips them for real (history/model never see the value);
+        // this just keeps the value off the screen and out of local state.
+        apply({ type: "user_sent", text: maskSecrets(text), attachments });
         push("send_message", { text, attachments }, (reason) =>
           reason === "busy"
             ? "The agent is still working - interrupt it first."

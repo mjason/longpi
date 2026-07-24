@@ -366,7 +366,7 @@ const ComposerImageMarkers: FC = () => {
 
 // Spans worth marking in the composer text: pi-style image markers and the
 // "@"-mention file directives. Capture group so split() keeps the matches.
-const COMPOSER_MARK_RE = /(\[Image #\d+\]|:file\[[^\]]*\]\{name=[^}]*\})/g;
+const COMPOSER_MARK_RE = /(\[Image #\d+\]|:file\[[^\]]*\]\{name=[^}]*\}|@@(?:[A-Z][A-Z0-9_]*)?=[^@]*(?:@@)?)/g;
 
 /**
  * The composer textarea with marker highlighting. A backdrop div behind the

@@ -21,6 +21,7 @@ defmodule Longpi.Agent.Toolbox do
     Tools.Bash,
     Tools.ContinueLater,
     Tools.Schedule,
+    Tools.NameSecret,
     Tools.Grep,
     Tools.Find,
     Tools.Ls

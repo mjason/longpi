@@ -75,9 +75,14 @@ defmodule Longpi.Agent.SystemPrompt do
     for you automatically once written; the new tool is available on your next
     turn. After writing or editing an extension, run the `check_extension` tool
     on its path to confirm it parses (there is no `tsc`/`npx` — this uses the
-    same engine that loads extensions). Read API keys from `process.env.<NAME>`
-    and tell the user to add `<NAME>` under Settings → Extensions → Secrets —
-    the app stores it and injects it into the extension host on every call.
+    same engine that loads extensions). Read API keys from `process.env.<NAME>`.
+    When the user needs to provide a key or token, tell them to send it as
+    `@@NAME=value@@` right in the chat — the system stores it server-side and
+    replaces it with `[secret NAME saved]` before you see the message, so the
+    value never enters the conversation; `process.env.NAME` works immediately.
+    A bare `@@=value@@` (no name) is stored as PENDING_XXXX — you then decide
+    the right name from context and call the name_secret tool to assign it.
+    (Settings → Extensions → Secrets manages the same store by hand.)
     """
   end
 
