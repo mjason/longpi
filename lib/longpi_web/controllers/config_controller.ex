@@ -18,6 +18,44 @@ defmodule LongpiWeb.ConfigController do
     json(conn, %{tools: Longpi.Agent.Prompts.tool_catalog()})
   end
 
+  # Directory completion for the new-conversation dialog: given a partial
+  # path, list matching directories. "/home/mj/de" → subdirectories of
+  # /home/mj starting with "de"; a trailing slash lists the directory itself.
+  # Directories only, hidden ones excluded unless explicitly prefixed, capped.
+  def list_dirs(conn, params) do
+    prefix = params["prefix"] || ""
+
+    # Split on the LAST slash textually — Path.expand would swallow a trailing
+    # "." or "..", breaking hidden-dir completion like "/home/mj/.".
+    {base, fragment} =
+      case Regex.run(~r{^(.*/)([^/]*)$}, prefix) do
+        [_, base_part, frag] -> {base_part |> Path.expand() |> ensure_root(), frag}
+        nil -> {System.user_home!(), prefix}
+      end
+
+    dirs =
+      case File.ls(base) do
+        {:ok, entries} ->
+          entries
+          |> Enum.filter(fn entry ->
+            String.starts_with?(entry, fragment) and
+              (String.starts_with?(fragment, ".") or not String.starts_with?(entry, ".")) and
+              File.dir?(Path.join(base, entry))
+          end)
+          |> Enum.sort()
+          |> Enum.take(30)
+          |> Enum.map(&Path.join(base, &1))
+
+        {:error, _} ->
+          []
+      end
+
+    json(conn, %{dirs: dirs})
+  end
+
+  defp ensure_root(""), do: "/"
+  defp ensure_root(path), do: path
+
   # Next run times for a batch of cron expressions (the Schedules admin page
   # shows them; cron math lives server-side with the scheduler's clock).
   # Capped and type-filtered: next_run searches up to 10k candidate dates per

@@ -7,6 +7,40 @@ defmodule LongpiWeb.ConfigControllerTest do
     assert is_binary(token) and token != ""
   end
 
+  describe "GET /rpc/dirs (directory completion for the new-conversation dialog)" do
+    @describetag :tmp_dir
+
+    test "a partial path lists matching subdirectories", %{conn: conn, tmp_dir: dir} do
+      File.mkdir_p!(Path.join(dir, "dev"))
+      File.mkdir_p!(Path.join(dir, "documents"))
+      File.mkdir_p!(Path.join(dir, "music"))
+      File.write!(Path.join(dir, "devfile"), "not a dir")
+
+      conn = get(conn, ~p"/rpc/dirs?prefix=#{dir <> "/d"}")
+      assert %{"dirs" => dirs} = json_response(conn, 200)
+      assert dirs == [Path.join(dir, "dev"), Path.join(dir, "documents")]
+    end
+
+    test "a trailing slash lists inside the directory; hidden dirs need an explicit dot",
+         %{conn: conn, tmp_dir: dir} do
+      File.mkdir_p!(Path.join(dir, "visible"))
+      File.mkdir_p!(Path.join(dir, ".hidden"))
+
+      conn1 = get(conn, ~p"/rpc/dirs?prefix=#{dir <> "/"}")
+      assert %{"dirs" => [only]} = json_response(conn1, 200)
+      assert only == Path.join(dir, "visible")
+
+      conn2 = get(conn, ~p"/rpc/dirs?prefix=#{dir <> "/."}")
+      assert %{"dirs" => [hidden]} = json_response(conn2, 200)
+      assert hidden == Path.join(dir, ".hidden")
+    end
+
+    test "a bogus path returns an empty list, not an error", %{conn: conn} do
+      conn = get(conn, ~p"/rpc/dirs?prefix=/no/such/place/anywhere")
+      assert %{"dirs" => []} = json_response(conn, 200)
+    end
+  end
+
   describe "POST /rpc/cron-next (the Schedules admin page's next-run column)" do
     test "returns a next run per valid cron and nil for junk", %{conn: conn} do
       conn = post(conn, ~p"/rpc/cron-next", %{"crons" => ["0 23 * * *", "not cron"]})

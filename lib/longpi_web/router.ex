@@ -72,6 +72,7 @@ defmodule LongpiWeb.Router do
 
     get "/rpc/tool-catalog", ConfigController, :tool_catalog
     post "/rpc/cron-next", ConfigController, :cron_next
+    get "/rpc/dirs", ConfigController, :list_dirs
     get "/rpc/config-defaults", ConfigController, :defaults
     post "/rpc/discover-models", ConfigController, :discover_models
     get "/rpc/sessions", ConfigController, :sessions

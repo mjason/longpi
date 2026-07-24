@@ -49,7 +49,21 @@ import {
 import { useStore } from "zustand";
 import { useShallow } from "zustand/shallow";
 import { SubagentApprovals, SubagentsBar } from "./SubagentsBar";
-import { forkConversation, loadSettings, loadWorkspaceFiles, SETTING_KEYS } from "./settings";
+import {
+  forkConversation,
+  loadModels,
+  loadSettings,
+  loadWorkspaceFiles,
+  type ModelRow,
+  SETTING_KEYS,
+} from "./settings";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
 import type { ConversationSummary } from "./types";
 import { UpdateCheck } from "./UpdateCheck";
 
@@ -437,6 +451,12 @@ function NewConversationDialog({
   const [model, setModel] = useState(DEFAULT_MODEL);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Directory completion: server-listed subdirectories matching the typed
+  // prefix; shown as a picker under the input while it has focus.
+  const [dirSuggestions, setDirSuggestions] = useState<string[]>([]);
+  const [dirsOpen, setDirsOpen] = useState(false);
+  // Enabled models for the picker; empty → fall back to free-text input.
+  const [models, setModels] = useState<ModelRow[]>([]);
 
   // Prefill the model from the saved default_model setting.
   useEffect(() => {
@@ -444,7 +464,20 @@ function NewConversationDialog({
       const preset = s[SETTING_KEYS.defaultModel];
       if (preset) setModel(preset);
     });
+    loadModels().then((all) => setModels(all.filter((m) => m.enabled)));
   }, []);
+
+  // Debounced completion lookup as the user types a path.
+  useEffect(() => {
+    if (!dirsOpen) return;
+    const handle = setTimeout(() => {
+      fetch(`/rpc/dirs?prefix=${encodeURIComponent(cwd)}`, { headers: buildCSRFHeaders() })
+        .then((res) => (res.ok ? res.json() : { dirs: [] }))
+        .then((body) => setDirSuggestions(body.dirs ?? []))
+        .catch(() => setDirSuggestions([]));
+    }, 150);
+    return () => clearTimeout(handle);
+  }, [cwd, dirsOpen]);
 
   async function create(event: React.FormEvent) {
     event.preventDefault();
@@ -472,30 +505,83 @@ function NewConversationDialog({
           <DialogTitle>{t("newConv.title")}</DialogTitle>
         </DialogHeader>
         <form onSubmit={create} className="space-y-3">
-          <div className="space-y-1.5">
+          <div className="relative space-y-1.5">
             <Label htmlFor="new-conv-cwd" className="text-xs text-muted-foreground">
               Workspace directory
             </Label>
             <Input
               id="new-conv-cwd"
               autoFocus
+              autoComplete="off"
               className="font-mono text-xs"
               placeholder="/path/to/workspace"
               value={cwd}
-              onChange={(e) => setCwd(e.target.value)}
+              onChange={(e) => {
+                setCwd(e.target.value);
+                setDirsOpen(true);
+              }}
+              onFocus={() => setDirsOpen(true)}
+              onBlur={() => setTimeout(() => setDirsOpen(false), 150)}
+              onKeyDown={(e) => {
+                // Tab completes to the first suggestion (shell muscle memory).
+                if (e.key === "Tab" && dirsOpen && dirSuggestions[0]) {
+                  e.preventDefault();
+                  setCwd(dirSuggestions[0] + "/");
+                }
+                if (e.key === "Escape") setDirsOpen(false);
+              }}
             />
+            {dirsOpen && dirSuggestions.length > 0 && (
+              <div className="absolute inset-x-0 top-full z-50 mt-1 max-h-48 overflow-y-auto rounded-lg bg-popover py-1 shadow-[0_12px_40px_-8px_rgba(0,0,0,0.18)] ring-1 ring-black/[0.06] dark:ring-white/[0.08]">
+                {dirSuggestions.map((dir) => (
+                  <button
+                    key={dir}
+                    type="button"
+                    className="block w-full truncate px-3 py-1.5 text-left font-mono text-xs hover:bg-accent"
+                    // onMouseDown so it beats the input's onBlur close.
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setCwd(dir + "/");
+                    }}
+                  >
+                    {dir}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="new-conv-model" className="text-xs text-muted-foreground">
               Model
             </Label>
-            <Input
-              id="new-conv-model"
-              className="font-mono text-xs"
-              placeholder="provider:model"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-            />
+            {models.length > 0 ? (
+              <Select value={model} onValueChange={setModel}>
+                <SelectTrigger id="new-conv-model" className="w-full font-mono text-xs">
+                  <SelectValue placeholder="model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {models.map((m) => (
+                    <SelectItem key={m.id} value={m.spec} className="font-mono text-xs">
+                      {m.label || m.spec}
+                    </SelectItem>
+                  ))}
+                  {/* The preset default may not be in the enabled list; keep it selectable. */}
+                  {!models.some((m) => m.spec === model) && model && (
+                    <SelectItem value={model} className="font-mono text-xs">
+                      {model}
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                id="new-conv-model"
+                className="font-mono text-xs"
+                placeholder="provider:model"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+              />
+            )}
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
           <div className="flex justify-end gap-2 pt-1">
