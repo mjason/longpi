@@ -29,6 +29,7 @@ defmodule LongpiWeb.ConversationChannel do
           |> Enum.map(&serialize_message/1)
 
         ext = Session.ext_info(session)
+        live = Session.live_events(session)
 
         socket =
           assign(socket, conversation_id: conversation_id, session: session, ext_host: ext.host)
@@ -37,7 +38,10 @@ defmodule LongpiWeb.ConversationChannel do
           messages: history,
           # Mid-turn streamed events (folded), so a reload/second tab replays
           # straight onto the live view instead of a blank pane until turn end.
-          live: Session.live_events(session),
+          # live_seq is the watermark covering them: the client drops pushes
+          # with seq <= live_seq (they are already inside the replay).
+          live: live.events,
+          live_seq: live.seq,
           status: Session.status(session),
           pending_approvals: Session.pending_approvals(session),
           context_usage: Session.context_usage(session),

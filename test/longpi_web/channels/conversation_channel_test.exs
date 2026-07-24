@@ -23,6 +23,45 @@ defmodule LongpiWeb.ConversationChannelTest do
     %{socket: socket, conversation: conversation}
   end
 
+  test "join reply carries a JSON-serializable live buffer (list + integer seq)", %{
+    conversation: conversation
+  } do
+    test_pid = self()
+
+    stub(LLMMock, :stream, fn _, _, _, _, sink ->
+      sink.({:text_delta, "streaming…"})
+      sink.({:tool_call, %{id: "x1", name: "bash", args: %{"command" => "ls"}}})
+      send(test_pid, {:mid_turn, self()})
+      receive do
+        :finish -> :ok
+      end
+
+      {:ok, %{text: "done", tool_calls: []}}
+    end)
+
+    {:ok, session} = Sessions.ensure_started(conversation.id)
+    :ok = Longpi.Agent.Session.send_message(session, "go")
+    assert_receive {:mid_turn, task_pid}, 3_000
+    Process.sleep(50)
+
+    # A SECOND client joins mid-turn (the refresh scenario).
+    {:ok, reply, _socket2} =
+      LongpiWeb.UserSocket
+      |> socket("user2", %{})
+      |> subscribe_and_join(LongpiWeb.ConversationChannel, "conversation:#{conversation.id}")
+
+    assert is_list(reply.live)
+    assert is_integer(reply.live_seq) and reply.live_seq > 0
+    assert [%{type: "text_delta", text: "streaming…"}, %{type: "tool_call", id: "x1"}] =
+             Enum.map(reply.live, &Map.take(&1, [:type, :text, :id]))
+
+    # The whole reply must survive the websocket JSON serializer — a shape
+    # regression here is exactly the "(s ?? []) is not iterable" class of bug.
+    assert {:ok, _} = Jason.encode(reply)
+
+    send(task_pid, :finish)
+  end
+
   test "join replies with existing history", %{conversation: conversation, socket: socket} do
     Process.unlink(socket.channel_pid)
     leave(socket)
