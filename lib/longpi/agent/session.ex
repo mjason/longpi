@@ -78,9 +78,10 @@ defmodule Longpi.Agent.Session do
   def loop_status(session), do: GenServer.call(session, :loop_status)
 
   @doc """
-  The RUNNING turn's streamed events so far, in wire format (oldest first) —
-  a client joining mid-turn replays them to reconstruct the live view.
-  Empty when idle.
+  The RUNNING turn's streamed events so far, in wire format (oldest first),
+  plus the session's event-seq watermark covering them — a client joining
+  mid-turn replays the events and uses the watermark to drop pushes that are
+  already contained in the replay. Events are empty when idle.
   """
   def live_events(session), do: GenServer.call(session, :live_events)
 
@@ -443,7 +444,7 @@ defmodule Longpi.Agent.Session do
   def handle_call(:loop_status, _from, state), do: {:reply, state.loop, state}
 
   def handle_call(:live_events, _from, state),
-    do: {:reply, serialize_live(state.live), state}
+    do: {:reply, %{seq: state.seq, events: serialize_live(state.live)}, state}
 
   def handle_call({:edit_last, _text, _attachments}, _from, %{status: status} = state)
       when status in [:running, :compacting] do
@@ -1421,8 +1422,14 @@ defmodule Longpi.Agent.Session do
       {live, added} when state.live_bytes + added <= @live_max_bytes ->
         %{state | live: live, live_bytes: state.live_bytes + added}
 
-      {_live, _added} ->
-        state
+      {live, added} ->
+        # Over the cap: keep recording STRUCTURE (tool calls/results — a late
+        # joiner must not see a stuck spinner), drop further text-ish bulk.
+        case event do
+          {:tool_call, _} -> %{state | live: live, live_bytes: state.live_bytes + added}
+          {:tool_result, _} -> %{state | live: live, live_bytes: state.live_bytes + added}
+          _ -> state
+        end
     end
   end
 

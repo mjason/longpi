@@ -248,8 +248,14 @@ defmodule LongpiWeb.ConversationChannel do
       |> Enum.reject(&(&1.role == :system))
       |> Enum.map(&serialize_message/1)
 
+    # get_state REPLACES the client's items — it must carry the live replay
+    # too, or a pull right after a mid-turn join wipes the replayed view.
+    live = Session.live_events(session)
+
     reply = %{
       messages: history,
+      live: live.events,
+      live_seq: live.seq,
       status: Session.status(session),
       pending_approvals: Session.pending_approvals(session),
       context_usage: Session.context_usage(session),

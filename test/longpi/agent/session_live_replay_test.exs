@@ -46,18 +46,22 @@ defmodule Longpi.Agent.SessionLiveReplayTest do
     # Let the session drain the sink events from its mailbox.
     Process.sleep(50)
 
-    # This is exactly what a fresh channel join replays.
+    # This is exactly what a fresh channel join replays — plus the seq
+    # watermark that lets the client drop pushes already inside the replay.
+    assert %{seq: seq, events: events} = Session.live_events(session)
+    assert is_integer(seq) and seq > 0
+
     assert [
              %{type: "text_delta", text: "Let me check that."},
              %{type: "tool_call", id: "t1", name: "bash", args: %{"command" => "ls"}},
              %{type: "tool_output", id: "t1", chunk: "file-a\nfile-b\n"},
              %{type: "tool_result", id: "t1", name: "bash", content: "file-a\nfile-b\n", error: false}
-           ] = Session.live_events(session)
+           ] = events
 
     # Turn finishes → the buffer is gone (history carries the final truth).
     send(task_pid, :finish)
     assert_receive {:agent_event, {:turn_ended, :complete}}, 3_000
-    assert Session.live_events(session) == []
+    assert %{events: []} = Session.live_events(session)
   end
 
 end

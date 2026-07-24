@@ -24,6 +24,8 @@ defmodule Longpi.Application do
       # Cron-scheduled tasks: ticks every minute, fires due tasks into their
       # conversations. After the session supervisor (it starts sessions).
       Longpi.Agent.Scheduler,
+      # Brute-force throttle for the mobile login endpoint (per-IP ETS).
+      LongpiWeb.LoginThrottle,
       # Start a worker by calling: Longpi.Worker.start_link(arg)
       # {Longpi.Worker, arg},
       # Start to serve requests, typically the last entry

@@ -146,6 +146,12 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
       .join()
       .receive("ok", (reply: JoinReply) => {
         e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands, subagents: reply.subagents, subagentApprovals: reply.subagent_approvals });
+        // Watermark BEFORE replay: pushes emitted while the join reply was
+        // being assembled are inside `live` — dropping seq <= live_seq stops
+        // them from appending twice.
+        if (typeof reply.live_seq === "number") {
+          e.lastSeq = Math.max(e.lastSeq, reply.live_seq);
+        }
         replayLive(reply.live);
         resolve();
       })
@@ -183,6 +189,9 @@ type JoinReply = {
   // Folded stream events of the RUNNING turn, replayed on join (wire shapes
   // identical to the live push events).
   live?: LiveEvent[];
+  // Session seq watermark covering `live`: pushes with seq <= live_seq are
+  // already inside the replay and must be dropped.
+  live_seq?: number;
   status: string;
   pending_approvals?: string[];
   context_usage?: ContextUsage;
@@ -498,17 +507,42 @@ export function useConversationChannel(conversationId: string | null): Conversat
     entry.joined.then(() => {
       if (cancelled || entry.channel.state !== "joined") return;
       entry.channel.push("get_state", {}).receive("ok", (reply: JoinReply) => {
-        if (!cancelled)
-          store.getState().apply({
-            type: "joined",
-            messages: reply.messages,
-            status: reply.status,
-            pending: reply.pending_approvals,
-            usage: reply.context_usage,
-            reasoningEffort: reply.reasoning_effort,
-            commands: reply.commands,
-            subagents: reply.subagents,
-          });
+        if (cancelled) return;
+        store.getState().apply({
+          type: "joined",
+          messages: reply.messages,
+          status: reply.status,
+          pending: reply.pending_approvals,
+          usage: reply.context_usage,
+          reasoningEffort: reply.reasoning_effort,
+          commands: reply.commands,
+          subagents: reply.subagents,
+        });
+        // This REPLACED items — replay the mid-turn buffer again (watermark
+        // first) or a pull right after a mid-turn join would wipe the live
+        // view the join just reconstructed.
+        if (typeof reply.live_seq === "number") {
+          entry.lastSeq = Math.max(entry.lastSeq, reply.live_seq);
+        }
+        for (const ev of reply.live ?? []) {
+          switch (ev.type) {
+            case "text_delta":
+              store.getState().apply({ type: "text_delta", text: ev.text ?? "" });
+              break;
+            case "thinking_delta":
+              store.getState().apply({ type: "thinking_delta", text: ev.text ?? "" });
+              break;
+            case "tool_call":
+              store.getState().apply({ type: "tool_call", id: ev.id!, name: ev.name!, args: ev.args ?? {} });
+              break;
+            case "tool_output":
+              store.getState().apply({ type: "tool_output", id: ev.id!, chunk: ev.chunk ?? "" });
+              break;
+            case "tool_result":
+              store.getState().apply({ type: "tool_result", id: ev.id!, content: ev.content ?? "", error: !!ev.error });
+              break;
+          }
+        }
       });
     });
 

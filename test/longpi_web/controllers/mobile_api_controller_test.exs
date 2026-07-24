@@ -3,6 +3,13 @@ defmodule LongpiWeb.MobileApiControllerTest do
   # authorized per-request by the embed token (open when sign-in is off).
   use LongpiWeb.ConnCase
 
+  # The mobile API only accepts JSON writes (anti-CSRF); mirror the real client.
+  defp json_post(conn, path, body) do
+    conn
+    |> put_req_header("content-type", "application/json")
+    |> post(path, Jason.encode!(body))
+  end
+
   describe "auth flow (status probe + native login)" do
     setup do
       Application.delete_env(:longpi, :auth_enabled)
@@ -42,7 +49,7 @@ defmodule LongpiWeb.MobileApiControllerTest do
 
       assert %{"token" => "tok-456", "auth_enabled" => true} =
                conn
-               |> post(~p"/api/mobile/login", %{
+               |> json_post(~p"/api/mobile/login", %{
                  "email" => "phone@example.com",
                  "password" => "secret123"
                })
@@ -50,13 +57,56 @@ defmodule LongpiWeb.MobileApiControllerTest do
 
       assert %{"error" => error} =
                conn
-               |> post(~p"/api/mobile/login", %{
+               |> json_post(~p"/api/mobile/login", %{
                  "email" => "phone@example.com",
                  "password" => "wrong"
                })
                |> json_response(401)
 
       assert error =~ "invalid"
+    end
+
+    test "login without a configured embed token is a loud 503, not token:null", %{conn: conn} do
+      Application.put_env(:longpi, :auth_enabled, true)
+      Application.delete_env(:longpi, :embed_token)
+      Application.put_env(:longpi, :bootstrap_users, "lost@example.com:secret123")
+      on_exit(fn -> Application.delete_env(:longpi, :bootstrap_users) end)
+      :ok = Longpi.Accounts.Seeder.run()
+
+      conn =
+        json_post(conn, ~p"/api/mobile/login", %{
+          "email" => "lost@example.com",
+          "password" => "secret123"
+        })
+
+      assert %{"error" => error} = json_response(conn, 503)
+      assert error =~ "embed token not configured"
+    end
+
+    test "repeated failed logins get throttled with 429", %{conn: conn} do
+      Application.put_env(:longpi, :auth_enabled, true)
+      Application.put_env(:longpi, :embed_token, "tok-throttle")
+      on_exit(fn ->
+        Application.delete_env(:longpi, :embed_token)
+        :ets.delete_all_objects(:longpi_login_throttle)
+      end)
+
+      payload = %{"email" => "nobody@example.com", "password" => "wrong"}
+      for _ <- 1..10, do: json_post(conn, ~p"/api/mobile/login", payload)
+
+      conn = json_post(conn, ~p"/api/mobile/login", payload)
+      assert %{"error" => error} = json_response(conn, 429)
+      assert error =~ "too many"
+    end
+
+    test "cross-site form posts are rejected (JSON writes only)", %{conn: conn} do
+      conn =
+        conn
+        |> put_req_header("content-type", "application/x-www-form-urlencoded")
+        |> post(~p"/api/mobile/conversations", "cwd=%2Ftmp")
+
+      assert %{"error" => error} = json_response(conn, 415)
+      assert error =~ "JSON"
     end
 
     test "the token-guarded API rejects a bad token when auth is on", %{conn: conn} do
@@ -87,7 +137,7 @@ defmodule LongpiWeb.MobileApiControllerTest do
   end
 
   test "creates a conversation with the default model and deletes it", %{conn: conn} do
-    conn1 = post(conn, ~p"/api/mobile/conversations", %{"cwd" => System.tmp_dir!()})
+    conn1 = json_post(conn, ~p"/api/mobile/conversations", %{"cwd" => System.tmp_dir!()})
     assert %{"id" => id, "model" => model} = json_response(conn1, 200)
     assert is_binary(model) and model != ""
 
@@ -99,7 +149,7 @@ defmodule LongpiWeb.MobileApiControllerTest do
   end
 
   test "missing cwd is a 422", %{conn: conn} do
-    conn = post(conn, ~p"/api/mobile/conversations", %{})
+    conn = json_post(conn, ~p"/api/mobile/conversations", %{})
     assert %{"error" => error} = json_response(conn, 422)
     assert error =~ "cwd"
   end

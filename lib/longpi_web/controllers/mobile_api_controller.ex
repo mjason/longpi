@@ -31,18 +31,36 @@ defmodule LongpiWeb.MobileApiController do
   """
   def login(conn, %{"email" => email, "password" => password})
       when is_binary(email) and is_binary(password) do
-    if not Longpi.Auth.enabled?() do
-      json(conn, %{token: nil, auth_enabled: false})
-    else
+    cond do
+      not Longpi.Auth.enabled?() ->
+        json(conn, %{token: nil, auth_enabled: false})
+
+      not LongpiWeb.LoginThrottle.allowed?(client_ip(conn)) ->
+        conn |> put_status(429) |> json(%{error: "too many attempts — try again later"})
+
+      true ->
       query =
         Longpi.Accounts.User
         |> Ash.Query.for_read(:sign_in_with_password, %{email: email, password: password})
 
       case Ash.read_one(query, authorize?: false) do
         {:ok, %Longpi.Accounts.User{}} ->
-          json(conn, %{token: Longpi.Auth.embed_token(), auth_enabled: true})
+          case Longpi.Auth.embed_token() do
+            token when is_binary(token) and token != "" ->
+              LongpiWeb.LoginThrottle.reset(client_ip(conn))
+              json(conn, %{token: token, auth_enabled: true})
+
+            _ ->
+              # Signed in fine, but there is no token to hand out — a null
+              # token would strand the app in a login-succeeds-nothing-works
+              # loop. Be explicit.
+              conn
+              |> put_status(503)
+              |> json(%{error: "embed token not configured on the server (set auth.embedToken)"})
+          end
 
         _ ->
+          LongpiWeb.LoginThrottle.record_failure(client_ip(conn))
           conn |> put_status(401) |> json(%{error: "invalid email or password"})
       end
     end
@@ -50,6 +68,8 @@ defmodule LongpiWeb.MobileApiController do
 
   def login(conn, _params),
     do: conn |> put_status(422) |> json(%{error: "email and password are required"})
+
+  defp client_ip(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()
 
   def conversations(conn, _params) do
     conversations =

@@ -151,6 +151,15 @@ export default function ChatApp() {
   // Mobile: the sidebar lives in a sheet, opened from the hamburger top bar.
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  // Crossing to desktop width hides the sheet CONTENT (md:hidden) but not its
+  // overlay — close the drawer outright so no orphaned dim layer remains.
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const onChange = () => mq.matches && setDrawerOpen(false);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
   const sidebarProps = {
     conversations,
     selectedId: conversationId ?? null,

@@ -59,8 +59,32 @@ defmodule LongpiWeb.Router do
   # embed token (query `?token=` or `x-longpi-token` header). When sign-in is
   # disabled the API is open, matching the rest of the app.
   pipeline :mobile_token_auth do
+    plug :require_json_writes
     plug :verify_mobile_token
   end
+
+  pipeline :mobile_json_writes do
+    plug :require_json_writes
+  end
+
+  # Blind cross-site form posts (urlencoded/multipart) can reach these
+  # endpoints when sign-in is off — JSON-only writes force a CORS preflight,
+  # which browsers won't grant to a hostile origin.
+  defp require_json_writes(conn, _opts) do
+    if conn.method in ["POST", "PUT", "PATCH", "DELETE"] and
+         not json_content?(Plug.Conn.get_req_header(conn, "content-type")) do
+      conn
+      |> Plug.Conn.put_status(415)
+      |> Phoenix.Controller.json(%{error: "JSON body required"})
+      |> Plug.Conn.halt()
+    else
+      conn
+    end
+  end
+
+  defp json_content?([type | _]), do: String.starts_with?(type, "application/json")
+  # DELETE without a body has no content type — that's fine (no form can send it).
+  defp json_content?([]), do: true
 
   defp verify_mobile_token(conn, _opts) do
     presented =
@@ -160,7 +184,7 @@ defmodule LongpiWeb.Router do
   # Pre-auth mobile endpoints: the boot probe and the login exchange —
   # by definition they run before the app holds a token.
   scope "/api/mobile", LongpiWeb do
-    pipe_through [:api]
+    pipe_through [:api, :mobile_json_writes]
 
     get "/status", MobileApiController, :status
     post "/login", MobileApiController, :login
