@@ -140,7 +140,11 @@ const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
         turnAnchor="top"
         data-slot="aui_thread-viewport"
         className={cn(
-          "relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll",
+          // overflow-x HIDDEN: wide content (pre/tables/diffs) scrolls inside
+          // its own container; the page itself must never pan horizontally —
+          // a single overflowing element would shove the centered column off
+          // to the side and let the whole thread drift on swipe.
+          "relative flex flex-1 flex-col overflow-x-hidden overflow-y-scroll",
           // Smooth scroll is nice for messages, but on the centered empty view
           // it animates every reflow (typing toggles suggestions) into a shake.
           !isEmpty && "scroll-smooth",
