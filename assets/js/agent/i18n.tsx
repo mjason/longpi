@@ -93,6 +93,7 @@ const en = {
   "newConv.workspace": "Workspace",
   "newConv.model": "Model",
   "newConv.create": "Create",
+  "newConv.cancel": "Cancel",
 
   // Update check
   "update.updateTo": "Update to v{version}",
@@ -325,6 +326,7 @@ const zh: Record<I18nKey, string> = {
   "newConv.workspace": "工作区",
   "newConv.model": "模型",
   "newConv.create": "创建",
+  "newConv.cancel": "取消",
 
   "update.updateTo": "更新到 v{version}",
   "update.updating": "更新中…",

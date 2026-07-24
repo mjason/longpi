@@ -507,7 +507,7 @@ function NewConversationDialog({
         <form onSubmit={create} className="space-y-3">
           <div className="relative space-y-1.5">
             <Label htmlFor="new-conv-cwd" className="text-xs text-muted-foreground">
-              Workspace directory
+              {t("newConv.workspace")}
             </Label>
             <Input
               id="new-conv-cwd"
@@ -520,7 +520,6 @@ function NewConversationDialog({
                 setCwd(e.target.value);
                 setDirsOpen(true);
               }}
-              onFocus={() => setDirsOpen(true)}
               onBlur={() => setTimeout(() => setDirsOpen(false), 150)}
               onKeyDown={(e) => {
                 // Tab completes to the first suggestion (shell muscle memory).
@@ -552,7 +551,7 @@ function NewConversationDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="new-conv-model" className="text-xs text-muted-foreground">
-              Model
+              {t("newConv.model")}
             </Label>
             {models.length > 0 ? (
               <Select value={model} onValueChange={setModel}>
@@ -586,11 +585,11 @@ function NewConversationDialog({
           {error && <p className="text-xs text-destructive">{error}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-              Cancel
+              {t("newConv.cancel")}
             </Button>
             <Button type="submit" size="sm" disabled={creating || !cwd.trim()}>
               {creating ? <Loader2 className="animate-spin" /> : <Plus />}
-              Create
+              {t("newConv.create")}
             </Button>
           </div>
         </form>
