@@ -145,6 +145,9 @@ struct Registry {
 struct ToolEntry {
     description: String,
     parameters_json: String,
+    // Model tier/spec this tool prefers ("" = none): after the tool runs, the
+    // rest of the turn's LLM calls switch to it (see Longpi.Agent.Turn).
+    model: String,
     execute: Persistent<Function<'static>>,
 }
 
@@ -375,7 +378,7 @@ async fn run_instance(
                 // A panicked load still needs a reply, else the host waits
                 // ready?:false to its timeout.
                 Reply::Load => send_to(&owner, move |e| {
-                    let tools: Vec<(String, String, String)> = vec![];
+                    let tools: Vec<(String, String, String, String)> = vec![];
                     let commands: Vec<(String, String)> = vec![];
                     let errors = vec![("<load>".to_string(), "load panicked".to_string())];
                     (atoms::js_loaded(), id, tools, commands, errors).encode(e)
@@ -484,15 +487,15 @@ impl Registry {
 
 fn registry_summary(
     registry: &Rc<RefCell<Registry>>,
-) -> (Vec<(String, String, String)>, Vec<(String, String)>) {
+) -> (Vec<(String, String, String, String)>, Vec<(String, String)>) {
     let reg = registry.borrow();
     let tools = reg
         .tool_order
         .iter()
         .filter_map(|name| {
-            reg.tools
-                .get(name)
-                .map(|t| (name.clone(), t.description.clone(), t.parameters_json.clone()))
+            reg.tools.get(name).map(|t| {
+                (name.clone(), t.description.clone(), t.parameters_json.clone(), t.model.clone())
+            })
         })
         .collect();
     let commands = reg
@@ -732,13 +735,14 @@ async fn bind_globals(
                 .ok()
                 .and_then(|v| stringify(def.ctx(), &v))
                 .unwrap_or_else(|| "{\"type\":\"object\",\"properties\":{}}".to_string());
+            let model: String = def.get("model").unwrap_or_default();
             let execute: Function = def.get("execute")?;
             let saved = Persistent::save(def.ctx(), execute);
             let mut reg = reg_tool.borrow_mut();
             if !reg.tools.contains_key(&name) {
                 reg.tool_order.push(name.clone());
             }
-            reg.tools.insert(name, ToolEntry { description, parameters_json, execute: saved });
+            reg.tools.insert(name, ToolEntry { description, parameters_json, model, execute: saved });
             Ok(())
         })).ok();
 

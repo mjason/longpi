@@ -264,6 +264,32 @@ defmodule Longpi.Extensions.HostTest do
     assert {:ok, ^text} = Longpi.Agent.ExtensionUI.model_text(result)
   end
 
+  test "a tool's model declaration reaches its ToolSpec", %{cwd: cwd} do
+    write_ext(cwd, "tiered.js", """
+    export default function (longpi) {
+      longpi.registerTool({
+        name: "cheap_tool",
+        description: "Prefers the light tier.",
+        model: "J",
+        parameters: { type: "object", properties: {} },
+        execute() { return "ok"; },
+      });
+      longpi.registerTool({
+        name: "plain_tool",
+        description: "No preference.",
+        parameters: { type: "object", properties: {} },
+        execute() { return "ok"; },
+      });
+    }
+    """)
+
+    {:ok, host} = Host.start_for(cwd)
+    specs = Host.tool_specs(host)
+
+    assert %{model: "J"} = Enum.find(specs, &(&1.name == "cheap_tool"))
+    assert %{model: nil} = Enum.find(specs, &(&1.name == "plain_tool"))
+  end
+
   test "no extensions anywhere → :none (built-ins don't boot a host on their own)", %{cwd: cwd} do
     File.rm_rf!(Path.join(cwd, ".longpi/extensions"))
     assert :none = Host.start_for(cwd)

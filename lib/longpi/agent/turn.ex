@@ -45,7 +45,7 @@ defmodule Longpi.Agent.Turn do
         assistant = Message.assistant(completion.text, calls)
         results = Enum.map(calls, &execute_call(config, &1))
         produced = Enum.reverse(results) ++ [assistant | produced]
-        iterate(config, history, produced, remaining - 1)
+        iterate(apply_tool_model(config, calls), history, produced, remaining - 1)
 
       {:error, reason} ->
         {:error, reason, Enum.reverse(produced)}
@@ -64,6 +64,44 @@ defmodule Longpi.Agent.Turn do
         []
     end
   end
+
+  # A tool may declare a preferred model (`registerTool({model: "J"})`, a tier
+  # alias or full spec): after it runs, the REST of this turn's LLM calls
+  # switch to that profile — processing an extension's output rarely needs the
+  # session's strongest model. Turn-scoped only; the session model is
+  # untouched. The last declaring tool in the batch wins; an unresolvable
+  # reference logs and keeps the current model (the tool itself succeeded).
+  defp apply_tool_model(config, calls) do
+    declared =
+      calls
+      |> Enum.reverse()
+      |> Enum.find_value(fn call ->
+        case config.toolbox[call.name] do
+          %{model: model} when is_binary(model) -> model
+          _ -> nil
+        end
+      end)
+
+    with model when is_binary(model) <- declared,
+         {:ok, %{spec: spec} = resolved} when is_binary(spec) <-
+           Longpi.Agent.ModelResolver.resolve(declared) do
+      %{config | model: spec}
+      |> Map.put(:reasoning_effort, effort_atom(resolved.reasoning_effort) || config[:reasoning_effort])
+    else
+      {:error, reason} ->
+        require Logger
+        Logger.warning("tool-declared model #{inspect(declared)} not usable: #{reason}")
+        config
+
+      _ ->
+        config
+    end
+  end
+
+  defp effort_atom(effort) when effort in ~w(minimal low medium high xhigh),
+    do: String.to_existing_atom(effort)
+
+  defp effort_atom(_), do: nil
 
   defp execute_call(config, call) do
     %{toolbox: toolbox, ctx: ctx, sink: sink} = config

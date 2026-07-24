@@ -10,14 +10,18 @@ defmodule Longpi.Agent.ToolSpec do
   """
 
   @enforce_keys [:name, :description, :schema, :run]
-  defstruct [:name, :description, :schema, :run, source: :builtin]
+  defstruct [:name, :description, :schema, :run, source: :builtin, model: nil]
 
   @type t :: %__MODULE__{
           name: String.t(),
           description: String.t(),
           schema: keyword() | map(),
           run: (map(), Longpi.Agent.Tool.ctx() -> {:ok, binary()} | {:error, binary()}),
-          source: :builtin | :extension
+          source: :builtin | :extension,
+          # A model tier ("J") or spec the tool prefers: after this tool runs,
+          # the REST of the turn's LLM calls switch to it (session model is
+          # untouched). nil = no preference.
+          model: String.t() | nil
         }
 
   @doc "Wraps a built-in tool module (implementing `Longpi.Agent.Tool`) as a spec."

@@ -59,6 +59,10 @@ export default function (longpi: any) {
   longpi.registerTool({
     name: "my_tool",                 // snake_case, unique
     description: "What the model reads to decide when to use this.",
+    model: "J",                       // optional: after this tool runs, the rest
+                                      // of the turn uses this model tier (J/Q/K,
+                                      // admin-mapped) or a full spec. Session
+                                      // model is untouched.
     parameters: {                     // JSON Schema for the arguments
       type: "object",
       properties: { text: { type: "string", description: "Input text." } },

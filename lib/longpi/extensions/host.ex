@@ -207,7 +207,15 @@ defmodule Longpi.Extensions.Host do
   def handle_info({:js_loaded, id, tools, commands, errors}, %{id: id} = state) do
     log_errors(state.cwd, errors)
 
-    tools = for {name, description, params_json} <- tools, do: %{name: name, description: description, parameters_json: params_json}
+    tools =
+      for {name, description, params_json, model} <- tools do
+        %{
+          name: name,
+          description: description,
+          parameters_json: params_json,
+          model: if(model == "", do: nil, else: model)
+        }
+      end
     commands = for {name, description} <- commands, do: %{"name" => name, "description" => description}
 
     state = %{state | tools: tools, commands: commands, ready?: true}
@@ -315,13 +323,14 @@ defmodule Longpi.Extensions.Host do
   defp build_specs(state) do
     host = self()
 
-    Enum.map(state.tools, fn %{name: name, description: desc, parameters_json: params_json} ->
+    Enum.map(state.tools, fn %{name: name, description: desc, parameters_json: params_json} = tool ->
       %ToolSpec{
         name: name,
         description: desc,
         schema: decode_params(params_json),
         run: fn args, _ctx -> call_tool(host, name, args) end,
-        source: :extension
+        source: :extension,
+        model: tool[:model]
       }
     end)
   end

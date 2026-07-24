@@ -63,7 +63,9 @@ defmodule Longpi.Agent.SystemPrompt do
       running; plain JavaScript also works. A tool returns plain text, OR
       `longpi.ui({ text, view })` to give the model `text` and the user a small
       TSX UI as `view` (a table/card/stat — name the file `.tsx`); the guide's
-      "Custom result UI" section lists the components
+      "Custom result UI" section lists the components. A tool may also declare
+      `model: "J"` (tier J/Q/K or a full spec) — after it runs, the rest of
+      that turn uses the declared model
     - Examples: {{ext_examples}} (e.g. web-search.ts — a tool with an API key;
       ui-dashboard.tsx — a tool returning `longpi.ui({ text, view })`)
 
