@@ -82,7 +82,10 @@ defmodule LongpiWeb.MobileApiController do
           title: c.title,
           cwd: c.cwd,
           model: c.model,
-          updated_at: c.updated_at
+          updated_at: c.updated_at,
+          # Unseen-activity badge ("done" | "failed" | "approval" | nil) —
+          # set when a turn settled with nobody watching (scheduled tasks).
+          unseen_kind: c.unseen_kind
         }
       end)
 

@@ -26,41 +26,16 @@ defmodule LongpiWeb.ConversationChannel do
         # idle-reap once every tab closes).
         Session.watch(session, self())
 
-        history =
-          session
-          |> Session.messages()
-          |> Enum.reject(&(&1.role == :system))
-          |> Enum.map(&serialize_message/1)
-
-        ext = Session.ext_info(session)
-        live = Session.live_events(session)
+        snap = Session.snapshot(session)
 
         socket =
-          assign(socket, conversation_id: conversation_id, session: session, ext_host: ext.host)
+          assign(socket,
+            conversation_id: conversation_id,
+            session: session,
+            ext_host: snap.ext.host
+          )
 
-        reply = %{
-          messages: history,
-          # Mid-turn streamed events (folded), so a reload/second tab replays
-          # straight onto the live view instead of a blank pane until turn end.
-          # live_seq is the watermark covering them: the client drops pushes
-          # with seq <= live_seq (they are already inside the replay).
-          live: live.events,
-          live_seq: live.seq,
-          status: Session.status(session),
-          pending_approvals: Session.pending_approvals(session),
-          # Countdown survives a page refresh (unlike event-stream-only UIs):
-          # the retry state lives in the session, so a fresh join re-renders it.
-          retrying: Session.retrying(session),
-          # Previous incarnation died mid-turn → the client offers "resume".
-          interrupted: Session.interrupted_turn?(session),
-          context_usage: Session.context_usage(session),
-          reasoning_effort: Session.reasoning_effort(session),
-          commands: ext.commands,
-          subagents: serialize_subagents(Session.subagents(session)),
-          subagent_approvals: Enum.map(Session.subagent_approvals(session), &serialize_approval/1)
-        }
-
-        {:ok, reply, socket}
+        {:ok, state_reply(snap), socket}
 
       {:error, reason} ->
         {:error, %{reason: inspect(reason)}}
@@ -270,34 +245,35 @@ defmodule LongpiWeb.ConversationChannel do
   # Current history snapshot, for a client that re-attached to an
   # already-joined channel and needs to rebuild its view.
   def handle_in("get_state", _payload, socket) do
-    session = socket.assigns.session
+    {:reply, {:ok, state_reply(Session.snapshot(socket.assigns.session))}, socket}
+  end
 
-    history =
-      session
-      |> Session.messages()
-      |> Enum.reject(&(&1.role == :system))
-      |> Enum.map(&serialize_message/1)
-
-    # get_state REPLACES the client's items — it must carry the live replay
-    # too, or a pull right after a mid-turn join wipes the replayed view.
-    live = Session.live_events(session)
-
-    reply = %{
-      messages: history,
-      live: live.events,
-      live_seq: live.seq,
-      status: Session.status(session),
-      pending_approvals: Session.pending_approvals(session),
-      retrying: Session.retrying(session),
-      interrupted: Session.interrupted_turn?(session),
-      context_usage: Session.context_usage(session),
-      reasoning_effort: Session.reasoning_effort(session),
-      commands: Session.ext_info(session).commands,
-      subagents: serialize_subagents(Session.subagents(session)),
-      subagent_approvals: Enum.map(Session.subagent_approvals(session), &serialize_approval/1)
+  # The join/get_state wire shape, from one Session.snapshot/1 call.
+  #
+  #   * `live`/`live_seq`: mid-turn streamed events (folded), so a reload or
+  #     second tab replays straight onto the live view. live_seq is the
+  #     watermark: pushes with seq <= live_seq are already in the replay.
+  #   * `retrying`: the countdown survives a refresh — it lives in the
+  #     session, not just the event stream.
+  #   * `interrupted`: the previous incarnation died mid-turn → offer resume.
+  defp state_reply(snap) do
+    %{
+      messages:
+        snap.messages
+        |> Enum.reject(&(&1.role == :system))
+        |> Enum.map(&serialize_message/1),
+      live: snap.live.events,
+      live_seq: snap.live.seq,
+      status: snap.status,
+      pending_approvals: snap.pending_approvals,
+      retrying: snap.retrying,
+      interrupted: snap.interrupted,
+      context_usage: snap.context_usage,
+      reasoning_effort: snap.reasoning_effort,
+      commands: snap.ext.commands,
+      subagents: serialize_subagents(snap.subagents),
+      subagent_approvals: Enum.map(snap.subagent_approvals, &serialize_approval/1)
     }
-
-    {:reply, {:ok, reply}, socket}
   end
 
   @impl true

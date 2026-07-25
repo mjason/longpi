@@ -323,6 +323,38 @@ export type LiveEvent = {
   error?: boolean;
 };
 
+/**
+ * Live sidebar badge feed: pushes whenever any conversation's unseen dot
+ * changes (kind = "done" | "failed" | "approval" | null to clear). This is
+ * the push path the focus/visibility refetch can't cover — the user actively
+ * working in one conversation while a scheduled task flags another.
+ * Returns an unsubscribe function.
+ */
+export function subscribeSidebar(
+  onChange: (id: string, kind: string | null) => void,
+  onResync?: () => void,
+): () => void {
+  const channel = getSocket().channel("sidebar:updates");
+  channel.on("attention_changed", (p: { id: string; kind: string | null }) =>
+    onChange(p.id, p.kind),
+  );
+
+  // phoenix.js auto-rejoins after a socket drop, but badges broadcast DURING
+  // the outage are gone — a focused window (no blur/focus refetch) would
+  // miss them forever. The join receipt re-fires on every rejoin; skip the
+  // initial one (the caller's own first load covers it).
+  let initialJoin = true;
+  channel.join().receive("ok", () => {
+    if (initialJoin) {
+      initialJoin = false;
+      return;
+    }
+    onResync?.();
+  });
+
+  return () => channel.leave();
+}
+
 export function historyToItems(messages: HistoryMessage[], pending: string[] = []): ThreadItem[] {
   const items: ThreadItem[] = [];
   const pendingSet = new Set(pending);

@@ -40,7 +40,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { useI18n } from "./i18n";
 import { LanguageToggle } from "./LanguageToggle";
 import { useChannelRuntime } from "./runtime";
-import { useConversationChannel } from "./channel";
+import { subscribeSidebar, useConversationChannel } from "./channel";
 import {
   ConversationStoreProvider,
   selectCompactionCount,
@@ -66,7 +66,7 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet";
-import type { ConversationSummary } from "./types";
+import { CONVERSATION_FIELDS, type ConversationSummary } from "./types";
 import { UpdateCheck } from "./UpdateCheck";
 
 export const DEFAULT_MODEL = "openai:gpt-5.4";
@@ -123,29 +123,123 @@ export function groupByProject(conversations: ConversationSummary[]): ProjectGro
   return [...groups.entries()].map(([cwd, list]) => ({ cwd, conversations: list }));
 }
 
+/**
+ * The kind a collapsed folder's dot shows: the MOST URGENT among its
+ * conversations, not the first — a blue "done" must never mask an amber
+ * approval that is quietly counting down to auto-deny.
+ */
+export function mostUrgentKind(conversations: ConversationSummary[]): string | null {
+  const rank = (kind: string | null | undefined) =>
+    kind === "approval" ? 3 : kind === "failed" ? 2 : kind === "done" ? 1 : 0;
+
+  return conversations.reduce<string | null>(
+    (best, c) => (rank(c.unseenKind) > rank(best) ? (c.unseenKind ?? null) : best),
+    null,
+  );
+}
+
+/** The open conversation never shows a dot — the user is literally reading it. */
+export function withOpenConversationSeen(
+  conversations: ConversationSummary[],
+  openId: string | null,
+): ConversationSummary[] {
+  if (!openId || !conversations.some((c) => c.id === openId && c.unseenKind)) {
+    return conversations;
+  }
+  return conversations.map((c) => (c.id === openId ? { ...c, unseenKind: null } : c));
+}
+
 export default function ChatApp() {
   const { t } = useI18n();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const { conversationId } = useParams();
   const navigate = useNavigate();
 
+  // The list effect runs once but must always know which conversation is
+  // open (to suppress its dot on every refetch/push).
+  const openIdRef = React.useRef<string | null>(conversationId ?? null);
+  openIdRef.current = conversationId ?? null;
+
+  // Current row ids, readable from push callbacks without entering a state
+  // updater (updaters must stay pure — React may double-invoke them).
+  const knownIdsRef = React.useRef<Set<string>>(new Set());
+  knownIdsRef.current = new Set(conversations.map((c) => c.id));
+
   useEffect(() => {
-    (async () => {
+    let disposed = false;
+
+    const load = async (initial: boolean) => {
       const result = await listConversations({
-        fields: ["id", "title", "cwd", "model", "parentId", "agentRole"],
+        fields: [...CONVERSATION_FIELDS],
         sort: "-insertedAt",
         headers: buildCSRFHeaders(),
       });
-      if (result.success) {
-        setConversations(result.data);
-        // Land on the most recent conversation when none is in the URL.
-        if (!conversationId && result.data.length > 0) {
-          navigate(`/c/${result.data[0].id}`, { replace: true });
-        }
+      if (disposed || !result.success) return;
+      // Suppress the open conversation's dot AT APPLY TIME: the server clears
+      // it via Session.watch, but a list snapshot can race that write — and
+      // painting a dot on the conversation being read is always wrong.
+      setConversations(withOpenConversationSeen(result.data, openIdRef.current));
+      // Land on the most recent conversation when none is in the URL.
+      if (initial && !conversationId && result.data.length > 0) {
+        navigate(`/c/${result.data[0].id}`, { replace: true });
       }
-    })();
+    };
+
+    load(true);
+
+    // Returning to the tab re-pulls the list (visibilitychange for tab
+    // switches, focus for window switches; throttled — alt-tab fires both).
+    let lastPull = 0;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastPull < 1_000) return;
+      lastPull = now;
+      load(false);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+
+    // The PUSH path: badge changes land live even while the window stays
+    // focused on another conversation (the refetch above can't cover that).
+    // On rejoin after a socket drop, re-pull — pushes during the outage are
+    // gone for good.
+    const unsubscribe = subscribeSidebar(
+      (id, kind) => {
+        if (disposed) return;
+        if (!knownIdsRef.current.has(id)) {
+          // A conversation we don't know yet got flagged — pull the list.
+          // (Decided OUTSIDE the state updater: updaters must stay pure.)
+          if (kind) load(false);
+          return;
+        }
+        setConversations((prev) =>
+          withOpenConversationSeen(
+            prev.map((c) => (c.id === id ? { ...c, unseenKind: kind } : c)),
+            openIdRef.current,
+          ),
+        );
+      },
+      () => {
+        if (!disposed) load(false);
+      },
+    );
+
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      unsubscribe();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Opening a conversation clears its dot server-side (Session.watch) — mirror
+  // that immediately in the list so the badge doesn't linger until a refetch.
+  useEffect(() => {
+    if (!conversationId) return;
+    setConversations((prev) => withOpenConversationSeen(prev, conversationId));
+  }, [conversationId]);
 
   const selected = conversations.find((c) => c.id === conversationId) ?? null;
   // Mobile: the sidebar lives in a sheet, opened from the hamburger top bar.
@@ -260,7 +354,7 @@ export default function ChatApp() {
               // A brand-new subagent conversation may not be in our list yet.
               if (!conversations.some((c) => c.id === id)) {
                 const result = await listConversations({
-                  fields: ["id", "title", "cwd", "model", "parentId", "agentRole"],
+                  fields: [...CONVERSATION_FIELDS],
                   sort: "-insertedAt",
                   headers: buildCSRFHeaders(),
                 });
@@ -283,6 +377,32 @@ export default function ChatApp() {
         </div>
       </div>
     </TooltipProvider>
+  );
+}
+
+// The sidebar's unseen-activity dot: something settled in this conversation
+// while nobody was watching (typically a scheduled task). Amber = a tool is
+// waiting for approval (auto-denies in 5 min — the urgent one); red = the
+// turn failed; blue = finished fine.
+function UnseenDot({ kind }: { kind?: string | null }) {
+  const { t } = useI18n();
+  if (!kind) return null;
+  return (
+    <span
+      title={t(
+        kind === "approval"
+          ? "unseen.approval"
+          : kind === "failed"
+            ? "unseen.failed"
+            : "unseen.done",
+      )}
+      className={cn(
+        "size-2 shrink-0 rounded-full",
+        kind === "approval" && "animate-pulse bg-amber-500",
+        kind === "failed" && "bg-red-500",
+        kind === "done" && "bg-sky-500",
+      )}
+    />
   );
 }
 
@@ -406,6 +526,7 @@ function Sidebar(props: {
                         <span className="truncate text-sm font-medium">
                           {folderName(project.cwd)}
                         </span>
+                        {!open && <UnseenDot kind={mostUrgentKind(project.conversations)} />}
                         <span className="ml-auto shrink-0 pl-1 text-xs text-muted-foreground group-hover:hidden">
                           {project.conversations.length}
                         </span>
@@ -450,9 +571,12 @@ function Sidebar(props: {
                     >
                       <button
                         onClick={() => props.onSelect(conversation.id)}
-                        className="min-w-0 flex-1 py-1.5 pr-2 pl-8 text-left"
+                        className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 pr-2 pl-8 text-left"
                       >
-                        <div className="truncate text-sm">{conversationLabel(conversation)}</div>
+                        <span className="min-w-0 truncate text-sm">
+                          {conversationLabel(conversation)}
+                        </span>
+                        <UnseenDot kind={conversation.unseenKind} />
                       </button>
                       <button
                         onClick={() => props.onDelete(conversation)}
@@ -538,7 +662,7 @@ function NewConversationDialog({
 
     const result = await createConversation({
       input: { cwd: cwd.trim(), model: model.trim() || DEFAULT_MODEL },
-      fields: ["id", "title", "cwd", "model", "parentId", "agentRole"],
+      fields: [...CONVERSATION_FIELDS],
       headers: buildCSRFHeaders(),
     });
 

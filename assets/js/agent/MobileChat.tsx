@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { buildCSRFHeaders, getConversation } from "../ash_rpc";
 import { TooltipProvider } from "../components/ui/tooltip";
 import { ConversationPane } from "./ChatApp";
-import type { ConversationSummary } from "./types";
+import { CONVERSATION_FIELDS, type ConversationSummary } from "./types";
 
 /**
  * `/m/c/:conversationId[?token=...&theme=dark|light]` — a bare conversation
@@ -31,7 +31,7 @@ export default function MobileChat() {
     if (!conversationId) return;
     getConversation({
       getBy: { id: conversationId },
-      fields: ["id", "title", "cwd", "model", "parentId", "agentRole"],
+      fields: [...CONVERSATION_FIELDS],
       headers: buildCSRFHeaders(),
     }).then((result) => {
       if (result.success && result.data) setConversation(result.data as ConversationSummary);

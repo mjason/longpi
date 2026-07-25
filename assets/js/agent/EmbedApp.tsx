@@ -11,7 +11,7 @@ import { TooltipProvider } from "../components/ui/tooltip";
 import { ConversationPane, DEFAULT_MODEL, conversationLabel } from "./ChatApp";
 import { useI18n } from "./i18n";
 import { loadSettings, SETTING_KEYS } from "./settings";
-import type { ConversationSummary } from "./types";
+import { CONVERSATION_FIELDS, type ConversationSummary } from "./types";
 
 /** Newest conversation for `cwd`, or -1. Exported for tests. */
 export function pickConversation(conversations: { cwd: string }[], cwd: string): number {
@@ -49,7 +49,7 @@ export default function EmbedApp() {
   async function createForCwd(): Promise<ConversationSummary | null> {
     const created = await createConversation({
       input: { cwd, model: await defaultModel() },
-      fields: ["id", "title", "cwd", "model", "parentId", "agentRole"],
+      fields: [...CONVERSATION_FIELDS],
       headers: buildCSRFHeaders(),
     });
     return created.success ? created.data : null;
@@ -64,9 +64,9 @@ export default function EmbedApp() {
 
     let cancelled = false;
 
-    (async () => {
+    const bootstrap = async () => {
       const listed = await listConversations({
-        fields: ["id", "title", "cwd", "model", "parentId", "agentRole"],
+        fields: [...CONVERSATION_FIELDS],
         sort: "-insertedAt",
         headers: buildCSRFHeaders(),
       });
@@ -95,10 +95,28 @@ export default function EmbedApp() {
       }
 
       setLoading(false);
-    })();
+    };
+
+    // A hidden embed must not become a watcher: auto-joining from a
+    // background tab would suppress (and clear) the workspace's unseen
+    // badges with no human looking. Defer the bootstrap until the page is
+    // actually visible. (Page-level only — an in-page display:none iframe
+    // still counts as visible to the Page Visibility API.)
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || cancelled) return;
+      document.removeEventListener("visibilitychange", onVisible);
+      bootstrap();
+    };
+
+    if (document.visibilityState === "visible") {
+      bootstrap();
+    } else {
+      document.addEventListener("visibilitychange", onVisible);
+    }
 
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, modelParam]);

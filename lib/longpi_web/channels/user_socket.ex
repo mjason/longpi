@@ -2,6 +2,7 @@ defmodule LongpiWeb.UserSocket do
   use Phoenix.Socket
 
   channel "conversation:*", LongpiWeb.ConversationChannel
+  channel "sidebar:*", LongpiWeb.SidebarChannel
 
   # When auth is enabled, the socket requires either the signed-in session's
   # bearer token (revoked with the session on sign-out) or the static embed

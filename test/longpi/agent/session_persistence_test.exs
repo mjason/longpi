@@ -306,4 +306,146 @@ defmodule Longpi.Agent.SessionPersistenceTest do
     assert {:error, :nothing_to_resume} = Session.resume(session)
     GenServer.stop(session)
   end
+
+  test "a subagent's bubbled approval flags the parent's badge", %{
+    conversation: conversation
+  } do
+    session = start_session(conversation)
+
+    # The child is excluded from badges (parent_session guard), so the
+    # parent's bubble handler is the only place this can become visible.
+    send(
+      session,
+      {:subagent_approval_request, Ecto.UUID.generate(), "scout",
+       %{id: "sa1", name: "bash", args: %{"command" => "ls"}}}
+    )
+
+    :idle = Session.status(session)
+    {:ok, flagged} = Longpi.Agent.get_conversation(conversation.id)
+    assert flagged.unseen_kind == "approval"
+
+    GenServer.stop(session)
+  end
+
+  test "closing the last watcher re-flags a still-pending approval", %{
+    conversation: conversation
+  } do
+    session = start_session(conversation)
+
+    watcher =
+      spawn(fn ->
+        receive do
+          :die -> :ok
+        end
+      end)
+
+    :ok = Session.watch(session, watcher)
+
+    # Approval arrives WHILE watched → correctly no badge.
+    :sys.replace_state(session, fn state ->
+      %{state | pending_approvals: Map.put(state.pending_approvals, "w1", {self(), make_ref()})}
+    end)
+
+    {:ok, unflagged} = Longpi.Agent.get_conversation(conversation.id)
+    assert unflagged.unseen_kind == nil
+
+    # Tab closes without answering — the badge must appear now, or the
+    # approval times out with zero traces anywhere. (The DOWN is async; the
+    # status call after it serializes the handler.)
+    send(watcher, :die)
+    Process.sleep(20)
+    :idle = Session.status(session)
+
+    {:ok, reflagged} = Longpi.Agent.get_conversation(conversation.id)
+    assert reflagged.unseen_kind == "approval"
+
+    GenServer.stop(session)
+  end
+
+  test "badge writes do not bump updated_at (mobile list order is activity, not views)", %{
+    conversation: conversation
+  } do
+    session = start_session(conversation)
+    {:ok, before} = Longpi.Agent.get_conversation(conversation.id)
+
+    expect(LLMMock, :stream, fn _, _, _, _, _ -> {:ok, %{text: "done", tool_calls: []}} end)
+    :ok = Session.send_message(session, "[scheduled] work")
+    assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
+    :idle = Session.status(session)
+
+    {:ok, flagged} = Longpi.Agent.get_conversation(conversation.id)
+    assert flagged.unseen_kind == "done"
+    # The marker/badge writes went through update_all — no timestamp churn.
+    assert DateTime.compare(flagged.updated_at, before.updated_at) == :eq
+
+    GenServer.stop(session)
+  end
+
+  test "stopping during a pending continuation clears the turn marker (no bogus resume)", %{
+    conversation: conversation
+  } do
+    session = start_session(conversation)
+
+    {:ok, calls} = Agent.start_link(fn -> 0 end)
+
+    stub(LLMMock, :stream, fn _, _, _, _, _ ->
+      case Agent.get_and_update(calls, &{&1, &1 + 1}) do
+        0 -> {:error, %{status: 502, reason: "Bad Gateway"}}
+        _ -> {:ok, %{text: "never reached", tool_calls: []}}
+      end
+    end)
+
+    :ok = Session.send_message(session, "go")
+    assert_receive {:agent_event, {:turn_retrying, _}}, 2_000
+
+    # Mid-backoff (idle + retry pending) the user hits Stop: the marker must
+    # come off — this run is deliberately settled, not crash-interrupted.
+    :ok = Session.interrupt(session)
+    :idle = Session.status(session)
+
+    {:ok, settled} = Longpi.Agent.get_conversation(conversation.id)
+    assert settled.turn_started_at == nil
+    refute Session.interrupted_turn?(session)
+
+    GenServer.stop(session)
+  end
+
+  test "an unwatched settle flags the unseen badge; watching clears it", %{
+    conversation: conversation
+  } do
+    session = start_session(conversation)
+
+    expect(LLMMock, :stream, fn _, _, _, _, _ ->
+      {:ok, %{text: "scheduled work done", tool_calls: []}}
+    end)
+
+    # Nobody is watching (no Session.watch) — the scheduled-task shape.
+    :ok = Session.send_message(session, "[scheduled 0 23 * * *] do the thing")
+    assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
+    :idle = Session.status(session)
+
+    {:ok, flagged} = Longpi.Agent.get_conversation(conversation.id)
+    assert flagged.unseen_kind == "done"
+    assert %DateTime{} = flagged.unseen_at
+
+    # Opening the conversation (a channel joins → watch) clears the dot.
+    # The clear is a self-message (off the join path) — the status call
+    # serializes behind it before we read the row.
+    :ok = Session.watch(session, self())
+    :idle = Session.status(session)
+    {:ok, seen} = Longpi.Agent.get_conversation(conversation.id)
+    assert seen.unseen_kind == nil
+    assert seen.unseen_at == nil
+
+    # A WATCHED settle never flags — the user saw it live.
+    expect(LLMMock, :stream, fn _, _, _, _, _ -> {:ok, %{text: "seen live", tool_calls: []}} end)
+    :ok = Session.send_message(session, "again")
+    assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
+    :idle = Session.status(session)
+
+    {:ok, watched} = Longpi.Agent.get_conversation(conversation.id)
+    assert watched.unseen_kind == nil
+
+    GenServer.stop(session)
+  end
 end

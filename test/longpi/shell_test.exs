@@ -6,9 +6,22 @@ defmodule Longpi.ShellTest do
 
   @moduletag timeout: 30_000
 
+  # unique_integer is only unique WITHIN one VM run; the cwd test below
+  # mkdir's one of these and leaves it, so a later run whose counter lands on
+  # the same number finds a leftover DIRECTORY where it expects to write a
+  # file (EISDIR flake). Namespace by os_time so runs never collide, and
+  # clean up either way.
   defp tmp_path do
     dir = System.tmp_dir!()
-    Path.join(dir, "longpi_shell_test_#{System.unique_integer([:positive])}")
+
+    path =
+      Path.join(
+        dir,
+        "longpi_shell_test_#{System.os_time(:nanosecond)}_#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn -> File.rm_rf(path) end)
+    path
   end
 
   defp os_process_alive?(pid) when is_integer(pid) do

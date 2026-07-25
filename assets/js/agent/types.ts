@@ -43,6 +43,21 @@ export type ThreadItem =
 
 export type SessionStatus = "connecting" | "idle" | "running";
 
+/**
+ * The one field list every conversation-list fetch uses. Divergent copies
+ * caused real bugs: a refetch with a shorter list replaced the state and
+ * silently wiped `unseenKind` from every row.
+ */
+export const CONVERSATION_FIELDS = [
+  "id",
+  "title",
+  "cwd",
+  "model",
+  "parentId",
+  "agentRole",
+  "unseenKind",
+] as const;
+
 export type ConversationSummary = {
   id: string;
   title: string | null;
@@ -52,4 +67,9 @@ export type ConversationSummary = {
   parentId?: string | null;
   /** Set on subagent conversations: the role it was spawned as ("scout"). */
   agentRole?: string | null;
+  /**
+   * Unseen-activity badge: activity settled while nobody watched (the
+   * scheduled-task case). "done" | "failed" | "approval"; null = seen.
+   */
+  unseenKind?: string | null;
 };

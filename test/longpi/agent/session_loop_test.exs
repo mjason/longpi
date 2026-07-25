@@ -398,6 +398,40 @@ defmodule Longpi.Agent.SessionLoopTest do
     assert Session.status(session) == :idle
   end
 
+  test "fail-with-progress cannot retry forever: the total budget caps it", %{
+    session: session,
+    tmp_dir: dir
+  } do
+    # Every attempt completes one tool iteration (progress! streak resets to
+    # 0) and then dies — the exact shape that bypasses streak counting.
+    File.write!(Path.join(dir, "f.txt"), "x")
+    {:ok, calls} = Agent.start_link(fn -> 0 end)
+
+    stub(LLMMock, :stream, fn _, _, _, _, _sink ->
+      n = Agent.get_and_update(calls, &{&1, &1 + 1})
+
+      if rem(n, 2) == 0 do
+        {:ok, %{text: "", tool_calls: [%{id: "b#{n}", name: "read", args: %{"path" => "f.txt"}}]}}
+      else
+        {:error, %{status: 502, reason: "Bad Gateway"}}
+      end
+    end)
+
+    assert :ok = Session.send_message(session, "doomed with progress")
+
+    # 10-retry budget: initial + 10 retried runs, 2 stream calls each — then
+    # the failure surfaces despite every streak being length 1.
+    wait_for(fn ->
+      Session.status(session) == :idle and Session.retrying(session) == nil and
+        Enum.any?(Session.messages(session), fn
+          %{role: :assistant, content: c} -> is_binary(c) and c =~ "Turn failed"
+          _ -> false
+        end)
+    end, 200)
+
+    assert Agent.get(calls, & &1) == 22
+  end
+
   test "hitting max_iterations self-continues instead of failing (progress kept)", %{
     session: session
   } do

@@ -10,7 +10,7 @@ export type UtcDateTimeUsec = string;
 // Conversation Schema
 export type ConversationResourceSchema = {
   __type: "Resource";
-  __primitiveFields: "id" | "title" | "cwd" | "model" | "systemPrompt" | "reasoningEffort" | "agentRole" | "turnStartedAt" | "insertedAt" | "updatedAt" | "parentId";
+  __primitiveFields: "id" | "title" | "cwd" | "model" | "systemPrompt" | "reasoningEffort" | "agentRole" | "turnStartedAt" | "unseenAt" | "unseenKind" | "insertedAt" | "updatedAt" | "parentId";
   id: UUID;
   title: string | null;
   cwd: string;
@@ -19,6 +19,8 @@ export type ConversationResourceSchema = {
   reasoningEffort: string | null;
   agentRole: string | null;
   turnStartedAt: UtcDateTimeUsec | null;
+  unseenAt: UtcDateTimeUsec | null;
+  unseenKind: string | null;
   insertedAt: UtcDateTimeUsec;
   updatedAt: UtcDateTimeUsec;
   parentId: UUID | null;
@@ -29,7 +31,7 @@ export type ConversationResourceSchema = {
 
 export type ConversationAttributesOnlySchema = {
   __type: "Resource";
-  __primitiveFields: "id" | "title" | "cwd" | "model" | "systemPrompt" | "reasoningEffort" | "agentRole" | "turnStartedAt" | "insertedAt" | "updatedAt" | "parentId";
+  __primitiveFields: "id" | "title" | "cwd" | "model" | "systemPrompt" | "reasoningEffort" | "agentRole" | "turnStartedAt" | "unseenAt" | "unseenKind" | "insertedAt" | "updatedAt" | "parentId";
   id: UUID;
   title: string | null;
   cwd: string;
@@ -38,6 +40,8 @@ export type ConversationAttributesOnlySchema = {
   reasoningEffort: string | null;
   agentRole: string | null;
   turnStartedAt: UtcDateTimeUsec | null;
+  unseenAt: UtcDateTimeUsec | null;
+  unseenKind: string | null;
   insertedAt: UtcDateTimeUsec;
   updatedAt: UtcDateTimeUsec;
   parentId: UUID | null;
@@ -242,6 +246,24 @@ export type ConversationFilterInput = {
     lessThan?: UtcDateTimeUsec;
     lessThanOrEqual?: UtcDateTimeUsec;
     in?: Array<UtcDateTimeUsec>;
+    isNil?: boolean;
+  };
+
+  unseenAt?: {
+    eq?: UtcDateTimeUsec;
+    notEq?: UtcDateTimeUsec;
+    greaterThan?: UtcDateTimeUsec;
+    greaterThanOrEqual?: UtcDateTimeUsec;
+    lessThan?: UtcDateTimeUsec;
+    lessThanOrEqual?: UtcDateTimeUsec;
+    in?: Array<UtcDateTimeUsec>;
+    isNil?: boolean;
+  };
+
+  unseenKind?: {
+    eq?: string;
+    notEq?: string;
+    in?: Array<string>;
     isNil?: boolean;
   };
 
@@ -586,7 +608,7 @@ export type SettingFilterInput = {
 };
 
 
-export const conversationFilterFields = ["id", "title", "cwd", "model", "systemPrompt", "reasoningEffort", "agentRole", "turnStartedAt", "insertedAt", "updatedAt", "parentId", "parent"] as const;
+export const conversationFilterFields = ["id", "title", "cwd", "model", "systemPrompt", "reasoningEffort", "agentRole", "turnStartedAt", "unseenAt", "unseenKind", "insertedAt", "updatedAt", "parentId", "parent"] as const;
 export type ConversationFilterField = (typeof conversationFilterFields)[number];
 
 export const modelFilterFields = ["id", "spec", "label", "enabled", "position", "contextWindow", "insertedAt", "updatedAt"] as const;
@@ -605,7 +627,7 @@ export const settingFilterFields = ["id", "key", "value", "insertedAt", "updated
 export type SettingFilterField = (typeof settingFilterFields)[number];
 
 
-export const conversationSortFields = ["id", "title", "cwd", "model", "systemPrompt", "reasoningEffort", "agentRole", "turnStartedAt", "insertedAt", "updatedAt", "parentId"] as const;
+export const conversationSortFields = ["id", "title", "cwd", "model", "systemPrompt", "reasoningEffort", "agentRole", "turnStartedAt", "unseenAt", "unseenKind", "insertedAt", "updatedAt", "parentId"] as const;
 export type ConversationSortField = (typeof conversationSortFields)[number];
 
 export const modelSortFields = ["id", "spec", "label", "enabled", "position", "contextWindow", "insertedAt", "updatedAt"] as const;

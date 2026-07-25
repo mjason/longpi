@@ -64,6 +64,13 @@ defmodule Longpi.Agent.Conversation do
     update :set_turn_started do
       accept [:turn_started_at]
     end
+
+    # Unseen-activity badge: set when a turn settles (or an approval waits)
+    # with NOBODY watching the conversation — the scheduled-task case; cleared
+    # when a client joins. The sidebar renders it as a dot.
+    update :set_attention do
+      accept [:unseen_at, :unseen_kind]
+    end
   end
 
   attributes do
@@ -106,6 +113,15 @@ defmodule Longpi.Agent.Conversation do
 
     # See the :set_turn_started action.
     attribute :turn_started_at, :utc_datetime_usec do
+      public? true
+    end
+
+    # See the :set_attention action. Kind: "done" | "failed" | "approval".
+    attribute :unseen_at, :utc_datetime_usec do
+      public? true
+    end
+
+    attribute :unseen_kind, :string do
       public? true
     end
 

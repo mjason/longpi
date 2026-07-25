@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conversationLabel, folderName, groupByProject } from "./ChatApp";
+import { conversationLabel, folderName, groupByProject, mostUrgentKind, withOpenConversationSeen } from "./ChatApp";
 import type { ConversationSummary } from "./types";
 
 function conv(over: Partial<ConversationSummary> & { id: string }): ConversationSummary {
@@ -71,5 +71,47 @@ describe("groupByProject", () => {
 
   it("returns an empty list for no conversations", () => {
     expect(groupByProject([])).toEqual([]);
+  });
+});
+
+describe("mostUrgentKind", () => {
+  it("ranks approval > failed > done — a blue done never masks an amber approval", () => {
+    expect(
+      mostUrgentKind([
+        conv({ id: "1", cwd: "/a", unseenKind: "done" }),
+        conv({ id: "2", cwd: "/a", unseenKind: "approval" }),
+        conv({ id: "3", cwd: "/a", unseenKind: "failed" }),
+      ]),
+    ).toBe("approval");
+    expect(
+      mostUrgentKind([
+        conv({ id: "1", cwd: "/a", unseenKind: "done" }),
+        conv({ id: "2", cwd: "/a", unseenKind: "failed" }),
+      ]),
+    ).toBe("failed");
+  });
+
+  it("is null when nothing is flagged", () => {
+    expect(mostUrgentKind([conv({ id: "1", cwd: "/a" })])).toBeNull();
+  });
+});
+
+describe("withOpenConversationSeen", () => {
+  it("clears the dot ONLY on the open conversation", () => {
+    const result = withOpenConversationSeen(
+      [
+        conv({ id: "open", cwd: "/a", unseenKind: "done" }),
+        conv({ id: "other", cwd: "/a", unseenKind: "approval" }),
+      ],
+      "open",
+    );
+    expect(result.find((c) => c.id === "open")?.unseenKind).toBeNull();
+    expect(result.find((c) => c.id === "other")?.unseenKind).toBe("approval");
+  });
+
+  it("returns the same array when there is nothing to clear (no render churn)", () => {
+    const list = [conv({ id: "a", cwd: "/a" })];
+    expect(withOpenConversationSeen(list, "a")).toBe(list);
+    expect(withOpenConversationSeen(list, null)).toBe(list);
   });
 });
