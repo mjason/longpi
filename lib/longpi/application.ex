@@ -20,6 +20,9 @@ defmodule Longpi.Application do
       {DynamicSupervisor, name: Longpi.Shell.CommandSupervisor, strategy: :one_for_one},
       {Task.Supervisor, name: Longpi.Agent.TaskSupervisor},
       {Registry, keys: :unique, name: Longpi.Agent.SessionRegistry},
+      # Node-wide provider circuit breaker: sessions and the scheduler share
+      # one view of gateway health instead of probing outages independently.
+      Longpi.Agent.GatewayHealth,
       {DynamicSupervisor, name: Longpi.Agent.SessionSupervisor, strategy: :one_for_one},
       # Cron-scheduled tasks: ticks every minute, fires due tasks into their
       # conversations. After the session supervisor (it starts sessions).

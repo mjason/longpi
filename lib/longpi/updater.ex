@@ -58,9 +58,10 @@ defmodule Longpi.Updater do
     with :ok <- ensure_enabled(),
          {:ok, release} <- fetch_latest(),
          tag = release["tag_name"],
+         :ok <- validate_tag(tag),
          :ok <- ensure_newer(tag),
          {:ok, url} <- Release.asset_url(release),
-         :ok <- install_version(tag, url),
+         :ok <- install_version(tag, url, release),
          :ok <- switch_current(tag) do
       Logger.info("updater: switched to #{tag}, requesting restart")
       restart()
@@ -82,16 +83,31 @@ defmodule Longpi.Updater do
 
   defp fetch_latest, do: source().latest_stable()
 
-  defp install_version(tag, url) do
+  # The tag becomes a filesystem path component; GitHub lets a compromised
+  # repo publish an arbitrary tag_name, so refuse anything path-like.
+  defp validate_tag(tag) do
+    if is_binary(tag) and tag =~ ~r/^v?[\w][\w.\-]*$/,
+      do: :ok,
+      else: {:error, "refusing suspicious release tag: #{inspect(tag)}"}
+  end
+
+  defp install_version(tag, url, release) do
     dest = Path.join([release_root(), "versions", tag])
 
     if File.exists?(Path.join(dest, "bin/longpi")) do
       :ok
     else
-      tarball = Path.join(System.tmp_dir!(), "longpi-#{tag}.tar.gz")
+      # Inside release_root (user-owned), unique name — never a predictable
+      # path in world-writable /tmp where a symlink could redirect the write.
+      tarball =
+        Path.join(
+          release_root(),
+          ".longpi-#{tag}-#{:erlang.unique_integer([:positive])}.tar.gz.part"
+        )
 
       try do
-        with :ok <- download(url, tarball) do
+        with :ok <- download(url, tarball),
+             :ok <- verify_checksum(tarball, release) do
           File.mkdir_p!(dest)
 
           case System.cmd("tar", ["-xzf", tarball, "-C", dest], stderr_to_stdout: true) do
@@ -106,6 +122,28 @@ defmodule Longpi.Updater do
       after
         File.rm(tarball)
       end
+    end
+  end
+
+  # The release workflow publishes `<asset>.sha256` (sha256sum output) next to
+  # every tarball; a download that doesn't match it never gets unpacked.
+  defp verify_checksum(tarball, release) do
+    with {:ok, url} <- Release.checksum_url(release),
+         {:ok, %{status: 200, body: body}} <- Req.get(url, retry: false),
+         [expected | _] <- body |> to_string() |> String.split() do
+      actual =
+        tarball
+        |> File.stream!(2_048 * 1_024)
+        |> Enum.reduce(:crypto.hash_init(:sha256), &:crypto.hash_update(&2, &1))
+        |> :crypto.hash_final()
+        |> Base.encode16(case: :lower)
+
+      if Plug.Crypto.secure_compare(actual, String.downcase(expected)),
+        do: :ok,
+        else: {:error, "checksum mismatch — expected #{expected}, got #{actual}"}
+    else
+      {:error, reason} -> {:error, "checksum unavailable: #{inspect(reason)}"}
+      other -> {:error, "checksum unavailable: #{inspect(other)}"}
     end
   end
 

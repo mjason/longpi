@@ -44,6 +44,10 @@ defmodule Longpi.Agent.Turn do
       {:ok, %{tool_calls: calls} = completion} ->
         assistant = Message.assistant(completion.text, calls, model)
         results = Enum.map(calls, &execute_call(config, &1))
+        # Checkpoint the completed iteration NOW (pi persists per message): the
+        # session stores it immediately, so a later stream failure, task crash,
+        # or VM restart never loses tool work that already ran.
+        sink.({:iteration_messages, [assistant | results]})
         produced = Enum.reverse(results) ++ [assistant | produced]
         iterate(apply_tool_model(config, calls), history, produced, remaining - 1)
 
@@ -84,7 +88,7 @@ defmodule Longpi.Agent.Turn do
 
     with model when is_binary(model) <- declared,
          {:ok, %{spec: spec} = resolved} when is_binary(spec) <-
-           Longpi.Agent.ModelResolver.resolve(declared) do
+           resolve_declared(declared) do
       %{config | model: spec}
       |> Map.put(:reasoning_effort, effort_atom(resolved.reasoning_effort) || config[:reasoning_effort])
     else
@@ -96,6 +100,16 @@ defmodule Longpi.Agent.Turn do
       _ ->
         config
     end
+  end
+
+  # The resolver hits the model_aliases table; a DB hiccup must degrade to
+  # "keep the current model", never crash the turn mid-batch.
+  defp resolve_declared(model) do
+    Longpi.Agent.ModelResolver.resolve(model)
+  rescue
+    error -> {:error, Exception.message(error)}
+  catch
+    kind, reason -> {:error, inspect({kind, reason})}
   end
 
   defp effort_atom(effort) when effort in ~w(minimal low medium high xhigh),
@@ -136,14 +150,25 @@ defmodule Longpi.Agent.Turn do
   end
 
   defp extension_write?(%{name: name, args: args}, ctx) when name in ["write", "edit"] do
-    path = Longpi.Agent.Tool.resolve_path(Map.get(args, "path", ""), ctx)
+    extension_path?(Longpi.Agent.Tool.resolve_path(Map.get(args, "path", ""), ctx))
+  end
 
+  # apply_patch carries its paths inside the patch text — a patched extension
+  # must hot-reload the same as a written/edited one.
+  defp extension_write?(%{name: "apply_patch", args: args}, _ctx) do
+    args
+    |> Map.get("input", "")
+    |> to_string()
+    |> String.contains?(".longpi/extensions/")
+  end
+
+  defp extension_write?(_call, _ctx), do: false
+
+  defp extension_path?(path) do
     String.ends_with?(path, [".tsx", ".ts", ".jsx", ".js", ".mjs"]) and
       (String.contains?(path, "/.longpi/extensions/") or
          String.starts_with?(path, Path.expand("~/.longpi/extensions")))
   end
-
-  defp extension_write?(_call, _ctx), do: false
 
   defp invoke(toolbox, call, ctx) do
     case Toolbox.execute(toolbox, call.name, call.args, ctx) do

@@ -29,6 +29,9 @@ defmodule Longpi.DataCase do
 
   setup tags do
     Longpi.DataCase.setup_sandbox(tags)
+    # The circuit breaker is node-global: a test that trips it must not slow
+    # every later test's retries.
+    Longpi.Agent.GatewayHealth.reset()
     :ok
   end
 

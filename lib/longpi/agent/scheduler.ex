@@ -95,6 +95,40 @@ defmodule Longpi.Agent.Scheduler do
   end
 
   defp fire(task) do
+    case gateway_delay(task) do
+      {delay, model} when delay > 0 ->
+        Logger.info(
+          "scheduler: gateway for #{model} is down (#{div(delay, 1000)}s to next probe); " <>
+            "skipping #{task.id} this occurrence"
+        )
+
+      _ ->
+        fire_now(task)
+    end
+  rescue
+    error -> Logger.warning("scheduler: task #{task.id} failed: #{Exception.message(error)}")
+  catch
+    :exit, reason -> Logger.warning("scheduler: task #{task.id} exited: #{inspect(reason)}")
+  end
+
+  # Best-effort health probe: a raising/restarting breaker must read as
+  # "assume healthy" — never cost the user their scheduled occurrence (the
+  # inverse of report_gateway's "never take the turn down" guard).
+  defp gateway_delay(task) do
+    case Longpi.Agent.get_conversation(task.conversation_id) do
+      {:ok, conversation} ->
+        {Longpi.Agent.GatewayHealth.delay_for(conversation.model), conversation.model}
+
+      _ ->
+        {0, nil}
+    end
+  rescue
+    _ -> {0, nil}
+  catch
+    _, _ -> {0, nil}
+  end
+
+  defp fire_now(task) do
     case Longpi.Agent.Sessions.ensure_started(task.conversation_id, []) do
       {:ok, session} ->
         message = "[scheduled #{task.cron}] #{task.task}"
@@ -115,6 +149,11 @@ defmodule Longpi.Agent.Scheduler do
     error ->
       disable_if_orphaned(task)
       Logger.warning("scheduler: task #{task.id} failed: #{Exception.message(error)}")
+  catch
+    # A GenServer.call timeout or a session dying mid-call exits rather than
+    # raises; the scheduler must survive to fire the other schedules.
+    :exit, reason ->
+      Logger.warning("scheduler: task #{task.id} exited: #{inspect(reason)}")
   end
 
   # A schedule whose conversation was deleted would otherwise warn on every

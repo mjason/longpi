@@ -1,6 +1,7 @@
 "use client";
 
-import { memo, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { Component, memo, useCallback, useLayoutEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   AlertCircleIcon,
   CheckIcon,
@@ -303,6 +304,23 @@ function ToolFallbackArgs({
   );
 }
 
+// An extension-authored UI tree is untrusted data: a shape that slips past the
+// renderer's checks must degrade to the raw text, never white-screen the thread.
+class ResultBoundary extends Component<
+  { fallback: ReactNode; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
 function ToolFallbackResult({
   result,
   toolName,
@@ -336,7 +354,15 @@ function ToolFallbackResult({
           builtin
         ) : uiNode ? (
           <div className="mt-1">
-            <ExtensionUI node={uiNode} />
+            <ResultBoundary
+              fallback={
+                <pre className="bg-muted/50 text-foreground/90 mt-1 rounded-md p-2.5 text-xs whitespace-pre-wrap">
+                  {typeof result === "string" ? result : JSON.stringify(result)}
+                </pre>
+              }
+            >
+              <ExtensionUI node={uiNode} />
+            </ResultBoundary>
           </div>
         ) : (
           <pre className="aui-tool-fallback-result-content bg-muted/50 text-foreground/90 mt-1 rounded-md p-2.5 text-xs whitespace-pre-wrap">

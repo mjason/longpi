@@ -55,6 +55,8 @@ export type ConversationState = ConversationChannelState & {
   send: (text: string, attachments?: MessageAttachment[]) => void;
   interrupt: () => void;
   regenerate: () => void;
+  // Continue an interrupted (crashed/restarted) turn from the saved history.
+  resume: () => void;
   editLast: (text: string, attachments?: MessageAttachment[]) => void;
   respondApproval: (id: string, approved: boolean) => void;
   runCommand: (name: string, arg?: string) => void;
@@ -73,6 +75,8 @@ const INITIAL: ConversationChannelState = {
   commands: [],
   subagents: {},
   subagentApprovals: {},
+  retrying: null,
+  interrupted: false,
 };
 
 export type ConversationStore = ReturnType<typeof createConversationStore>;
@@ -136,6 +140,8 @@ export function createConversationStore() {
       },
 
       regenerate: () => push("regenerate", {}),
+
+      resume: () => push("resume", {}),
 
       editLast: (text, attachments = []) => push("edit_last", { text, attachments }),
 

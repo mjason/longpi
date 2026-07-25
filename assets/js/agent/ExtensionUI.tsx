@@ -22,11 +22,31 @@ export type UINode = {
   children?: Array<UINode | string | number | null>;
 };
 
+// Every thread re-render re-parses every tool result (both the "does this
+// have a custom view?" probe and the actual render) — a big JSON.parse per
+// result per frame. Results are immutable strings, so cache verdicts.
+const parseCache = new Map<string, UINode | null>();
+const PARSE_CACHE_MAX = 200;
+
 /** Parses a tool-result string into a UI node, or null if it isn't a UI payload. */
 export function parseExtensionUI(result: unknown): UINode | null {
   if (typeof result !== "string") return null;
   const trimmed = result.trim();
   if (!trimmed.startsWith("{") || !trimmed.includes(UI_ENVELOPE)) return null;
+
+  const cached = parseCache.get(result);
+  if (cached !== undefined) return cached;
+
+  const node = parseUncached(trimmed);
+  if (parseCache.size >= PARSE_CACHE_MAX) {
+    const oldest = parseCache.keys().next().value;
+    if (oldest !== undefined) parseCache.delete(oldest);
+  }
+  parseCache.set(result, node);
+  return node;
+}
+
+function parseUncached(trimmed: string): UINode | null {
   try {
     const parsed = JSON.parse(trimmed);
     const view = parsed?.[UI_ENVELOPE] === true ? parsed.view : null;
@@ -39,16 +59,46 @@ export function parseExtensionUI(result: unknown): UINode | null {
   }
 }
 
+// The tree is extension-authored data: a runaway generator can emit a huge or
+// deeply recursive view. Cap both dimensions so one bad tool result can't
+// freeze the tab (nodes past the caps degrade to a small notice).
+const MAX_NODES = 500;
+const MAX_DEPTH = 32;
+
 export function ExtensionUI({ node }: { node: UINode }) {
-  return <>{renderNode(node, "root")}</>;
+  const budget = { nodes: MAX_NODES, truncated: false };
+  const rendered = renderNode(node, "root", 0, budget);
+  return (
+    <>
+      {rendered}
+      {budget.truncated && (
+        <div className="text-xs text-muted-foreground">(view truncated — too large)</div>
+      )}
+    </>
+  );
 }
 
-function renderNode(node: UINode | string | number | null, key: string): ReactNode {
+type RenderBudget = { nodes: number; truncated: boolean };
+
+function renderNode(
+  node: UINode | string | number | null,
+  key: string,
+  depth: number,
+  budget: RenderBudget,
+): ReactNode {
   if (node === null || node === undefined) return null;
   if (typeof node === "string" || typeof node === "number") return node;
 
+  if (budget.nodes <= 0 || depth >= MAX_DEPTH) {
+    budget.truncated = true;
+    return null;
+  }
+  budget.nodes -= 1;
+
   const renderer = REGISTRY[node.type];
-  const children = (node.children ?? []).map((child, i) => renderNode(child, `${key}.${i}`));
+  const children = (node.children ?? []).map((child, i) =>
+    renderNode(child, `${key}.${i}`, depth + 1, budget),
+  );
   const props = node.props ?? {};
 
   // An unknown type degrades to its children, so a newer extension still shows

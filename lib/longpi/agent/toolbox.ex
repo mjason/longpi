@@ -78,12 +78,28 @@ defmodule Longpi.Agent.Toolbox do
     case Map.fetch(toolbox, name) do
       {:ok, spec} ->
         with {:ok, args} <- validate(spec, raw_args) do
-          spec.run.(args, ctx)
+          run_isolated(spec, args, ctx)
         end
 
       :error ->
         {:error, "unknown tool: #{name}. Available tools: #{Enum.join(Map.keys(toolbox), ", ")}"}
     end
+  end
+
+  # A raising tool (File.write! on a read-only path, a DB hiccup in schedule…)
+  # must surface as an ordinary tool error the model can react to — an
+  # uncaught raise crashes the whole Turn task and throws away every tool
+  # result the turn had already produced.
+  defp run_isolated(spec, args, ctx) do
+    spec.run.(args, ctx)
+  rescue
+    exception ->
+      Logger.warning("tool #{spec.name} raised: #{Exception.message(exception)}")
+      {:error, "#{spec.name} failed: #{Exception.message(exception)}"}
+  catch
+    kind, reason ->
+      Logger.warning("tool #{spec.name} #{kind}: #{inspect(reason)}")
+      {:error, "#{spec.name} failed: #{inspect({kind, reason})}"}
   end
 
   defp index(specs), do: Map.new(specs, &{&1.name, &1})

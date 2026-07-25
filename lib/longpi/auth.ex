@@ -103,6 +103,20 @@ defmodule Longpi.Auth do
     end
   end
 
+  @doc """
+  CSP `frame-ancestors` source list for `/embed` — the origins allowed to
+  iframe the agent. Configured via `auth.embedFrameAncestors` in config.jsonc
+  or `LONGPI_EMBED_FRAME_ANCESTORS` (space-separated origins). Defaults to
+  `'self'`: embedding from another origin (dala on a different port counts)
+  requires listing that origin explicitly.
+  """
+  def embed_frame_ancestors do
+    case Application.get_env(:longpi, :embed_frame_ancestors) do
+      value when is_binary(value) and value != "" -> value
+      _ -> "'self'"
+    end
+  end
+
   @doc "Constant-time check of a presented embed token."
   def verify_embed_token(presented) when is_binary(presented) and presented != "" do
     case embed_token() do

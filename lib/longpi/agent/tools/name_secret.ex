@@ -55,6 +55,12 @@ defmodule Longpi.Agent.Tools.NameSecret do
       SecretCapture.pending?(name) ->
         {:error, "the new name must not start with PENDING_"}
 
+      # put_secret is an upsert: naming a pending value GITHUB_TOKEN would
+      # silently destroy the user's existing key. Real secrets are managed by
+      # the user, not renamed over.
+      Map.has_key?(secrets, name) ->
+        {:error, "#{name} already exists — pick another name (the user manages existing secrets)"}
+
       true ->
         case Map.fetch(secrets, pending) do
           {:ok, value} ->

@@ -6,7 +6,10 @@ defmodule LongpiWeb.Router do
   import AshAuthentication.Plug.Helpers
 
   pipeline :browser do
-    plug :accepts, ["html"]
+    # "json" included because the /rpc data plane rides this pipeline: a fetch
+    # sending Accept: application/json must not 406 before reaching the
+    # controller (the CSRF self-heal path depends on /rpc/csrf answering).
+    plug :accepts, ["html", "json"]
     plug :fetch_session
     plug :fetch_live_flash
     plug :put_root_layout, html: {LongpiWeb.Layouts, :root}
@@ -48,11 +51,20 @@ defmodule LongpiWeb.Router do
 
   # Phoenix 1.8's put_secure_browser_headers guards with CSP
   # `frame-ancestors 'self'` (ports count as different origins, so a host app
-  # on another port can't iframe us). Relax just that directive here.
+  # on another port can't iframe us). Relax just that directive here — to the
+  # configured host origins, not the whole web: `frame-ancestors *` would let
+  # ANY site iframe the embed and (with auth off, or a leaked token link)
+  # drive the agent invisibly. Set `embed_frame_ancestors` in config.jsonc to
+  # the host app's origin(s), e.g. "http://localhost:3000".
   defp allow_embedding(conn, _opts) do
+    ancestors = Longpi.Auth.embed_frame_ancestors()
+
     conn
     |> Plug.Conn.delete_resp_header("x-frame-options")
-    |> Plug.Conn.put_resp_header("content-security-policy", "base-uri 'self'; frame-ancestors *;")
+    |> Plug.Conn.put_resp_header(
+      "content-security-policy",
+      "base-uri 'self'; frame-ancestors #{ancestors};"
+    )
   end
 
   # Stateless auth for the native shell's JSON API: every request carries the
@@ -71,20 +83,33 @@ defmodule LongpiWeb.Router do
   # endpoints when sign-in is off — JSON-only writes force a CORS preflight,
   # which browsers won't grant to a hostile origin.
   defp require_json_writes(conn, _opts) do
-    if conn.method in ["POST", "PUT", "PATCH", "DELETE"] and
-         not json_content?(Plug.Conn.get_req_header(conn, "content-type")) do
-      conn
-      |> Plug.Conn.put_status(415)
-      |> Phoenix.Controller.json(%{error: "JSON body required"})
-      |> Plug.Conn.halt()
-    else
-      conn
+    content_type = Plug.Conn.get_req_header(conn, "content-type")
+
+    cond do
+      conn.method not in ["POST", "PUT", "PATCH", "DELETE"] ->
+        conn
+
+      json_content?(content_type) ->
+        conn
+
+      # A body-less DELETE has no content type and that's fine: DELETE is not
+      # a CORS "simple" method, so a hostile origin can't send it without a
+      # preflight. POST/PUT/PATCH with NO content-type do NOT get that pass —
+      # a cross-site fetch with an empty body skips the preflight, and query
+      # params still land in conn.params.
+      conn.method == "DELETE" and content_type == [] ->
+        conn
+
+      true ->
+        conn
+        |> Plug.Conn.put_status(415)
+        |> Phoenix.Controller.json(%{error: "JSON body required"})
+        |> Plug.Conn.halt()
     end
   end
 
   defp json_content?([type | _]), do: String.starts_with?(type, "application/json")
-  # DELETE without a body has no content type — that's fine (no form can send it).
-  defp json_content?([]), do: true
+  defp json_content?([]), do: false
 
   defp verify_mobile_token(conn, _opts) do
     presented =

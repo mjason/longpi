@@ -6,7 +6,7 @@ defmodule Longpi.Agent.TurnModelSwitchTest do
 
   import Mox
 
-  alias Longpi.Agent.{Toolbox, ToolSpec, Turn}
+  alias Longpi.Agent.{ToolSpec, Turn}
   alias Longpi.Agent.LLM.Mock, as: LLMMock
 
   setup :set_mox_global

@@ -239,6 +239,84 @@ defmodule LongpiWeb.ConversationChannelTest do
     assert_push "turn_ended", %{reason: "interrupted"}
   end
 
+  test "edit_last pushes a history event carrying status and pending approvals (wire contract)",
+       %{socket: socket, conversation: conversation} do
+    LLMMock
+    |> expect(:stream, fn _, _, _, _, _ -> {:ok, %{text: "first reply", tool_calls: []}} end)
+    |> expect(:stream, fn _, _, _, _, _ -> {:ok, %{text: "edited reply", tool_calls: []}} end)
+
+    valid = %{"type" => "image", "data" => "AAAA", "media_type" => "image/png", "name" => "a.png"}
+
+    ref =
+      push(socket, "send_message", %{"text" => "original", "attachments" => [valid]})
+
+    assert_reply ref, :ok
+    assert_push "turn_ended", %{reason: "complete"}
+
+    # Edit with NO attachments: the original image must be carried over.
+    ref2 = push(socket, "edit_last", %{"text" => "edited"})
+    assert_reply ref2, :ok
+
+    # Several history pushes can be in flight (titling etc.) — take the one
+    # reflecting the edit and check the wire contract on it.
+    %{messages: messages, status: status, pending_approvals: pending} =
+      payload = await_history_containing("edited")
+
+    assert is_list(pending)
+    assert status in [:idle, :running]
+    assert {:ok, _} = Jason.encode(payload)
+    assert_push "turn_ended", %{reason: "complete"}
+
+    edited =
+      conversation.id
+      |> Longpi.Agent.list_messages!()
+      |> Enum.find(&(&1.role == :user))
+
+    assert edited.content == "edited"
+    assert [%{"type" => "image", "name" => "a.png"}] = edited.attachments
+    assert Enum.any?(messages, &(&1.role == :user and &1.content == "edited"))
+  end
+
+  test "transient failures push turn_retrying and the join reply carries the countdown (wire contract)",
+       %{socket: _socket, conversation: conversation} do
+    {:ok, calls} = Agent.start_link(fn -> 0 end)
+
+    stub(LLMMock, :stream, fn _, _, _, _, _ ->
+      case Agent.get_and_update(calls, &{&1, &1 + 1}) do
+        0 -> {:error, %{status: 502, reason: "Bad Gateway"}}
+        _ -> {:ok, %{text: "recovered", tool_calls: []}}
+      end
+    end)
+
+    {:ok, session} = Sessions.ensure_started(conversation.id)
+    :ok = Longpi.Agent.Session.send_message(session, "go")
+
+    assert_push "turn_retrying", %{attempt: 1, max: max, delay_ms: delay} = payload, 2_000
+    assert is_integer(max) and is_integer(delay)
+    assert {:ok, _} = Jason.encode(payload)
+
+    # A refresh mid-backoff still sees the countdown: it lives in the session,
+    # not just in the event stream.
+    {:ok, reply, _socket2} =
+      LongpiWeb.UserSocket
+      |> socket("user2", %{})
+      |> subscribe_and_join(LongpiWeb.ConversationChannel, "conversation:#{conversation.id}")
+
+    assert Map.has_key?(reply, :retrying)
+    assert Map.has_key?(reply, :interrupted)
+    assert {:ok, _} = Jason.encode(reply)
+
+    assert_push "turn_ended", %{reason: "complete"}, 3_000
+  end
+
+  defp await_history_containing(text) do
+    assert_push "history", %{messages: messages} = payload
+
+    if Enum.any?(messages, &(&1.role == :user and &1.content == text)),
+      do: payload,
+      else: await_history_containing(text)
+  end
+
   test "the session survives the channel leaving", %{socket: socket, conversation: conversation} do
     session = Sessions.whereis(conversation.id)
     assert is_pid(session)

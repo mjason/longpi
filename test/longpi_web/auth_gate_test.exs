@@ -17,6 +17,18 @@ defmodule LongpiWeb.AuthGateTest do
 
   defp enable_auth, do: Application.put_env(:longpi, :auth_enabled, true)
 
+  # A REAL signed-in session (embed_authorized no longer reaches admin routes).
+  defp sign_in(conn, email, password) do
+    {:ok, user} =
+      Longpi.Accounts.User
+      |> Ash.Query.for_read(:sign_in_with_password, %{email: email, password: password})
+      |> Ash.read_one(authorize?: false)
+
+    conn
+    |> Phoenix.ConnTest.init_test_session(%{})
+    |> AshAuthentication.Plug.Helpers.store_in_session(user)
+  end
+
   describe "auth disabled (the default)" do
     test "SPA and RPC are open", %{conn: conn} do
       assert conn |> get(~p"/") |> html_response(200)
@@ -120,8 +132,9 @@ defmodule LongpiWeb.AuthGateTest do
       # The toggle is LIVE: an unauthenticated request now 401s...
       assert conn |> get(~p"/rpc/version") |> json_response(401)
 
-      # ...so turning it back off needs an authorized session.
-      authed = Phoenix.ConnTest.init_test_session(conn, %{embed_authorized: true})
+      # ...so turning it back off needs a signed-in user (an embed token is
+      # NOT enough for management endpoints).
+      authed = sign_in(conn, "ui@example.com", "secret123")
 
       assert %{"ok" => true} =
                authed |> post(~p"/rpc/auth", %{"enabled" => false}) |> json_response(200)
@@ -155,7 +168,7 @@ defmodule LongpiWeb.AuthGateTest do
 
       conn |> post(~p"/rpc/auth", %{"enabled" => true}) |> json_response(200)
 
-      authed = Phoenix.ConnTest.init_test_session(conn, %{embed_authorized: true})
+      authed = sign_in(conn, "only@example.com", "secret123")
 
       if Ash.count!(Longpi.Accounts.User, authorize?: false) == 1 do
         assert json_response(post(authed, ~p"/rpc/users/delete", %{"id" => id}), 422)["error"] =~
@@ -173,13 +186,43 @@ defmodule LongpiWeb.AuthGateTest do
     end
 
     test "the toggle is read-only when config pins auth", %{conn: conn} do
+      conn
+      |> post(~p"/rpc/users", %{"email" => "pinned@example.com", "password" => "secret123"})
+      |> json_response(200)
+
       enable_auth()
 
-      # A pinned config wins and the endpoint refuses to flip it. (The gate is
-      # bypassed here via an embed-authorized session, since auth is now on.)
-      conn = Phoenix.ConnTest.init_test_session(conn, %{embed_authorized: true})
+      # A pinned config wins and the endpoint refuses to flip it.
+      conn = sign_in(conn, "pinned@example.com", "secret123")
+
       assert json_response(post(conn, ~p"/rpc/auth", %{"enabled" => false}), 422)["error"] =~
                "pinned"
+    end
+
+    test "an embed-token session cannot reach management endpoints", %{conn: conn} do
+      conn
+      |> post(~p"/rpc/users", %{"email" => "scope@example.com", "password" => "secret123"})
+      |> json_response(200)
+
+      enable_auth()
+      embed = Phoenix.ConnTest.init_test_session(conn, %{embed_authorized: true})
+
+      # Conversation surface stays open to the embed...
+      assert embed |> get(~p"/rpc/version") |> json_response(200)
+
+      # ...but the admin surface refuses it outright.
+      for path <- ["/rpc/users", "/rpc/embed-info", "/rpc/extensions/secrets"] do
+        assert embed |> get(path) |> json_response(403)
+      end
+
+      assert embed |> post(~p"/rpc/auth", %{"enabled" => false}) |> json_response(403)
+
+      assert embed
+             |> post(~p"/rpc/users", %{"email" => "x@example.com", "password" => "secret123"})
+             |> json_response(403)
+
+      assert embed |> post(~p"/rpc/version/upgrade", %{}) |> json_response(403)
+      assert embed |> get(~p"/manage") |> response(403)
     end
   end
 
@@ -232,12 +275,21 @@ defmodule LongpiWeb.AuthGateTest do
   end
 
   describe "embed frame headers" do
-    test "/embed can be iframed (frame-ancestors relaxed)", %{conn: conn} do
+    test "/embed drops X-Frame-Options but defaults frame-ancestors to 'self'", %{conn: conn} do
       conn = get(conn, ~p"/embed")
       assert html_response(conn, 200)
       assert get_resp_header(conn, "x-frame-options") == []
       assert [csp] = get_resp_header(conn, "content-security-policy")
-      assert csp =~ "frame-ancestors *"
+      assert csp =~ "frame-ancestors 'self'"
+    end
+
+    test "configured embed ancestors are honored", %{conn: conn} do
+      Application.put_env(:longpi, :embed_frame_ancestors, "http://host.example:3000")
+      on_exit(fn -> Application.delete_env(:longpi, :embed_frame_ancestors) end)
+
+      conn = get(conn, ~p"/embed")
+      assert [csp] = get_resp_header(conn, "content-security-policy")
+      assert csp =~ "frame-ancestors http://host.example:3000"
     end
 
     test "the normal SPA keeps its frame-ancestors 'self' guard", %{conn: conn} do

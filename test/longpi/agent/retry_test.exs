@@ -95,6 +95,25 @@ defmodule Longpi.Agent.RetryTest do
       refute Retry.transient?(:something_else)
       refute Retry.transient?(%{reason: :bad_request})
     end
+
+    # The text classifier ported from pi — each pattern is a real, reported
+    # provider/gateway failure mode.
+    test "true for mid-stream and gateway failure TEXT" do
+      assert Retry.transient?("Anthropic stream ended before message_stop")
+      assert Retry.transient?("socket hang up")
+      assert Retry.transient?("Provider returned error")
+      assert Retry.transient?("upstream connect error or disconnect")
+      assert Retry.transient?("502 Bad Gateway: Upstream service temporarily unavailable")
+      assert Retry.transient?(%{message: "request timed out"})
+      assert Retry.transient?(%{reason: "connection reset before headers"})
+      assert Retry.transient?(%RuntimeError{message: "fetch failed"})
+    end
+
+    test "quota/billing exhaustion overrides retryable-looking text" do
+      refute Retry.transient?("429 insufficient_quota: please check your plan")
+      refute Retry.transient?("Monthly usage limit reached, server error fallback")
+      refute Retry.transient?(%{message: "out of budget (503)"})
+    end
   end
 
   test "backoff grows exponentially" do

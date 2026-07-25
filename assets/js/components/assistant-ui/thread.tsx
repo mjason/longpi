@@ -178,6 +178,8 @@ const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
           >
             <ThreadScrollToBottom />
             <ThreadFollowupSuggestions />
+            <RetryCountdown />
+            <ResumeInterrupted />
             <Composer />
           </ThreadPrimitive.ViewportFooter>
         </div>
@@ -545,6 +547,64 @@ const ComposerAction: FC = () => {
   );
 };
 
+// Countdown to the session's automatic clean retry after a transient gateway
+// failure. The state lives in the session (not just the event stream), so a
+// page refresh mid-backoff re-renders the same countdown from the join reply.
+const RetryCountdown: FC = () => {
+  const { t } = useI18n();
+  const retrying = useConversationStore((s) => s.retrying);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!retrying) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [retrying]);
+
+  if (!retrying) return null;
+  const seconds = Math.max(0, Math.ceil((retrying.until_ms - now) / 1000));
+
+  return (
+    <div className="mx-auto flex w-full max-w-(--thread-max-width) items-center gap-2 px-2 text-xs text-muted-foreground">
+      <RefreshCwIcon className="size-3.5 animate-spin [animation-duration:2.5s]" />
+      <span>
+        {t("retry.countdown", {
+          attempt: retrying.attempt,
+          max: retrying.max,
+          seconds,
+        })}
+      </span>
+    </div>
+  );
+};
+
+// The previous server run died mid-turn (crash/deploy). Progress up to the
+// last completed tool call is already saved — offer to continue from there.
+const ResumeInterrupted: FC = () => {
+  const { t } = useI18n();
+  const interrupted = useConversationStore((s) => s.interrupted);
+  const status = useConversationStore((s) => s.status);
+  const resume = useConversationStore((s) => s.resume);
+
+  if (!interrupted || status !== "idle") return null;
+
+  return (
+    <div className="mx-auto flex w-full max-w-(--thread-max-width) items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm ring-1 ring-black/[0.06] dark:ring-white/[0.08]">
+      <span className="text-muted-foreground">{t("resume.notice")}</span>
+      <Button
+        size="sm"
+        variant="outline"
+        className="shrink-0 gap-1.5 active:scale-[0.98]"
+        onClick={() => resume()}
+      >
+        <RefreshCwIcon className="size-3.5" />
+        {t("resume.action")}
+      </Button>
+    </div>
+  );
+};
+
 // A failed turn persists a "⚠ Turn failed: …" note as the last assistant
 // message. The hover-only action bar is too hidden for that moment — surface
 // an always-visible Retry that re-runs the last user message (regenerate).
@@ -659,7 +719,13 @@ const AssistantMessage: FC = () => {
                 return (
                   <AutoCollapsingToolGroup
                     count={part.indices.length}
-                    running={part.status.type === "running"}
+                    // requires-action keeps the group open too: collapsing at
+                    // the exact moment a tool asks for approval would hide
+                    // Allow/Deny inside a closed "N tool calls" row.
+                    running={
+                      part.status.type === "running" ||
+                      part.status.type === "requires-action"
+                    }
                   >
                     {children}
                   </AutoCollapsingToolGroup>

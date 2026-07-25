@@ -92,6 +92,25 @@ defmodule Longpi.Agent.SecretCaptureTest do
       # The real pending handle is listed as a hint.
       assert m4 =~ pending
     end
+
+    test "name_secret refuses to overwrite an existing real secret" do
+      SecretCapture.capture("@@GITHUB_TOKEN=the-users-key@@")
+      {_c, [pending]} = SecretCapture.capture("@@=a-new-value@@")
+
+      assert {:error, message} = NameSecret.run(%{pending: pending, name: "GITHUB_TOKEN"}, %{})
+      assert message =~ "already exists"
+      assert stored()["GITHUB_TOKEN"] == "the-users-key"
+    end
+
+    test "a user-typed PENDING_ name is treated as anonymous, not stored verbatim" do
+      {clean, [handle]} = SecretCapture.capture("@@PENDING_FOO=v@@")
+
+      # Stored under a GENERATED handle — never literally PENDING_FOO, which
+      # would be invisible to extensions forever while reading as saved.
+      assert handle =~ ~r/^PENDING_[0-9A-F]{6}$/
+      refute handle == "PENDING_FOO"
+      assert clean =~ "name it with the name_secret tool"
+    end
   end
 
   test "an oversized value is refused loudly, not silently truncated" do

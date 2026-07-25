@@ -188,5 +188,10 @@ if config_env() == :prod do
     # override via auth.embedToken / LONGPI_EMBED_TOKEN.
     embed_token:
       System.get_env("LONGPI_EMBED_TOKEN") || auth_cfg["embedToken"] ||
-        RC.secret(cfg, [], "embedToken")
+        RC.secret(cfg, [], "embedToken"),
+    # CSP frame-ancestors for /embed — which origins may iframe the agent.
+    # A host app (dala) must list its origin here, e.g.
+    # "embedFrameAncestors": "http://localhost:3000". Default: same origin only.
+    embed_frame_ancestors:
+      System.get_env("LONGPI_EMBED_FRAME_ANCESTORS") || auth_cfg["embedFrameAncestors"]
 end

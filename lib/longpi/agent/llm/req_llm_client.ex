@@ -40,7 +40,15 @@ defmodule Longpi.Agent.LLM.ReqLLMClient do
     emitted = :counters.new(1, [])
 
     guarded_sink = fn event ->
-      :counters.add(emitted, 1, 1)
+      # Count only events whose replay would DUPLICATE user-visible output.
+      # Usage/meta arrive before any token (Anthropic's message_start carries
+      # usage) — counting them made emitted > 0 from the first frame and
+      # disabled this retry path entirely for those providers.
+      case event do
+        {:usage, _} -> :ok
+        _ -> :counters.add(emitted, 1, 1)
+      end
+
       sink.(event)
     end
 

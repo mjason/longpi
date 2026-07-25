@@ -12,6 +12,8 @@ defmodule Longpi.Agent.SessionLoopTest do
   @moduletag :tmp_dir
 
   setup %{tmp_dir: dir} do
+    Longpi.Agent.GatewayHealth.reset()
+
     session =
       start_supervised!({Session, llm: LLMMock, model: "test:model", cwd: dir, stream_to: self()})
 
@@ -283,20 +285,15 @@ defmodule Longpi.Agent.SessionLoopTest do
     end
   end
 
-  test "a transient gateway failure auto-retries by continuation and then succeeds", %{
+  test "a transient gateway failure retries cleanly and succeeds — invisible to the context", %{
     session: session
   } do
-    stub(LLMMock, :stream, fn _, messages, _, _, _sink ->
-      retried? =
-        Enum.any?(messages, fn
-          %{role: :user, content: c} -> is_binary(c) and c =~ "[auto-retry"
-          _ -> false
-        end)
+    {:ok, calls} = Agent.start_link(fn -> 0 end)
 
-      if retried? do
-        {:ok, %{text: "recovered after the outage", tool_calls: []}}
-      else
-        {:error, %{status: 503, reason: "No available accounts"}}
+    stub(LLMMock, :stream, fn _, _messages, _, _, _sink ->
+      case Agent.get_and_update(calls, &{&1, &1 + 1}) do
+        0 -> {:error, %{status: 503, reason: "No available accounts"}}
+        _ -> {:ok, %{text: "recovered after the outage", tool_calls: []}}
       end
     end)
 
@@ -311,31 +308,84 @@ defmodule Longpi.Agent.SessionLoopTest do
     end)
 
     texts = session |> Session.messages() |> Enum.map(& &1[:content])
-    # The failure was recorded honestly AND retried without the user.
-    assert Enum.any?(texts, &(is_binary(&1) and &1 =~ "Turn failed"))
-    assert Enum.any?(texts, &(is_binary(&1) and &1 =~ "[auto-retry 1/2]"))
+    # The retry is INVISIBLE: no injected user message, no failure note —
+    # the model's context reads as if the outage never happened.
+    refute Enum.any?(texts, &(is_binary(&1) and &1 =~ "[auto-retry"))
+    refute Enum.any?(texts, &(is_binary(&1) and &1 =~ "Turn failed"))
   end
 
-  test "auto-retry gives up after the cap and leaves the manual Retry path", %{
+  test "a retry after PROGRESS keeps the checkpointed tool work in context", %{
+    session: session,
+    tmp_dir: dir
+  } do
+    {:ok, calls} = Agent.start_link(fn -> 0 end)
+    call = %{id: "ck1", name: "read", args: %{"path" => "checkpoint.txt"}}
+    File.write!(Path.join(dir, "checkpoint.txt"), "saved")
+
+    stub(LLMMock, :stream, fn _, messages, _, _, _sink ->
+      case Agent.get_and_update(calls, &{&1, &1 + 1}) do
+        # Iteration 1: request a tool.
+        0 ->
+          {:ok, %{text: "", tool_calls: [call]}}
+
+        # Iteration 2 dies mid-stream AFTER the tool already ran.
+        1 ->
+          {:error, %{status: 502, reason: "Bad Gateway"}}
+
+        # The retry must see the checkpointed tool result — it never re-runs
+        # the tool, it just finishes.
+        _ ->
+          if Enum.any?(messages, &(&1.role == :tool and &1.content =~ "saved")) do
+            {:ok, %{text: "finished with prior work intact", tool_calls: []}}
+          else
+            {:ok, %{text: "LOST THE CHECKPOINT", tool_calls: []}}
+          end
+      end
+    end)
+
+    assert :ok = Session.send_message(session, "go")
+
+    wait_for(fn ->
+      Enum.any?(Session.messages(session), fn
+        %{role: :assistant, content: c} -> is_binary(c) and c =~ "finished with prior work intact"
+        _ -> false
+      end)
+    end)
+
+    # The tool ran exactly once (3 stream calls: iterate, fail, retry-finish).
+    assert Agent.get(calls, & &1) == 3
+  end
+
+  test "auto-retry gives up after the budget: ONE note, turn_failed, manual Retry path", %{
     session: session
   } do
+    {:ok, calls} = Agent.start_link(fn -> 0 end)
+
     stub(LLMMock, :stream, fn _, _, _, _, _sink ->
+      Agent.update(calls, &(&1 + 1))
       {:error, %{status: 503, reason: "still down"}}
     end)
 
     assert :ok = Session.send_message(session, "doomed by gateway")
 
-    # Attempt 0 fails -> retry 1 fails -> retry 2 fails -> gives up.
-    wait_for(fn ->
-      Session.status(session) == :idle and
-        Enum.count(Session.messages(session), fn
-          %{role: :assistant, content: c} -> is_binary(c) and c =~ "Turn failed"
-          _ -> false
-        end) == 3
-    end)
+    # Initial attempt + one retry per schedule slot (3 in test config), then
+    # the failure finally becomes visible.
+    assert_receive {:agent_event, {:turn_failed, _}}, 5_000
 
-    Process.sleep(200)
-    # No further injections after the cap: exactly 2 auto-retry prompts exist.
+    wait_for(fn -> Session.status(session) == :idle and Session.retrying(session) == nil end)
+    assert Agent.get(calls, & &1) == 4
+
+    # EXACTLY one persisted note — the retries themselves left no trace.
+    notes =
+      session
+      |> Session.messages()
+      |> Enum.count(fn
+        %{role: :assistant, content: c} -> is_binary(c) and c =~ "Turn failed"
+        _ -> false
+      end)
+
+    assert notes == 1
+
     retries =
       session
       |> Session.messages()
@@ -344,7 +394,7 @@ defmodule Longpi.Agent.SessionLoopTest do
         _ -> false
       end)
 
-    assert retries == 2
+    assert retries == 0
     assert Session.status(session) == :idle
   end
 

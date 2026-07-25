@@ -20,6 +20,7 @@ defmodule LongpiWeb.ChannelCase do
   setup tags do
     pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Longpi.Repo, shared: not tags[:async])
     on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
+    Longpi.Agent.GatewayHealth.reset()
     :ok
   end
 end

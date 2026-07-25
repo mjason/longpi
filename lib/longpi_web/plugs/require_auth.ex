@@ -12,26 +12,50 @@ defmodule LongpiWeb.Plugs.RequireAuth do
   import Plug.Conn
   import Phoenix.Controller, only: [redirect: 2, json: 2, current_path: 1]
 
+  # Surfaces an embed-token session must NOT reach: the token authorizes
+  # driving a conversation from a host iframe, not administering the install.
+  # Without this, any page that can read the iframe URL holds full admin
+  # (user management, auth toggle, self-upgrade, secrets, the token itself).
+  @admin_prefixes ["/manage", "/rpc/users", "/rpc/auth", "/rpc/version/upgrade",
+                   "/rpc/embed-info", "/rpc/extensions/secrets"]
+
   def init(opts), do: opts
 
   def call(conn, opts) do
-    if not Longpi.Auth.enabled?() || conn.assigns[:current_user] ||
-         get_session(conn, :embed_authorized) do
-      conn
-    else
-      case Keyword.get(opts, :mode, :page) do
-        :api ->
-          conn
-          |> put_status(:unauthorized)
-          |> json(%{error: "authentication required"})
-          |> halt()
+    cond do
+      not Longpi.Auth.enabled?() || conn.assigns[:current_user] ->
+        conn
 
-        :page ->
+      get_session(conn, :embed_authorized) ->
+        if admin_path?(conn.request_path) do
           conn
-          |> put_session(:return_to, current_path(conn))
-          |> redirect(to: "/sign-in")
+          |> put_status(:forbidden)
+          |> json(%{error: "embed sessions cannot access management endpoints"})
           |> halt()
-      end
+        else
+          conn
+        end
+
+      true ->
+        deny(conn, opts)
+    end
+  end
+
+  defp admin_path?(path), do: Enum.any?(@admin_prefixes, &String.starts_with?(path, &1))
+
+  defp deny(conn, opts) do
+    case Keyword.get(opts, :mode, :page) do
+      :api ->
+        conn
+        |> put_status(:unauthorized)
+        |> json(%{error: "authentication required"})
+        |> halt()
+
+      :page ->
+        conn
+        |> put_session(:return_to, current_path(conn))
+        |> redirect(to: "/sign-in")
+        |> halt()
     end
   end
 end

@@ -49,6 +49,13 @@ function once(entry: ChannelEntry, seq: number | undefined, run: () => void) {
 // the same topic, so every push arrives twice and streamed text duplicates.
 const entries = new Map<string, ChannelEntry>();
 
+function releaseChannel(topic: string) {
+  const entry = entries.get(topic);
+  if (!entry) return;
+  entry.channel.leave();
+  entries.delete(topic);
+}
+
 function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   let entry = entries.get(topic);
   if (entry) {
@@ -61,8 +68,17 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   entries.set(topic, entry);
 
   const e = entry;
-  channel.on("history", (p: { messages: HistoryMessage[]; seq?: number }) =>
-    once(e, p.seq, () => e.dispatch({ type: "joined", messages: p.messages, status: "running" })),
+  channel.on(
+    "history",
+    (p: { messages: HistoryMessage[]; status?: string; pending_approvals?: string[]; seq?: number }) =>
+      once(e, p.seq, () =>
+        e.dispatch({
+          type: "joined",
+          messages: p.messages,
+          status: p.status ?? "running",
+          pending: p.pending_approvals,
+        }),
+      ),
   );
   channel.on("text_delta", (p: { text: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "text_delta", text: p.text })),
@@ -81,6 +97,11 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   );
   channel.on("approval_request", (p: { id: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "approval_request", id: p.id })),
+  );
+  // Timed-out (or otherwise resolved) approvals retract the prompt — leaving
+  // it up would let the user click into a void.
+  channel.on("approval_resolved", (p: { id: string; seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "approval_resolved", id: p.id })),
   );
   channel.on("compacted", (p: { covered_through: number; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "compacted", coveredThrough: p.covered_through })),
@@ -115,6 +136,9 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   channel.on("turn_failed", (p: { reason: string; seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "turn_failed", reason: p.reason })),
   );
+  channel.on("turn_retrying", (p: TurnRetrying & { seq?: number }) =>
+    once(e, p.seq, () => e.dispatch({ type: "turn_retrying", retrying: p })),
+  );
 
   // Replay mid-turn events from the join reply through the SAME reducer paths
   // as live pushes — a refresh mid-turn reconstructs text, thinking, and
@@ -145,12 +169,14 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
     channel
       .join()
       .receive("ok", (reply: JoinReply) => {
-        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands, subagents: reply.subagents, subagentApprovals: reply.subagent_approvals });
+        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands, subagents: reply.subagents, subagentApprovals: reply.subagent_approvals, retrying: reply.retrying, interrupted: reply.interrupted });
         // Watermark BEFORE replay: pushes emitted while the join reply was
         // being assembled are inside `live` — dropping seq <= live_seq stops
-        // them from appending twice.
+        // them from appending twice. ASSIGN, don't max: the session process
+        // restarts (idle reap, deploy) with seq back at 0, and a kept stale
+        // watermark would silently drop every push forever.
         if (typeof reply.live_seq === "number") {
-          e.lastSeq = Math.max(e.lastSeq, reply.live_seq);
+          e.lastSeq = reply.live_seq;
         }
         replayLive(reply.live);
         resolve();
@@ -165,6 +191,17 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
 }
 
 export type ContextUsage = { used: number | null; window: number };
+
+// A pending clean retry: the session re-runs the turn from the checkpointed
+// history after the countdown — surfaced so the UI can show it (and a page
+// refresh re-reads it from the join reply, not just the event stream).
+export type TurnRetrying = {
+  attempt: number;
+  max: number;
+  delay_ms: number;
+  until_ms: number;
+  reason: string;
+};
 export type ExtCommand = { name: string; description: string };
 
 export type SubagentInfo = {
@@ -199,6 +236,9 @@ type JoinReply = {
   commands?: ExtCommand[];
   subagents?: Record<string, SubagentInfo>;
   subagent_approvals?: SubagentApproval[];
+  retrying?: TurnRetrying | null;
+  // The previous server incarnation died mid-turn; resume is available.
+  interrupted?: boolean;
 };
 
 export type ConversationChannelState = {
@@ -217,10 +257,14 @@ export type ConversationChannelState = {
   subagents: Record<string, SubagentInfo>;
   // Tool approvals bubbled up from subagents, keyed by call id.
   subagentApprovals: Record<string, SubagentApproval>;
+  // Countdown to the next automatic retry of a transiently-failed turn.
+  retrying: TurnRetrying | null;
+  // A leftover mid-turn crash marker: offer "resume" until any turn runs.
+  interrupted: boolean;
 };
 
 export type ConversationAction =
-  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage; commands?: ExtCommand[]; reasoningEffort?: string | null; subagents?: Record<string, SubagentInfo>; subagentApprovals?: SubagentApproval[] }
+  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage; commands?: ExtCommand[]; reasoningEffort?: string | null; subagents?: Record<string, SubagentInfo>; subagentApprovals?: SubagentApproval[]; retrying?: TurnRetrying | null; interrupted?: boolean }
   | { type: "subagent_approval"; approval: SubagentApproval }
   | { type: "subagent_approval_resolved"; id: string }
   | { type: "model_changed"; model: string }
@@ -234,11 +278,13 @@ export type ConversationAction =
   | { type: "tool_result"; id: string; content: string; error: boolean }
   | { type: "tool_output"; id: string; chunk: string }
   | { type: "approval_request"; id: string }
+  | { type: "approval_resolved"; id: string }
   | { type: "compacted"; coveredThrough: number }
   | { type: "context_usage"; used: number | null; window: number }
   | { type: "user_sent"; text: string; attachments?: MessageAttachment[] }
   | { type: "turn_ended"; reason: string }
   | { type: "turn_failed"; reason: string }
+  | { type: "turn_retrying"; retrying: TurnRetrying }
   | { type: "notice"; tone: "error" | "info"; text: string }
   | { type: "reset" };
 
@@ -248,6 +294,16 @@ export type ConversationAction =
 const MAX_TOOL_OUTPUT = 32_768;
 function capTail(text: string): string {
   return text.length > MAX_TOOL_OUTPUT ? "…\n" + text.slice(-MAX_TOOL_OUTPUT) : text;
+}
+
+// Final tool results are kept in full up to this cap (they render collapsed
+// anyway); past it, keep the head — unlike live output, the beginning of a
+// result is usually the informative part — plus a truncation note.
+const MAX_TOOL_RESULT = 200_000;
+function capResult(text: string): string {
+  return text.length > MAX_TOOL_RESULT
+    ? text.slice(0, MAX_TOOL_RESULT) + "\n…(result truncated in view)"
+    : text;
 }
 
 // Items are a RENDER view of the DB rows: one row can yield 0..N items (an
@@ -325,7 +381,7 @@ function settle(items: ThreadItem[]): ThreadItem[] {
 export function reduce(state: ConversationChannelState, action: ConversationAction): ConversationChannelState {
   switch (action.type) {
     case "reset":
-      return { items: [], status: "connecting", usage: null, model: null, reasoningEffort: null, title: null, commands: [], subagents: {}, subagentApprovals: {} };
+      return { items: [], status: "connecting", usage: null, model: null, reasoningEffort: null, title: null, commands: [], subagents: {}, subagentApprovals: {}, retrying: null, interrupted: false };
 
     case "model_changed":
       return { ...state, model: action.model };
@@ -351,6 +407,12 @@ export function reduce(state: ConversationChannelState, action: ConversationActi
         subagentApprovals: action.subagentApprovals
           ? Object.fromEntries(action.subagentApprovals.map((a) => [a.id, a]))
           : state.subagentApprovals,
+        // `undefined` means the sender didn't include the field (e.g. a
+        // history push) — keep what we have. An explicit null CLEARS it.
+        // `??` would conflate the two and wipe a live countdown ~1 RTT after
+        // every refresh (the get_state pull replaces the join reply).
+        retrying: action.retrying !== undefined ? action.retrying : state.retrying,
+        interrupted: action.interrupted !== undefined ? action.interrupted : state.interrupted,
       };
 
     case "subagents_updated":
@@ -374,6 +436,8 @@ export function reduce(state: ConversationChannelState, action: ConversationActi
       return {
         ...state,
         status: "running",
+        retrying: null,
+        interrupted: false,
         items: [
           ...state.items,
           {
@@ -392,7 +456,7 @@ export function reduce(state: ConversationChannelState, action: ConversationActi
       } else {
         items.push({ kind: "assistant", text: action.text, streaming: true });
       }
-      return { ...state, status: "running", items };
+      return { ...state, status: "running", retrying: null, items };
     }
 
     case "thinking_delta": {
@@ -403,13 +467,14 @@ export function reduce(state: ConversationChannelState, action: ConversationActi
       } else {
         items.push({ kind: "reasoning", text: action.text, streaming: true });
       }
-      return { ...state, status: "running", items };
+      return { ...state, status: "running", retrying: null, items };
     }
 
     case "tool_call":
       return {
         ...state,
         status: "running",
+        retrying: null,
         items: [
           ...settle(state.items),
           { kind: "tool", id: action.id, name: action.name, args: action.args, error: false, running: true },
@@ -422,6 +487,16 @@ export function reduce(state: ConversationChannelState, action: ConversationActi
         items: state.items.map((item) =>
           item.kind === "tool" && item.id === action.id
             ? { ...item, awaitingApproval: true }
+            : item,
+        ),
+      };
+
+    case "approval_resolved":
+      return {
+        ...state,
+        items: state.items.map((item) =>
+          item.kind === "tool" && item.id === action.id
+            ? { ...item, awaitingApproval: false }
             : item,
         ),
       };
@@ -441,7 +516,7 @@ export function reduce(state: ConversationChannelState, action: ConversationActi
         ...state,
         items: state.items.map((item) =>
           item.kind === "tool" && item.id === action.id
-            ? { ...item, content: action.content, error: action.error, running: false, awaitingApproval: false }
+            ? { ...item, content: capResult(action.content), error: action.error, running: false, awaitingApproval: false }
             : item,
         ),
       };
@@ -466,7 +541,7 @@ export function reduce(state: ConversationChannelState, action: ConversationActi
       if (interrupted) {
         items.push({ kind: "notice", tone: "info", text: "Turn interrupted" });
       }
-      return { ...state, items, status: "idle" };
+      return { ...state, items, status: "idle", retrying: null };
     }
 
     case "turn_failed":
@@ -474,7 +549,14 @@ export function reduce(state: ConversationChannelState, action: ConversationActi
         ...state,
         items: [...settle(state.items), { kind: "notice", tone: "error", text: `Turn failed: ${action.reason}` }],
         status: "idle",
+        retrying: null,
       };
+
+    // Backoff countdown before the session's automatic clean retry. The turn
+    // is still considered in flight ("running" keeps Stop available — Stop
+    // cancels the retry server-side).
+    case "turn_retrying":
+      return { ...state, status: "running", retrying: action.retrying, interrupted: false };
 
     case "notice":
       return { ...state, items: [...state.items, { kind: "notice", tone: action.tone, text: action.text }] };
@@ -517,12 +599,14 @@ export function useConversationChannel(conversationId: string | null): Conversat
           reasoningEffort: reply.reasoning_effort,
           commands: reply.commands,
           subagents: reply.subagents,
+          retrying: reply.retrying,
+          interrupted: reply.interrupted,
         });
         // This REPLACED items — replay the mid-turn buffer again (watermark
-        // first) or a pull right after a mid-turn join would wipe the live
-        // view the join just reconstructed.
+        // first, ASSIGNED not maxed — see the join handler) or a pull right
+        // after a mid-turn join would wipe the live view just reconstructed.
         if (typeof reply.live_seq === "number") {
-          entry.lastSeq = Math.max(entry.lastSeq, reply.live_seq);
+          entry.lastSeq = reply.live_seq;
         }
         for (const ev of reply.live ?? []) {
           switch (ev.type) {
@@ -549,6 +633,11 @@ export function useConversationChannel(conversationId: string | null): Conversat
     return () => {
       cancelled = true;
       store.getState().bindChannel(null);
+      // Release the channel: leave the topic and drop the entry. Keeping it
+      // would retain this pane's store via entry.dispatch AND keep a zombie
+      // channel rejoining on every reconnect — one per conversation ever
+      // opened. Re-opening the conversation re-creates and re-joins cleanly.
+      releaseChannel(`conversation:${conversationId}`);
     };
   }, [conversationId, store]);
 

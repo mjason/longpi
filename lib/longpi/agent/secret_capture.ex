@@ -68,6 +68,12 @@ defmodule Longpi.Agent.SecretCapture do
 
   # Anonymous markers get a short random pending handle.
   defp placeholder_name(""), do: "PENDING_" <> (:crypto.strong_rand_bytes(3) |> Base.encode16())
+
+  # A user-typed @@PENDING_FOO=v@@ would collide with the anonymous-handle
+  # namespace: it would be filtered out of secret_env forever while the chat
+  # reports it saved. Treat it as anonymous and let name_secret name it.
+  defp placeholder_name("PENDING_" <> _), do: placeholder_name("")
+
   defp placeholder_name(name), do: name
 
   defp display(""), do: "(unnamed)"

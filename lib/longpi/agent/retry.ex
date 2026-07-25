@@ -44,13 +44,51 @@ defmodule Longpi.Agent.Retry do
   @doc "Backoff delay for a 1-based attempt number: base * 2^(n-1)."
   def backoff_ms(n, base), do: trunc(base * :math.pow(2, n - 1))
 
+  # Ported from pi's battle-tested classifier (retry.ts) — every pattern here
+  # is backed by a real provider/gateway failure mode: mid-stream drops
+  # ("stream ended before message_stop"), proxy wording ("upstream connect",
+  # "Provider returned error"), transport text ("socket hang up"), and the
+  # generic 5xx/overload family.
+  @retryable_text ~r/overloaded|rate.?limit|too many requests|\b(429|500|502|503|504|524)\b|service.?unavailable|server.?error|internal.?error|provider.?returned.?error|network.?error|connection.?(error|refused|lost|reset)|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|socket connection was closed|timed?.?out|timeout|terminated|websocket.?(closed|error)|ended without|stream ended before|http2 request did not get a response|you can retry your request|try your request again|please retry your request|ResourceExhausted/i
+
+  # Account/quota exhaustion looks 429-ish but a retry can never fix it —
+  # these override the retryable patterns (also from pi).
+  @non_retryable_text ~r/insufficient_quota|out of budget|quota exceeded|billing|usage limit reached|available balance/i
+
   @doc "Whether an error looks like a transient failure worth retrying."
   def transient?(reason) do
-    status(reason) in @retryable_status or transport?(reason)
+    not permanent_text?(reason) and
+      (status(reason) in @retryable_status or transport?(reason) or retryable_text?(reason))
   end
 
   defp status(reason) when is_map(reason), do: Map.get(reason, :status)
   defp status(_), do: nil
+
+  defp retryable_text?(reason) do
+    case error_text(reason) do
+      nil -> false
+      text -> Regex.match?(@retryable_text, text)
+    end
+  end
+
+  defp permanent_text?(reason) do
+    case error_text(reason) do
+      nil -> false
+      text -> Regex.match?(@non_retryable_text, text)
+    end
+  end
+
+  # Pull a human-readable message out of the many error shapes req_llm and
+  # transports produce; nil when there is none to classify.
+  defp error_text(reason) when is_binary(reason), do: reason
+  defp error_text(%{message: text}) when is_binary(text), do: text
+  defp error_text(%{reason: text}) when is_binary(text), do: text
+  defp error_text(%{reason: nested}) when is_map(nested), do: error_text(nested)
+
+  defp error_text(%{__struct__: _} = exception) when is_exception(exception),
+    do: Exception.message(exception)
+
+  defp error_text(_), do: nil
 
   defp transport?(reason) when is_atom(reason), do: reason in @transport_reasons
 

@@ -41,7 +41,7 @@ defmodule Longpi.Extensions.Host do
 
   @doc "Tool specs for every extension-registered tool (waits for load)."
   @spec tool_specs(pid()) :: [ToolSpec.t()]
-  def tool_specs(host), do: GenServer.call(host, :tool_specs, 15_000)
+  def tool_specs(host), do: GenServer.call(host, :tool_specs, @call_timeout)
 
   @doc "Runs an extension tool, returning `{:ok, text}`/`{:error, text}`."
   @spec call_tool(pid(), String.t(), map()) :: {:ok, binary()} | {:error, binary()}
@@ -50,7 +50,7 @@ defmodule Longpi.Extensions.Host do
 
   @doc "Extension-registered slash commands as `[%{name, description}]` (waits for load)."
   @spec commands(pid()) :: [map()]
-  def commands(host), do: GenServer.call(host, :commands, 15_000)
+  def commands(host), do: GenServer.call(host, :commands, @call_timeout)
 
   @doc "Runs an extension slash command."
   @spec call_command(pid(), String.t(), map()) :: {:ok, binary()} | {:error, binary()}
@@ -61,9 +61,14 @@ defmodule Longpi.Extensions.Host do
   @spec fire_event(pid(), String.t(), map()) :: :ok
   def fire_event(host, event, payload), do: GenServer.cast(host, {:event, event, payload})
 
-  @doc "Re-discovers and reloads the extensions in place (same runtime)."
+  @doc """
+  Re-discovers and reloads the extensions in place (same runtime). Uses the
+  full call timeout: the load queues behind any in-flight tool call in the
+  runtime's single command queue, and a reload that times out here silently
+  leaves the session with stale specs.
+  """
   @spec reload(pid()) :: [ToolSpec.t()]
-  def reload(host), do: GenServer.call(host, :reload, 15_000)
+  def reload(host), do: GenServer.call(host, :reload, @call_timeout)
 
   @doc "Global + project extension directories, in load order (project wins)."
   @spec extension_dirs(String.t()) :: [String.t()]
@@ -127,6 +132,20 @@ defmodule Longpi.Extensions.Host do
 
   defp builtin_dir, do: Path.join(:code.priv_dir(:longpi), "ext_host/builtin")
 
+  # A file can vanish or lose read permission between the regular? check and
+  # the read (the 400ms reload debounce races the agent's own edits) — and a
+  # raise here kills the host, which is LINKED to the session. Skip it.
+  defp read_source(path) do
+    case File.read(path) do
+      {:ok, source} ->
+        [{path, source}]
+
+      {:error, reason} ->
+        Logger.warning("extensions: cannot read #{path}: #{inspect(reason)}; skipping")
+        []
+    end
+  end
+
   defp collect_dir(dir) do
     case File.ls(dir) do
       {:ok, entries} ->
@@ -135,12 +154,12 @@ defmodule Longpi.Extensions.Host do
 
           cond do
             File.regular?(path) and String.ends_with?(entry, [".tsx", ".ts", ".jsx", ".js", ".mjs"]) ->
-              [{path, File.read!(path)}]
+              read_source(path)
 
             File.dir?(path) ->
               Enum.find_value(["index.tsx", "index.ts", "index.jsx", "index.js"], [], fn index ->
                 index_path = Path.join(path, index)
-                if File.regular?(index_path), do: [{index_path, File.read!(index_path)}]
+                if File.regular?(index_path), do: read_source(index_path)
               end)
 
             true ->
@@ -184,8 +203,8 @@ defmodule Longpi.Extensions.Host do
       :command -> Longpi.Js.call_command(state.instance, id, name, command_arg(args), state.cwd, env)
     end
 
-    watchdog = state.watchdog || Process.send_after(self(), :watchdog, @watchdog_timeout)
-    {:noreply, %{state | next_id: id + 1, pending: Map.put(state.pending, id, from), watchdog: watchdog}}
+    state = arm_watchdog(%{state | next_id: id + 1, pending: Map.put(state.pending, id, from)})
+    {:noreply, state}
   end
 
   # Slash-command args arrive as a bare string ("/cmd the rest").
@@ -195,8 +214,7 @@ defmodule Longpi.Extensions.Host do
   @impl true
   def handle_cast({:event, event, payload}, %{ready?: true} = state) do
     Longpi.Js.fire_event(state.instance, event, payload)
-    watchdog = state.watchdog || Process.send_after(self(), :watchdog, @watchdog_timeout)
-    {:noreply, %{state | events_inflight: state.events_inflight + 1, watchdog: watchdog}}
+    {:noreply, arm_watchdog(%{state | events_inflight: state.events_inflight + 1})}
   end
 
   def handle_cast({:event, _event, _payload}, state), do: {:noreply, state}
@@ -226,13 +244,13 @@ defmodule Longpi.Extensions.Host do
   def handle_info({:js_result, id, call_id, ok, content}, %{id: id} = state) do
     {from, pending} = Map.pop(state.pending, call_id)
     if from, do: GenServer.reply(from, if(ok, do: {:ok, content}, else: {:error, content}))
-    {:noreply, cancel_watchdog(%{state | pending: pending})}
+    {:noreply, settle_watchdog(%{state | pending: pending})}
   end
 
   # A lifecycle event finished on the runtime — one fewer outstanding job.
   def handle_info({:js_event_done, id}, %{id: id} = state) do
     events = max(state.events_inflight - 1, 0)
-    {:noreply, cancel_watchdog(%{state | events_inflight: events})}
+    {:noreply, settle_watchdog(%{state | events_inflight: events})}
   end
 
   def handle_info({:js_event_done, _stale}, state), do: {:noreply, state}
@@ -288,13 +306,16 @@ defmodule Longpi.Extensions.Host do
 
   # A tool call or event outran the watchdog — likely a hot loop. Interrupt the
   # runtime; the interrupted command still reports back and clears its slot.
+  # Re-arm while work remains so a LATER wedged command still has a watchdog
+  # (the interrupted one's report resets the window via settle_watchdog).
   def handle_info(:watchdog, state) do
     if map_size(state.pending) > 0 or state.events_inflight > 0 do
       Logger.warning("extension watchdog fired — interrupting the JS runtime")
       Longpi.Js.interrupt(state.instance)
+      {:noreply, arm_watchdog(%{state | watchdog: nil})}
+    else
+      {:noreply, %{state | watchdog: nil}}
     end
-
-    {:noreply, %{state | watchdog: nil}}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
@@ -308,14 +329,21 @@ defmodule Longpi.Extensions.Host do
     nil
   end
 
-  defp cancel_watchdog(%{watchdog: nil} = state), do: state
+  # The runtime executes commands serially, so "a fresh full window on every
+  # start/finish transition" is equivalent to a per-command watchdog: an old
+  # command's leftover timer can never interrupt a newer one 100ms in, and a
+  # still-pending call after one firing keeps a live watchdog.
+  defp arm_watchdog(state) do
+    cancel_timer(state.watchdog)
+    %{state | watchdog: Process.send_after(self(), :watchdog, @watchdog_timeout)}
+  end
 
-  defp cancel_watchdog(state) do
+  # A command finished: the next queued one (if any) gets its own full window.
+  defp settle_watchdog(state) do
     if map_size(state.pending) == 0 and state.events_inflight == 0 do
-      Process.cancel_timer(state.watchdog)
-      %{state | watchdog: nil}
+      %{state | watchdog: cancel_timer(state.watchdog)}
     else
-      state
+      arm_watchdog(state)
     end
   end
 

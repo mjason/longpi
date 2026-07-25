@@ -35,7 +35,6 @@ defmodule Longpi.Agent.Session do
   @loop_max 50
   # Transient turn failures (gateway 5xx/timeouts/stream drops) auto-retry
   # this many times with backoff before giving up to the manual Retry button.
-  @turn_auto_retries 2
   @loop_done_marker "LOOP_DONE"
 
   alias Longpi.Agent.{
@@ -97,6 +96,15 @@ defmodule Longpi.Agent.Session do
   def messages(session), do: GenServer.call(session, :messages)
 
   def status(session), do: GenServer.call(session, :status)
+
+  @doc "Pending clean-retry countdown (`%{attempt, max, delay_ms, until_ms, reason}`) or nil."
+  def retrying(session), do: GenServer.call(session, :retrying)
+
+  @doc "True when the previous incarnation died mid-turn (resume is available)."
+  def interrupted_turn?(session), do: GenServer.call(session, :interrupted_turn?)
+
+  @doc "Continues an interrupted turn from the checkpointed history (no new message)."
+  def resume(session), do: GenServer.call(session, :resume)
 
   @doc "Answers a pending tool-approval prompt (`call_id`, approved?)."
   def respond_approval(session, call_id, approved?) do
@@ -228,6 +236,11 @@ defmodule Longpi.Agent.Session do
        compaction: load_compaction(opts[:conversation_id]),
        last_input_tokens: nil,
        compaction_task: nil,
+       # A leftover turn-in-flight marker means the previous incarnation died
+       # mid-turn (crash/deploy/power) — the checkpointed history is intact,
+       # so the client can offer "resume".
+       interrupted_turn?:
+         not is_nil(conversation && conversation.turn_started_at) and history != [],
        # Auto-title the conversation after its first turn if it has no title yet.
        needs_title:
          not is_nil(opts[:conversation_id]) and is_nil(conversation && conversation.title),
@@ -266,9 +279,17 @@ defmodule Longpi.Agent.Session do
        auto_continue: nil,
        auto_turns: 0,
        continue_timer: nil,
-       # Consecutive transient turn failures — drives auto-retry with backoff;
-       # cleared by a successful turn or a real user message.
-       turn_retries: 0
+       # Consecutive ZERO-PROGRESS transient failures — drives auto-retry with
+       # backoff; any run that produced messages (and any user message) resets
+       # it, so only a genuinely dead gateway exhausts the budget.
+       turn_retries: 0,
+       # Messages of the CURRENT turn already persisted via the per-iteration
+       # checkpoint — the turn-end handlers drop this many before persisting.
+       turn_persisted: 0,
+       # Pending clean retry: %{attempt, max, delay_ms, until_ms, reason} while
+       # a :retry_turn timer is in flight (surfaced on join for the countdown).
+       retrying: nil,
+       retry_timer: nil
      }, {:continue, :load_extensions}}
   end
 
@@ -393,9 +414,15 @@ defmodule Longpi.Agent.Session do
   end
 
   def handle_call({:send_message, text, attachments}, _from, state) do
-    # A real user message resets the self-driven-turn fuse and takes over any
-    # pending timed wake-up (a surviving loop re-arms after this turn).
-    state = state |> cancel_continue_timer() |> Map.merge(%{auto_turns: 0, turn_retries: 0})
+    # A real user message resets the self-driven-turn fuse, takes over any
+    # pending timed wake-up (a surviving loop re-arms after this turn), and
+    # clears a stale continuation note — re-arming an "[auto-retry] previous
+    # attempt failed" after the USER's successful turn would gaslight the model.
+    state =
+      state
+      |> cancel_continue_timer()
+      |> cancel_retry()
+      |> Map.merge(%{auto_turns: 0, turn_retries: 0, auto_continue: nil})
     user_message = Message.user(text, attachments)
     state = persist(state, [user_message])
     messages = state.messages ++ [user_message]
@@ -458,9 +485,21 @@ defmodule Longpi.Agent.Session do
   end
 
   def handle_call({:edit_last, text, attachments}, _from, state) do
-    # Editing takes over like a fresh user message: a pending timed wake-up
-    # must not fire mid-rewrite (the loop re-arms after this turn).
-    state = cancel_continue_timer(state)
+    # Editing takes over like a fresh user message: cancel a pending timed
+    # wake-up and drop any stale continuation note (the loop re-arms after
+    # this turn).
+    state = %{cancel_retry(cancel_continue_timer(state)) | auto_continue: nil, turn_retries: 0}
+
+    # The edit composer only lets the user change TEXT — when the client sends
+    # no attachments, carry the original message's over instead of silently
+    # dropping its images/files from the re-run.
+    original = Enum.reverse(state.messages) |> Enum.find(&(&1.role == :user))
+
+    attachments =
+      case {attachments, original} do
+        {[], %{attachments: kept}} when is_list(kept) -> kept
+        _ -> attachments
+      end
 
     case truncate_before_last_user(state) do
       {:ok, state} ->
@@ -471,7 +510,7 @@ defmodule Longpi.Agent.Session do
         user_message = Message.user(text, attachments)
         state = persist(state, [user_message])
         state = %{state | messages: state.messages ++ [user_message]}
-        state = notify(state, {:history, broadcast_history(state)})
+        state = notify(state, history_event(state))
         {:reply, :ok, run_turn(state, state.messages)}
 
       :error ->
@@ -485,13 +524,13 @@ defmodule Longpi.Agent.Session do
   end
 
   def handle_call(:regenerate, _from, state) do
-    state = cancel_continue_timer(state)
+    state = %{cancel_retry(cancel_continue_timer(state)) | auto_continue: nil, turn_retries: 0}
 
     case truncate_to_last_user(state) do
       {:ok, state} ->
         # Tell clients to rebuild their view from the truncated history before
         # the new turn streams in.
-        state = notify(state, {:history, broadcast_history(state)})
+        state = notify(state, history_event(state))
         {:reply, :ok, run_turn(state, state.messages)}
 
       :error ->
@@ -508,21 +547,41 @@ defmodule Longpi.Agent.Session do
       |> keep_partial_text()
       # Interrupting also stops self-continuation — the user wants the wheel.
       |> cancel_continue_timer()
-      |> Map.merge(%{status: :idle, task: nil, partial: [], live: [], live_bytes: 0, loop: nil, auto_continue: nil})
+      |> Map.merge(%{status: :idle, task: nil, partial: [], live: [], live_bytes: 0, loop: nil, auto_continue: nil, pending_approvals: %{}, turn_persisted: 0})
 
     state = notify(state, {:turn_ended, :interrupted})
     fire_ext_event(state, "turn_end", %{reason: "interrupted"})
+    state = clear_turn_inflight(state)
     {:reply, :ok, state}
   end
 
   # Idle interrupt: nothing is running, but a timed loop may be waiting for
-  # its next wake-up — "stop" must stop that too, not just a live turn.
+  # its next wake-up — or a retry backoff may be counting down. "Stop" must
+  # stop those too, not just a live turn.
   def handle_call(:interrupt, _from, state) do
-    state = cancel_continue_timer(state)
+    had_retry? = state.retrying != nil
+    state = state |> cancel_continue_timer() |> cancel_retry()
+    # Settle the client's retry countdown the same way a stopped turn settles.
+    state = if had_retry?, do: notify(state, {:turn_ended, :interrupted}), else: state
     {:reply, :ok, touch(%{state | loop: nil, auto_continue: nil})}
   end
 
   def handle_call(:messages, _from, state), do: {:reply, state.messages, state}
+
+  def handle_call(:retrying, _from, state), do: {:reply, state.retrying, state}
+
+  def handle_call(:interrupted_turn?, _from, state), do: {:reply, state.interrupted_turn?, state}
+
+  def handle_call(:resume, _from, %{status: :idle} = state) do
+    # More than just the system message — otherwise there is nothing to run.
+    if length(state.messages) > 1 do
+      {:reply, :ok, run_turn(state, state.messages)}
+    else
+      {:reply, {:error, :nothing_to_resume}, state}
+    end
+  end
+
+  def handle_call(:resume, _from, state), do: {:reply, {:error, :busy}, state}
 
   def handle_call(:status, _from, state), do: {:reply, state.status, state}
 
@@ -775,7 +834,35 @@ defmodule Longpi.Agent.Session do
     {:noreply, notify(state, {:context_usage, context_usage_payload(state)})}
   end
 
-  def handle_info({:turn_event, event}, state) do
+  # A completed iteration (assistant + its tool results): checkpoint it to the
+  # DB immediately — pi's per-message persistence. Whatever kills the rest of
+  # the turn (stream failure, task crash, VM restart), this work is kept, and
+  # the turn-end handlers drop the already-persisted head via turn_persisted.
+  def handle_info({:turn_event, {:iteration_messages, msgs}}, %{status: :running} = state) do
+    state = persist(state, msgs)
+
+    # The checkpoint is a boundary like turn start/end: this iteration's text
+    # now lives in `messages`, so the crash-recovery buffers must restart.
+    # Leaving `partial` full would double-persist the text on a later
+    # interrupt (keep_partial_text), and leaving `live` full would replay
+    # this iteration's events ON TOP of the checkpointed history to a
+    # mid-turn joiner (duplicated tool items).
+    {:noreply,
+     %{
+       state
+       | messages: state.messages ++ msgs,
+         turn_persisted: state.turn_persisted + length(msgs),
+         partial: [],
+         live: [],
+         live_bytes: 0
+     }}
+  end
+
+  # After an interrupt the turn is settled — a straggler checkpoint would
+  # append out of order (keep_partial_text already ran).
+  def handle_info({:turn_event, {:iteration_messages, _msgs}}, state), do: {:noreply, state}
+
+  def handle_info({:turn_event, event}, %{status: :running} = state) do
     fire_tool_hook(state, event)
     state = notify(state, event)
     state = buffer_live(state, event)
@@ -784,6 +871,15 @@ defmodule Longpi.Agent.Session do
       {:text_delta, text} -> {:noreply, %{state | partial: [state.partial | text]}}
       _ -> {:noreply, state}
     end
+  end
+
+  # Events already queued when an interrupt landed: the buffers were just
+  # cleared — folding ghosts back in would replay them to the next joiner.
+  # Extension hooks still fire (the tool genuinely ran); only the UI stream
+  # and replay buffer skip the stale event.
+  def handle_info({:turn_event, event}, state) do
+    fire_tool_hook(state, event)
+    {:noreply, state}
   end
 
   # A tool needs approval: remember who's waiting and prompt the user. A
@@ -837,13 +933,24 @@ defmodule Longpi.Agent.Session do
     end
   end
 
+  def handle_info({:approval_timed_out, call_id}, state) do
+    state = notify(state, {:approval_resolved, call_id})
+    {:noreply, %{state | pending_approvals: Map.delete(state.pending_approvals, call_id)}}
+  end
+
   # Turn task finished
   def handle_info({ref, result}, %{task: %Task{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
-    state = touch(%{state | status: :idle, task: nil, partial: [], live: [], live_bytes: 0})
+    state = touch(%{state | status: :idle, task: nil, partial: [], live: [], live_bytes: 0, pending_approvals: %{}})
+
+    # Completed iterations were already checkpointed as they happened — only
+    # the tail past turn_persisted is new here.
+    already_persisted = state.turn_persisted
+    state = %{state | turn_persisted: 0}
 
     case result do
-      {:ok, new_messages} ->
+      {:ok, all_messages} ->
+        new_messages = Enum.drop(all_messages, already_persisted)
         state = persist(state, new_messages)
         state = %{state | messages: state.messages ++ new_messages}
         # Broadcast the committed history BEFORE turn_ended so any client —
@@ -851,30 +958,34 @@ defmodule Longpi.Agent.Session do
         # converges to the correct, complete messages. (Order matters: the
         # `history` event forces status "running"; the following `turn_ended`
         # settles items and flips to idle.)
-        state = notify(state, {:history, broadcast_history(state)})
+        state = notify(state, history_event(state))
         state = notify(state, {:turn_ended, :complete})
         fire_ext_event(state, "turn_end", %{reason: "complete"})
+        report_gateway(state, :ok)
+        state = clear_turn_inflight(state)
         notify_parent_done(state, :done)
         state = maybe_start_titling(state)
-        state = settle_loop(state, new_messages)
+        state = settle_loop(state, all_messages)
         state = schedule_continue(%{state | turn_retries: 0})
         {:noreply, maybe_start_compaction(state)}
 
-      {:error, :max_iterations, new_messages} when state.auto_turns < @auto_turns_max ->
+      {:error, :max_iterations, all_messages} when state.auto_turns < @auto_turns_max ->
         # NOT a failure: the model was mid-task and ran out of the per-turn
         # tool budget. Persist the progress and self-continue — regenerate
         # would throw away 25 turns of tool work; picking up where it left
         # off is what a human would do. The auto-turn fuse still bounds the
         # total, so a genuinely stuck task ends at the fuse (below clause).
+        new_messages = Enum.drop(all_messages, already_persisted)
         state = persist(state, new_messages)
         state = %{state | messages: state.messages ++ new_messages}
-        state = notify(state, {:history, broadcast_history(state)})
+        state = notify(state, history_event(state))
         state = notify(state, {:turn_ended, :complete})
         fire_ext_event(state, "turn_end", %{reason: "max_iterations"})
 
         state = %{
           state
-          | auto_continue:
+          | turn_retries: 0,
+            auto_continue:
               {"[continue] You hit the per-turn tool-call budget. Pick up exactly " <>
                  "where you left off and finish the task.", 0}
         }
@@ -882,42 +993,67 @@ defmodule Longpi.Agent.Session do
         state = schedule_continue(state)
         {:noreply, maybe_start_compaction(state)}
 
-      {:error, reason, new_messages} ->
-        # Persist a short failure note too: the turn_failed event is transient,
-        # so without it a user who reloads sees their message answered by
-        # nothing at all (the "silent dead turn" report).
-        new_messages = new_messages ++ [failure_note(reason)]
+      {:error, reason, all_messages} ->
+        # Keep whatever the turn produced — but no failure note yet: a retry
+        # is pending, and the failed attempt must stay invisible to the model
+        # (history simply ends at the last completed iteration, so re-running
+        # is a natural continuation — nothing to clean up, unlike pi which
+        # strips the errored message from context).
+        new_messages = Enum.drop(all_messages, already_persisted)
         state = persist(state, new_messages)
         state = %{state | messages: state.messages ++ new_messages}
-        state = notify(state, {:history, broadcast_history(state)})
-        state = notify(state, {:turn_failed, reason})
+        state = if new_messages == [], do: state, else: notify(state, history_event(state))
         fire_ext_event(state, "turn_end", %{reason: "failed"})
 
-        if retryable_turn?(reason) and state.turn_retries < @turn_auto_retries and
-             state.auto_turns < @auto_turns_max do
-          # Transient (gateway 5xx / timeout / stream drop): retry BY
-          # CONTINUATION after a backoff — progress above is kept, unlike
-          # regenerate. The retry cap + auto-turn fuse stop a dead gateway
-          # from burning turns; the manual Retry button remains the fallback.
-          attempt = state.turn_retries + 1
+        # The retry counter only counts CONSECUTIVE ZERO-PROGRESS failures:
+        # a run that got anything done proves the gateway breathes, so the
+        # streak restarts (pi resets on any successful assistant message).
+        progressed? = already_persisted > 0 or new_messages != []
+        streak = if progressed?, do: 0, else: state.turn_retries
+        attempt = streak + 1
+        delays = retry_delays()
 
-          state = %{
-            state
-            | turn_retries: attempt,
-              auto_continue:
-                {"[auto-retry #{attempt}/#{@turn_auto_retries}] The previous attempt " <>
-                   "failed (#{humanize_reason(reason)}). Retry and continue the task, " <>
-                   "reusing any progress above.", retry_delay(attempt)}
+        if retryable_turn?(reason) and attempt <= length(delays) do
+          report_gateway(state, :error)
+          delay = retry_delay_for(state, Enum.at(delays, attempt - 1))
+          timer = Process.send_after(self(), :retry_turn, delay)
+
+          retrying = %{
+            attempt: attempt,
+            max: length(delays),
+            delay_ms: delay,
+            until_ms: System.system_time(:millisecond) + delay,
+            reason: humanize_reason(reason)
           }
 
-          {:noreply, schedule_continue(state)}
+          state = %{state | turn_retries: attempt, retrying: retrying, retry_timer: timer}
+          {:noreply, notify(state, {:turn_retrying, retrying})}
         else
+          # Out of budget or a dead-end error: NOW the failure becomes
+          # visible — persisted note (survives reloads) + turn_failed (the
+          # Retry button). Self-continuation stops; looping onto it repeats it.
+          note = failure_note(reason)
+          state = persist(state, [note])
+          state = %{state | messages: state.messages ++ [note]}
+          state = notify(state, history_event(state))
+          state = notify(state, {:turn_failed, reason})
+          state = clear_turn_inflight(state)
           notify_parent_done(state, {:failed, reason})
-          # A dead-end failure never self-continues — that would loop on it.
-          {:noreply, %{state | loop: nil, auto_continue: nil}}
+          {:noreply, %{state | loop: nil, auto_continue: nil, retrying: nil}}
         end
     end
   end
+
+  # The clean retry: re-run the turn on the checkpointed history — no injected
+  # user message, no failure note; the model sees a context that simply ends
+  # at the last completed iteration. Superseded silently if the user took over
+  # (send_message/edit/regenerate cancel the timer and clear `retrying`).
+  def handle_info(:retry_turn, %{status: :idle, retrying: %{}} = state) do
+    state = %{state | retrying: nil, retry_timer: nil}
+    {:noreply, run_turn(state, state.messages)}
+  end
+
+  def handle_info(:retry_turn, state), do: {:noreply, %{state | retry_timer: nil}}
 
 
   # Self-driven continuation: fires after a completed turn (immediately, or
@@ -991,12 +1127,15 @@ defmodule Longpi.Agent.Session do
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
     state = keep_partial_text(state)
     state = cancel_continue_timer(state)
-    state = %{state | status: :idle, task: nil, partial: [], live: [], live_bytes: 0, loop: nil, auto_continue: nil}
+    # Iterations checkpointed before the crash are already in state.messages —
+    # a crash loses only the in-flight iteration, same as a stream failure.
+    state = %{state | status: :idle, task: nil, partial: [], live: [], live_bytes: 0, loop: nil, auto_continue: nil, pending_approvals: %{}, turn_persisted: 0}
     note = failure_note({:crashed, reason})
     state = persist(state, [note])
     state = %{state | messages: state.messages ++ [note]}
-    state = notify(state, {:history, broadcast_history(state)})
+    state = notify(state, history_event(state))
     state = notify(state, {:turn_failed, {:crashed, reason}})
+    state = clear_turn_inflight(state)
     notify_parent_done(state, {:failed, {:crashed, reason}})
     {:noreply, state}
   end
@@ -1065,6 +1204,9 @@ defmodule Longpi.Agent.Session do
       {handle, %{status: :running} = info} ->
         info = %{info | status: :failed, detail: "session down: #{inspect(reason)}"}
         state = %{state | subagents: Map.put(state.subagents, handle, info)}
+        # A crashed child can never answer its bubbled approval — clearing it
+        # here keeps the parent reapable and retracts the ghost prompt.
+        state = clear_subagent_approvals_for(state, info.conversation_id)
         state = notify_subagents(state)
         {:noreply, maybe_inject_subagent_notice(state, handle, info)}
 
@@ -1115,6 +1257,7 @@ defmodule Longpi.Agent.Session do
       is_nil(state.loop) and
       is_nil(state.auto_continue) and
       is_nil(state.continue_timer) and
+      is_nil(state.retry_timer) and
       map_size(state.watchers) == 0 and
       map_size(state.pending_approvals) == 0 and
       map_size(state.subagent_approvals) == 0 and
@@ -1338,7 +1481,7 @@ defmodule Longpi.Agent.Session do
 
     state = persist(state, [message])
     state = %{state | messages: state.messages ++ [message]}
-    notify(state, {:history, broadcast_history(state)})
+    notify(state, history_event(state))
   end
 
   defp input_tokens(usage) when is_map(usage) do
@@ -1472,13 +1615,22 @@ defmodule Longpi.Agent.Session do
       {live, added} when state.live_bytes + added <= @live_max_bytes ->
         %{state | live: live, live_bytes: state.live_bytes + added}
 
-      {live, added} ->
+      {_live, _added} ->
         # Over the cap: keep recording STRUCTURE (tool calls/results — a late
-        # joiner must not see a stuck spinner), drop further text-ish bulk.
+        # joiner must not see a stuck spinner) but with truncated content;
+        # the history broadcast carries the full truth at turn end.
         case event do
-          {:tool_call, _} -> %{state | live: live, live_bytes: state.live_bytes + added}
-          {:tool_result, _} -> %{state | live: live, live_bytes: state.live_bytes + added}
-          _ -> state
+          {:tool_call, _} = ev ->
+            {live, added} = fold_live(state.live, ev)
+            %{state | live: live, live_bytes: state.live_bytes + added}
+
+          {:tool_result, %{call: call, content: content, error?: error?}} ->
+            truncated = String.slice(content, 0, 2_048) <> "\n[truncated — full result on turn end]"
+            {live, added} = fold_live(state.live, {:tool_result, %{call: call, content: truncated, error?: error?}})
+            %{state | live: live, live_bytes: state.live_bytes + added}
+
+          _ ->
+            state
         end
     end
   end
@@ -1528,7 +1680,7 @@ defmodule Longpi.Agent.Session do
 
   # Failures worth retrying without the user: upstream/gateway trouble, not
   # logic errors. Crashes and unknown atoms stay manual.
-  defp retryable_turn?(%{status: status}) when status >= 500 or status == 429, do: true
+  defp retryable_turn?(%{status: status}) when is_integer(status) and (status >= 500 or status == 429), do: true
   defp retryable_turn?(%{reason: nested}) when is_map(nested), do: retryable_turn?(nested)
 
   defp retryable_turn?(%{reason: text}) when is_binary(text),
@@ -1536,8 +1688,30 @@ defmodule Longpi.Agent.Session do
 
   defp retryable_turn?(reason), do: Longpi.Agent.Retry.transient?(reason)
 
-  defp retry_delay(attempt),
-    do: Application.get_env(:longpi, :turn_retry_delay_ms, 15_000) * attempt
+  # Backoff schedule for clean turn retries: fast first probes (blips), long
+  # tail (real gateway outages). ~7 minutes of total patience by default.
+  defp retry_delays,
+    do: Application.get_env(:longpi, :turn_retry_delays, [2_000, 8_000, 30_000, 90_000, 300_000])
+
+  # The circuit breaker knows how long the gateway has been down ACROSS all
+  # sessions — never probe earlier than it advises.
+  defp retry_delay_for(state, schedule_delay) do
+    max(schedule_delay, Longpi.Agent.GatewayHealth.delay_for(state.model))
+  end
+
+  defp report_gateway(state, verdict) do
+    Longpi.Agent.GatewayHealth.report(state.model, verdict)
+  catch
+    # Health tracking must never take a turn down with it.
+    _, _ -> :ok
+  end
+
+  defp cancel_retry(%{retry_timer: nil, retrying: nil} = state), do: state
+
+  defp cancel_retry(state) do
+    if state.retry_timer, do: Process.cancel_timer(state.retry_timer)
+    %{state | retry_timer: nil, retrying: nil}
+  end
 
   # A compact, persisted record of why the turn died — honest context for both
   # the user (after a reload) and the model (on the next turn).
@@ -1634,7 +1808,7 @@ defmodule Longpi.Agent.Session do
     user_message = Message.user(text, [])
     state = persist(state, [user_message])
     state = %{state | messages: state.messages ++ [user_message]}
-    state = notify(state, {:history, broadcast_history(state)})
+    state = notify(state, history_event(state))
     {:noreply, run_turn(state, state.messages)}
   end
 
@@ -1667,7 +1841,35 @@ defmodule Longpi.Agent.Session do
       end)
 
     fire_ext_event(state, "turn_start", %{})
-    touch(%{state | status: :running, task: task, partial: [], live: [], live_bytes: 0})
+    state = mark_turn_inflight(%{state | interrupted_turn?: false})
+    touch(%{state | status: :running, task: task, partial: [], live: [], live_bytes: 0, turn_persisted: 0})
+  end
+
+  # ── Turn-in-flight marker (crash/restart resume) ─────────────────────
+
+  defp mark_turn_inflight(state), do: put_turn_marker(state, DateTime.utc_now())
+  defp clear_turn_inflight(state), do: put_turn_marker(state, nil)
+
+  # Subagents don't get the marker: their parent coordination dies with the
+  # VM, so a standalone resume of a child conversation is meaningless.
+  defp put_turn_marker(%{conversation_id: nil} = state, _value), do: state
+  defp put_turn_marker(%{parent_session: parent} = state, _value) when not is_nil(parent), do: state
+
+  defp put_turn_marker(state, value) do
+    case Longpi.Agent.get_conversation(state.conversation_id) do
+      {:ok, conversation} ->
+        conversation
+        |> Ash.Changeset.for_update(:set_turn_started, %{turn_started_at: value})
+        |> Ash.update()
+
+      _ ->
+        :ok
+    end
+
+    state
+  rescue
+    # Best-effort bookkeeping — never let it break the turn itself.
+    _ -> state
   end
 
   # ── Context compaction ────────────────────────────────────────────────
@@ -1789,7 +1991,11 @@ defmodule Longpi.Agent.Session do
         receive do
           {:approval_decision, ^ref, decision} -> decision
         after
-          @approval_timeout -> :deny
+          @approval_timeout ->
+            # Unblock as deny AND tell the session to drop the pending entry —
+            # a stranded entry blocks reaping forever and ghosts the prompt.
+            send(session, {:approval_timed_out, call.id})
+            :deny
         end
     end
   end
@@ -1839,6 +2045,13 @@ defmodule Longpi.Agent.Session do
     |> Longpi.Agent.list_messages!()
     |> Enum.filter(&(&1.position > keep_index))
     |> Enum.each(&Ash.destroy!/1)
+  end
+
+  # History pushes carry the session status and pending approvals so a client
+  # rebuilding its view mid-approval (or right after a compaction while idle)
+  # lands in the correct state instead of assuming "running, nothing pending".
+  defp history_event(state) do
+    {:history, broadcast_history(state), state.status, Map.keys(state.pending_approvals)}
   end
 
   defp broadcast_history(state) do

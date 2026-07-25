@@ -124,6 +124,13 @@ defmodule LongpiWeb.ConfigController do
         |> put_status(422)
         |> json(%{error: "name must be a valid environment variable name (A-Z, 0-9, _)"})
 
+      # PENDING_* is the anonymous-capture namespace: a real secret stored
+      # there is filtered out of process.env forever.
+      String.starts_with?(name, "PENDING_") ->
+        conn
+        |> put_status(422)
+        |> json(%{error: "PENDING_ names are reserved for unnamed captured secrets"})
+
       true ->
         case Longpi.Extensions.put_secret(name, value) do
           :ok -> json(conn, %{ok: true})
@@ -187,18 +194,33 @@ defmodule LongpiWeb.ConfigController do
     end
   end
 
+  # Only media renders inline; every other type (html, svg, pdf, xml …) is
+  # forced to a download with a sandboxing CSP. Serving a workspace-written
+  # .html inline would execute agent-authored script on OUR origin — session
+  # cookie and all.
+  @inline_raw_types ~w(image/png image/jpeg image/gif image/webp image/avif
+                       image/bmp video/mp4 video/webm audio/mpeg audio/wav audio/ogg)
+
   def file_raw(conn, %{"path" => path} = params) when is_binary(path) do
     case resolve_file(path, params["cwd"]) do
       {:ok, abs, _stat} ->
-        disposition = if params["download"] in ["1", "true"], do: "attachment", else: "inline"
+        mime = MIME.from_path(abs)
+        inline_ok = mime in @inline_raw_types and params["download"] not in ["1", "true"]
         encoded_name = URI.encode(Path.basename(abs), &URI.char_unreserved?/1)
 
+        {content_type, disposition} =
+          if inline_ok,
+            do: {mime, "inline"},
+            else: {"application/octet-stream", "attachment"}
+
         conn
-        |> put_resp_content_type(MIME.from_path(abs), nil)
+        |> put_resp_content_type(content_type, nil)
         |> put_resp_header(
           "content-disposition",
           "#{disposition}; filename*=UTF-8''#{encoded_name}"
         )
+        |> put_resp_header("x-content-type-options", "nosniff")
+        |> put_resp_header("content-security-policy", "sandbox; default-src 'none'")
         |> send_file(200, abs)
 
       :error ->

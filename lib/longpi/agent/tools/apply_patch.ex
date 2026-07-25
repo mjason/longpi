@@ -71,7 +71,16 @@ defmodule Longpi.Agent.Tools.ApplyPatch do
     cond do
       prefixed?(line, "*** Add File: ") ->
         {body, rest2} = take_section(rest)
-        parse_ops(rest2, [{:add, suffix(line, "*** Add File: "), add_content(body)} | acc])
+
+        case add_content(body) do
+          {:ok, content} ->
+            parse_ops(rest2, [{:add, suffix(line, "*** Add File: "), content} | acc])
+
+          {:error, bad_line} ->
+            {:error,
+             "unexpected line in *** Add File section: #{inspect(bad_line)} — " <>
+               "every added line must start with '+' (use '+' alone for a blank line)"}
+        end
 
       prefixed?(line, "*** Delete File: ") ->
         {_body, rest2} = take_section(rest)
@@ -99,9 +108,25 @@ defmodule Longpi.Agent.Tools.ApplyPatch do
   # Lines up to (but not consuming) the next *** directive.
   defp take_section(lines), do: Enum.split_while(lines, &(not String.starts_with?(&1, "*** ")))
 
+  # '+' lines are content; a bare "" inside the body is a blank line the model
+  # forgot to prefix (trailing blanks are section separators and dropped);
+  # anything else is rejected — silently dropping it would corrupt the file.
   defp add_content(body) do
-    lines = body |> Enum.filter(&String.starts_with?(&1, "+")) |> Enum.map(&strip1/1)
-    if lines == [], do: "", else: Enum.join(lines, "\n") <> "\n"
+    body = body |> Enum.reverse() |> Enum.drop_while(&(&1 == "")) |> Enum.reverse()
+
+    result =
+      Enum.reduce_while(body, {:ok, []}, fn
+        "+" <> _ = line, {:ok, acc} -> {:cont, {:ok, [strip1(line) | acc]}}
+        "", {:ok, acc} -> {:cont, {:ok, ["" | acc]}}
+        line, {:ok, _acc} -> {:halt, {:error, line}}
+      end)
+
+    with {:ok, lines} <- result do
+      case Enum.reverse(lines) do
+        [] -> {:ok, ""}
+        lines -> {:ok, Enum.join(lines, "\n") <> "\n"}
+      end
+    end
   end
 
   defp parse_hunks(body) do
@@ -155,13 +180,26 @@ defmodule Longpi.Agent.Tools.ApplyPatch do
       Enum.reduce_while(ops, {:ok, []}, fn op, {:ok, notes} ->
         case apply_op(op, ctx) do
           {:ok, note} -> {:cont, {:ok, [note | notes]}}
-          {:error, reason} -> {:halt, {:error, reason}}
+          {:error, reason} -> {:halt, {:error, reason, notes}}
         end
       end)
 
     case result do
-      {:ok, notes} -> {:ok, notes |> Enum.reverse() |> Enum.join("\n")}
-      error -> error
+      {:ok, notes} ->
+        {:ok, notes |> Enum.reverse() |> Enum.join("\n")}
+
+      {:error, reason, []} ->
+        {:error, reason}
+
+      # Earlier sections already hit disk; the model must know or it will
+      # re-send the whole patch and double-apply them.
+      {:error, reason, notes} ->
+        applied = notes |> Enum.reverse() |> Enum.join(", ")
+
+        {:error,
+         reason <>
+           "\nNote: earlier sections were already applied (#{applied}) — " <>
+           "fix and re-send only the failed section."}
     end
   end
 

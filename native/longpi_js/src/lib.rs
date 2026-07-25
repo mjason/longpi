@@ -54,7 +54,50 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 // ── TypeScript stripping (oxc) ──────────────────────────────────────────
 
+// oxc's recursive-descent parser recurses per nesting level; pathologically
+// nested source (hundreds of parens/brackets) overflows the thread stack and
+// takes the whole BEAM down with a SIGSEGV that no catch_unwind can stop.
+// Guarded two ways: a cheap depth pre-check rejects absurd nesting outright,
+// and the parse itself runs on a dedicated thread with a large stack so
+// legitimately deep code stays safe.
+const MAX_SOURCE_NESTING: usize = 200;
+
+// Max nesting depth of (/[/{ in the source. Counts brackets inside strings
+// and comments too — a conservative over-count, but 200 real levels is far
+// beyond anything an extension author writes.
+fn max_nesting_depth(source: &str) -> usize {
+    let mut depth: usize = 0;
+    let mut max = 0;
+    for b in source.bytes() {
+        match b {
+            b'(' | b'[' | b'{' => {
+                depth += 1;
+                max = max.max(depth);
+            }
+            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    max
+}
+
 fn strip_ts(source: &str, jsx: bool) -> Result<String, String> {
+    if max_nesting_depth(source) > MAX_SOURCE_NESTING {
+        return Err(format!(
+            "source nested too deeply (>{MAX_SOURCE_NESTING}): refusing to parse"
+        ));
+    }
+    let source = source.to_string();
+    std::thread::Builder::new()
+        .name("longpi-strip-ts".to_string())
+        .stack_size(32 << 20)
+        .spawn(move || strip_ts_inner(&source, jsx))
+        .map_err(|e| format!("strip_ts thread spawn failed: {e}"))?
+        .join()
+        .map_err(|_| "strip_ts panicked".to_string())?
+}
+
+fn strip_ts_inner(source: &str, jsx: bool) -> Result<String, String> {
     use oxc_allocator::Allocator;
     use oxc_codegen::Codegen;
     use oxc_parser::Parser;
@@ -154,6 +197,18 @@ struct ToolEntry {
 struct CommandEntry {
     description: String,
     execute: Persistent<Function<'static>>,
+}
+
+// The extension-API entry points, captured right after the PRELUDE evaluates
+// and then DELETED from globalThis: were they left as writable globals, one
+// extension could replace them and intercept every later extension's
+// registration (rewritten descriptions, substituted execute). eval_extension
+// only ever uses these saved handles.
+struct PreludeFns {
+    make_longpi: Persistent<Function<'static>>,
+    register_tool: Persistent<Function<'static>>,
+    register_command: Persistent<Function<'static>>,
+    on: Persistent<Function<'static>>,
 }
 
 // ── Messaging back to the owner BEAM process ────────────────────────────
@@ -349,7 +404,9 @@ async fn run_instance(
     let http = Rc::new(http);
 
     let req_counter = Arc::new(AtomicU64::new(0));
-    bind_globals(id, &ctx, registry.clone(), http.clone(), owner, pending.clone(), req_counter).await;
+    let prelude =
+        bind_globals(id, &ctx, registry.clone(), http.clone(), owner, pending.clone(), req_counter)
+            .await;
 
     while let Some(cmd) = rx.recv().await {
         interrupt.store(false, Ordering::SeqCst);
@@ -364,7 +421,7 @@ async fn run_instance(
         // Isolate each command: a panic (a resumed rquickjs callback panic, or
         // a bug in ours) is caught here so it kills only this call, never the
         // instance thread — the runtime stays usable for the next command.
-        let outcome = AssertUnwindSafe(handle_command(id, owner, &ctx, &registry, cmd))
+        let outcome = AssertUnwindSafe(handle_command(id, owner, &ctx, &registry, &prelude, cmd))
             .catch_unwind()
             .await;
 
@@ -383,23 +440,37 @@ async fn run_instance(
                     let errors = vec![("<load>".to_string(), "load panicked".to_string())];
                     (atoms::js_loaded(), id, tools, commands, errors).encode(e)
                 }),
+                // A panicked FireEvent must still signal completion, else the
+                // host's events_inflight counter never decrements.
+                Reply::Event => send_to(&owner, move |e| {
+                    (atoms::js_event_done(), id).encode(e)
+                }),
                 Reply::None => {}
             }
         }
 
-        rt.idle().await;
+        // Bounded drain of leftover jobs: idle() runs until ALL pending
+        // futures finish, so a floating setTimeout would stall the queue for
+        // its full delay and a setInterval would wedge it forever. 50ms lets
+        // ordinary microtask/GC work settle; longer-lived timers keep running
+        // and get driven again during the next command.
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(50), rt.idle()).await;
     }
 
     // Drop all Persistent callbacks before the runtime is freed (else QuickJS
     // asserts on a non-empty GC object list at shutdown).
     registry.borrow_mut().clear();
+    drop(prelude);
     drop(ctx);
-    rt.idle().await;
+    // Bounded for the same reason as above: a live setInterval must not keep
+    // this thread (and its 64MB runtime) alive after Stop.
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(100), rt.idle()).await;
 }
 
 enum Reply {
     Call(u64),
     Load,
+    Event,
     None,
 }
 
@@ -410,6 +481,7 @@ impl Command {
                 Reply::Call(*call_id)
             }
             Command::Load { .. } => Reply::Load,
+            Command::FireEvent { .. } => Reply::Event,
             _ => Reply::None,
         }
     }
@@ -422,11 +494,12 @@ async fn handle_command(
     owner: LocalPid,
     ctx: &AsyncContext,
     registry: &Rc<RefCell<Registry>>,
+    prelude: &Option<PreludeFns>,
     cmd: Command,
 ) {
     match cmd {
         Command::Load { extensions, env } => {
-            let errors = load_extensions(ctx, registry, extensions, env).await;
+            let errors = load_extensions(ctx, registry, prelude, extensions, env).await;
             let (tools, commands) = registry_summary(registry);
             send_to(&owner, move |e| {
                 (atoms::js_loaded(), id, tools, commands, errors).encode(e)
@@ -658,13 +731,16 @@ globalThis.fetch = async (url, options = {}) => {
     }
     return new TextEncoder().encode(res.body || "");
   };
+  // A body that rode as base64 (binary or unknown content-type) can still be
+  // read as text — decode the bytes on demand.
+  const toText = () => res.body || (res.bodyB64 ? new TextDecoder().decode(toBytes()) : "");
   return {
     ok: res.status >= 200 && res.status < 300,
     status: res.status,
     statusText: res.statusText || String(res.status),
     headers: { get: (k) => lower[String(k).toLowerCase()] ?? null },
-    text: async () => res.body || "",
-    json: async () => JSON.parse(res.body || "null"),
+    text: async () => toText(),
+    json: async () => JSON.parse(toText() || "null"),
     arrayBuffer: async () => toBytes().buffer,
     bytes: async () => toBytes(),
   };
@@ -693,7 +769,7 @@ async fn bind_globals(
     owner: LocalPid,
     pending: Pending,
     req_counter: Arc<AtomicU64>,
-) {
+) -> Option<PreludeFns> {
     rquickjs::async_with!(ctx => |ctx| {
         let g = ctx.globals();
 
@@ -777,8 +853,24 @@ async fn bind_globals(
         })).ok();
 
         ctx.eval::<(), _>(PRELUDE).ok();
+
+        // Capture the API entry points and delete them from globalThis so no
+        // extension can replace them and intercept another's registration
+        // (see PreludeFns).
+        let capture = |name: &str| -> Option<Persistent<Function<'static>>> {
+            let f: Function = g.get(name).ok()?;
+            let saved = Persistent::save(&ctx, f);
+            let _ = g.remove(name);
+            Some(saved)
+        };
+        Some(PreludeFns {
+            make_longpi: capture("__makeLongpi")?,
+            register_tool: capture("__registerTool")?,
+            register_command: capture("__registerCommand")?,
+            on: capture("__on")?,
+        })
     })
-    .await;
+    .await
 }
 
 async fn apply_env(ctx: &AsyncContext, env: &[(String, String)]) {
@@ -801,11 +893,20 @@ async fn apply_env(ctx: &AsyncContext, env: &[(String, String)]) {
 async fn load_extensions(
     ctx: &AsyncContext,
     registry: &Rc<RefCell<Registry>>,
+    prelude: &Option<PreludeFns>,
     extensions: Vec<(String, String)>,
     env: Vec<(String, String)>,
 ) -> Vec<(String, String)> {
     registry.borrow_mut().clear();
     apply_env(ctx, &env).await;
+
+    let Some(prelude) = prelude else {
+        // bind_globals failed to capture the API — nothing can register.
+        return extensions
+            .into_iter()
+            .map(|(name, _)| (name, "extension API unavailable (prelude failed)".to_string()))
+            .collect();
+    };
 
     let mut errors = Vec::new();
     for (i, (name, source)) in extensions.into_iter().enumerate() {
@@ -815,16 +916,25 @@ async fn load_extensions(
             Err(_) => source, // let QuickJS surface the real syntax error
         };
         let module_name = format!("ext{i}");
-        if let Err(message) = eval_extension(ctx, &module_name, &js).await {
+        if let Err(message) = eval_extension(ctx, prelude, &module_name, &js).await {
             errors.push((name, message));
         }
     }
     errors
 }
 
-async fn eval_extension(ctx: &AsyncContext, module_name: &str, js: &str) -> Result<(), String> {
+async fn eval_extension(
+    ctx: &AsyncContext,
+    prelude: &PreludeFns,
+    module_name: &str,
+    js: &str,
+) -> Result<(), String> {
     let module_name = module_name.to_string();
     let js = js.to_string();
+    let make = prelude.make_longpi.clone();
+    let reg_tool = prelude.register_tool.clone();
+    let reg_cmd = prelude.register_command.clone();
+    let on = prelude.on.clone();
     rquickjs::async_with!(ctx => |ctx| {
         let declared = rquickjs::Module::declare(ctx.clone(), module_name, js)
             .map_err(|e| fmt_err(&ctx, e))?;
@@ -835,11 +945,12 @@ async fn eval_extension(ctx: &AsyncContext, module_name: &str, js: &str) -> Resu
             "extension has no default-exported factory function".to_string()
         })?;
 
-        // Build the `longpi` API object from the bound primitives and pass it in.
-        let make: Function = ctx.globals().get("__makeLongpi").map_err(|e| fmt_err(&ctx, e))?;
-        let reg_tool: Value = ctx.globals().get("__registerTool").map_err(|e| fmt_err(&ctx, e))?;
-        let reg_cmd: Value = ctx.globals().get("__registerCommand").map_err(|e| fmt_err(&ctx, e))?;
-        let on: Value = ctx.globals().get("__on").map_err(|e| fmt_err(&ctx, e))?;
+        // Build the `longpi` API object from the saved handles (never from
+        // globals — extensions must not be able to swap these out).
+        let make = make.restore(&ctx).map_err(|e| fmt_err(&ctx, e))?;
+        let reg_tool = reg_tool.restore(&ctx).map_err(|e| fmt_err(&ctx, e))?;
+        let reg_cmd = reg_cmd.restore(&ctx).map_err(|e| fmt_err(&ctx, e))?;
+        let on = on.restore(&ctx).map_err(|e| fmt_err(&ctx, e))?;
         let longpi: Value = make.call((reg_tool, reg_cmd, on)).map_err(|e| fmt_err(&ctx, e))?;
 
         let result: Value = default.call((longpi,)).map_err(|e| fmt_err(&ctx, e))?;
@@ -948,16 +1059,24 @@ fn to_text<'js>(ctx: &rquickjs::Ctx<'js>, value: Value<'js>) -> rquickjs::Result
         return s.to_string();
     }
     if let Some(obj) = value.as_object() {
-        if let Ok(content) = obj.get::<_, rquickjs::Array>("content") {
-            let mut out = String::new();
-            for item in content.iter::<Object>().flatten() {
-                let ty: String = item.get("type").unwrap_or_default();
-                if ty == "text" {
-                    let text: String = item.get("text").unwrap_or_default();
-                    out.push_str(&text);
+        // Own-property check first: `get` (like JS_HasProperty) walks the
+        // prototype chain, so an extension setting Object.prototype.content
+        // would otherwise rewrite every other tool's output.
+        let has_own_content = obj
+            .own_keys::<String>(rquickjs::Filter::new().string())
+            .any(|k| matches!(k.as_deref(), Ok("content")));
+        if has_own_content {
+            if let Ok(content) = obj.get::<_, rquickjs::Array>("content") {
+                let mut out = String::new();
+                for item in content.iter::<Object>().flatten() {
+                    let ty: String = item.get("type").unwrap_or_default();
+                    if ty == "text" {
+                        let text: String = item.get("text").unwrap_or_default();
+                        out.push_str(&text);
+                    }
                 }
+                return Ok(out);
             }
-            return Ok(out);
         }
     }
     Ok(stringify(ctx, &value).unwrap_or_default())
@@ -1033,18 +1152,27 @@ async fn do_http(client: &reqwest::Client, req_json: &str) -> Result<String, Str
     headers.push('}');
 
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-    let capped = if bytes.len() > HTTP_BODY_CAP {
-        &bytes[..HTTP_BODY_CAP]
-    } else {
-        &bytes[..]
-    };
+    let truncated = bytes.len() > HTTP_BODY_CAP;
+    let capped = if truncated { &bytes[..HTTP_BODY_CAP] } else { &bytes[..] };
 
     // Text responses (by content-type) are decoded to UTF-8 using the declared
     // charset, else UTF-8 if valid, else a detected legacy encoding (GBK/Big5/
     // Shift-JIS/…) — so `res.text()` reads correctly instead of mojibake.
     // Binary responses ride intact as base64 in `bodyB64` for arrayBuffer().
     let (body, body_b64) = if is_textual(&content_type) {
-        (json_string(&decode_text(capped, &content_type)), "null".to_string())
+        // Truncation can cut a multi-byte codepoint in half. When the FULL
+        // body was valid UTF-8, charset detection on the broken slice would
+        // misread the whole body (e.g. as windows-1252) — decode lossily
+        // instead: one U+FFFD at the cut, everything before it intact.
+        let text = if truncated
+            && charset_label(&content_type).is_none()
+            && std::str::from_utf8(&bytes).is_ok()
+        {
+            String::from_utf8_lossy(capped).into_owned()
+        } else {
+            decode_text(capped, &content_type)
+        };
+        (json_string(&text), "null".to_string())
     } else {
         ("\"\"".to_string(), json_string(&base64_encode(capped)))
     };
@@ -1055,10 +1183,12 @@ async fn do_http(client: &reqwest::Client, req_json: &str) -> Result<String, Str
     ))
 }
 
+// An empty/missing content-type is treated as BINARY: decoding unknown bytes
+// as text with no bodyB64 would make arrayBuffer()/bytes() lossy; text() can
+// still decode the bytes on the JS side.
 fn is_textual(content_type: &str) -> bool {
     let ct = content_type.to_ascii_lowercase();
-    ct.is_empty()
-        || ct.starts_with("text/")
+    ct.starts_with("text/")
         || ct.contains("json")
         || ct.contains("xml")
         || ct.contains("javascript")
@@ -1312,7 +1442,29 @@ fn parse_str(c: &mut Vec<char>, p: &mut usize) -> Option<String> {
                         let hex: String = c.get(*p..*p + 4)?.iter().collect();
                         *p += 4;
                         let code = u32::from_str_radix(&hex, 16).ok()?;
-                        out.push(char::from_u32(code).unwrap_or('\u{fffd}'));
+                        if (0xD800..0xDC00).contains(&code) {
+                            // High surrogate: pair it with an immediately
+                            // following \uDC00-\uDFFF escape into one char
+                            // (JSON encodes astral chars as such pairs).
+                            let low = (c.get(*p) == Some(&'\\') && c.get(*p + 1) == Some(&'u'))
+                                .then(|| c.get(*p + 2..*p + 6))
+                                .flatten()
+                                .map(|h| h.iter().collect::<String>())
+                                .and_then(|h| u32::from_str_radix(&h, 16).ok())
+                                .filter(|lo| (0xDC00..0xE000).contains(lo));
+                            match low {
+                                Some(lo) => {
+                                    *p += 6;
+                                    let cp = 0x10000 + ((code - 0xD800) << 10) + (lo - 0xDC00);
+                                    out.push(char::from_u32(cp).unwrap_or('\u{fffd}'));
+                                }
+                                // Lone high surrogate stays U+FFFD.
+                                None => out.push('\u{fffd}'),
+                            }
+                        } else {
+                            // from_u32 rejects lone low surrogates → U+FFFD.
+                            out.push(char::from_u32(code).unwrap_or('\u{fffd}'));
+                        }
                     }
                     other => out.push(*other),
                 }

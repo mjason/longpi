@@ -213,7 +213,7 @@ defmodule Longpi.Agent.SessionPersistenceTest do
     :ok = Session.send_message(session, "first wording")
     # Drain the first turn's convergence broadcast so the post-edit assertion
     # below matches the EDIT's history event, not this one.
-    assert_receive {:agent_event, {:history, _first}}, 2_000
+    assert_receive {:agent_event, {:history, _first, _status1, _pending1}}, 2_000
     assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
 
     # Edit: the LLM must see ONLY the replacement text, not the old wording.
@@ -229,7 +229,7 @@ defmodule Longpi.Agent.SessionPersistenceTest do
     # The history broadcast must ALREADY include the replacement message —
     # the edit flow has no optimistic client add, so broadcasting the
     # truncated list would make the message vanish from the UI.
-    assert_receive {:agent_event, {:history, history}}, 1_000
+    assert_receive {:agent_event, {:history, history, _status2, _pending2}}, 1_000
     assert Enum.any?(history, &(&1.content == "second wording"))
 
     assert_receive {:agent_event, {:turn_ended, :complete}}, 2_000
@@ -252,4 +252,58 @@ defmodule Longpi.Agent.SessionPersistenceTest do
     GenServer.stop(session)
   end
 
+  test "a crashed run leaves the turn marker; resume continues from the checkpointed history",
+       %{conversation: conversation} do
+    session = start_session(conversation)
+
+    # A turn that checkpoints one iteration and then dies hard (task crash —
+    # the VM-restart case behaves the same: the marker survives in the DB).
+    call = %{id: "rz1", name: "ls", args: %{}}
+
+    LLMMock
+    |> expect(:stream, fn _, _, _, _, _ -> {:ok, %{text: "", tool_calls: [call]}} end)
+    |> expect(:stream, fn _, _, _, _, _ -> raise "gateway process died" end)
+
+    :ok = Session.send_message(session, "long job")
+    assert_receive {:agent_event, {:turn_failed, {:crashed, _}}}, 3_000
+    # The DOWN handler clears the marker AFTER notifying — a sync call
+    # guarantees it finished before we plant the crash-leftover marker below.
+    :idle = Session.status(session)
+
+    # Simulate the crash having killed the whole session BEFORE it could
+    # clear the marker (a real crash/deploy skips clear_turn_inflight).
+    {:ok, record} = Longpi.Agent.get_conversation(conversation.id)
+
+    record
+    |> Ash.Changeset.for_update(:set_turn_started, %{turn_started_at: DateTime.utc_now()})
+    |> Ash.update!()
+
+    GenServer.stop(session)
+
+    # The fresh incarnation sees the leftover marker and offers resume.
+    revived = start_session(conversation)
+    assert Session.interrupted_turn?(revived)
+
+    expect(LLMMock, :stream, fn _, messages, _, _, _ ->
+      # The checkpointed iteration (assistant + tool result) IS the context.
+      assert Enum.any?(messages, &(&1.role == :tool))
+      {:ok, %{text: "picked up where we left off", tool_calls: []}}
+    end)
+
+    assert :ok = Session.resume(revived)
+    assert_receive {:agent_event, {:turn_ended, :complete}}, 3_000
+
+    refute Session.interrupted_turn?(revived)
+    # The marker is cleared once the resumed turn settles.
+    {:ok, settled} = Longpi.Agent.get_conversation(conversation.id)
+    assert settled.turn_started_at == nil
+
+    GenServer.stop(revived)
+  end
+
+  test "resume with nothing to run refuses cleanly", %{conversation: conversation} do
+    session = start_session(conversation)
+    assert {:error, :nothing_to_resume} = Session.resume(session)
+    GenServer.stop(session)
+  end
 end

@@ -56,6 +56,14 @@ defmodule Longpi.Agent.Conversation do
       primary? true
       accept [:title, :model, :system_prompt, :reasoning_effort]
     end
+
+    # Turn-in-flight marker: set when a turn starts, cleared when it settles.
+    # A non-nil value at session load means the previous run died mid-turn
+    # (crash, deploy, power loss) — the UI offers to resume from the
+    # checkpointed history.
+    update :set_turn_started do
+      accept [:turn_started_at]
+    end
   end
 
   attributes do
@@ -93,6 +101,11 @@ defmodule Longpi.Agent.Conversation do
     # "worker", …) this child was spawned as. nil = a normal top-level
     # conversation.
     attribute :agent_role, :string do
+      public? true
+    end
+
+    # See the :set_turn_started action.
+    attribute :turn_started_at, :utc_datetime_usec do
       public? true
     end
 

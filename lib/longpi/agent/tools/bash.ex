@@ -61,7 +61,7 @@ defmodule Longpi.Agent.Tools.Bash do
 
     case Longpi.Shell.start(args.command, opts) do
       {:ok, _pid} ->
-        case collect(ref, ctx[:progress]) do
+        case collect(ref, ctx[:progress], opts[:timeout_ms] + 10_000) do
           {:ok, result} -> {:ok, format(result)}
           {:error, reason} -> {:error, "shell execution failed: #{inspect(reason)}"}
         end
@@ -74,17 +74,22 @@ defmodule Longpi.Agent.Tools.Bash do
   # Forward each output chunk to the progress callback (live UI), then return
   # the final result. Running inside the turn task means an interrupt kills this
   # receive and, via the owner monitor, the shim.
-  defp collect(ref, progress) do
+  # The deadline backstops a lost shim: the Rust side enforces timeout_ms
+  # itself, so this only fires if the shim died without a :shell_exit /
+  # :shell_error (otherwise the turn would block on this receive forever).
+  defp collect(ref, progress, deadline_ms) do
     receive do
       {:shell_output, ^ref, chunk} ->
         if is_function(progress, 1), do: progress.(chunk)
-        collect(ref, progress)
+        collect(ref, progress, deadline_ms)
 
       {:shell_exit, ^ref, result} ->
         {:ok, result}
 
       {:shell_error, ^ref, reason} ->
         {:error, reason}
+    after
+      deadline_ms -> {:error, :shell_lost}
     end
   end
 
@@ -127,7 +132,7 @@ defmodule Longpi.Agent.Tools.Bash do
   end
 
   defp tail_note(%{tail: tail}) when is_binary(tail) and tail != "",
-    do: "; final output:\n#{tail}"
+    do: "; final output:\n#{strip_terminal_noise(tail)}"
 
   defp tail_note(_result), do: ""
 end

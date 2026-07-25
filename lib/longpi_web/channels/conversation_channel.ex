@@ -13,6 +13,10 @@ defmodule LongpiWeb.ConversationChannel do
 
   alias Longpi.Agent.{Session, Sessions}
 
+  # A message is typed prose (attachments carry the bulk); anything past this
+  # is a runaway client and would bloat every future model request.
+  @max_message_bytes 1_000_000
+
   @impl true
   def join("conversation:" <> conversation_id, _payload, socket) do
     case Sessions.ensure_started(conversation_id) do
@@ -44,6 +48,11 @@ defmodule LongpiWeb.ConversationChannel do
           live_seq: live.seq,
           status: Session.status(session),
           pending_approvals: Session.pending_approvals(session),
+          # Countdown survives a page refresh (unlike event-stream-only UIs):
+          # the retry state lives in the session, so a fresh join re-renders it.
+          retrying: Session.retrying(session),
+          # Previous incarnation died mid-turn → the client offers "resume".
+          interrupted: Session.interrupted_turn?(session),
           context_usage: Session.context_usage(session),
           reasoning_effort: Session.reasoning_effort(session),
           commands: ext.commands,
@@ -59,7 +68,8 @@ defmodule LongpiWeb.ConversationChannel do
   end
 
   @impl true
-  def handle_in("send_message", %{"text" => text} = payload, socket) do
+  def handle_in("send_message", %{"text" => text} = payload, socket)
+      when is_binary(text) and byte_size(text) <= @max_message_bytes do
     attachments = sanitize_attachments(payload["attachments"])
     # Out-of-band secrets: @@NAME=value@@ markers are stored server-side and
     # replaced with placeholders BEFORE the session (history/DB/model) sees the
@@ -77,7 +87,8 @@ defmodule LongpiWeb.ConversationChannel do
     {:reply, :ok, socket}
   end
 
-  def handle_in("edit_last", %{"text" => text} = payload, socket) do
+  def handle_in("edit_last", %{"text" => text} = payload, socket)
+      when is_binary(text) and byte_size(text) <= @max_message_bytes do
     attachments = sanitize_attachments(payload["attachments"])
     {text, _names} = Longpi.Agent.SecretCapture.capture(text)
 
@@ -88,8 +99,23 @@ defmodule LongpiWeb.ConversationChannel do
     end
   end
 
+  # Non-binary or oversized text: reject instead of crashing the channel.
+  def handle_in(event, %{"text" => _}, socket) when event in ["send_message", "edit_last"] do
+    {:reply, {:error, %{reason: "message text must be a string under #{@max_message_bytes} bytes"}},
+     socket}
+  end
+
   def handle_in("regenerate", _payload, socket) do
     case Session.regenerate(socket.assigns.session) do
+      :ok -> {:reply, :ok, socket}
+      {:error, reason} -> {:reply, {:error, %{reason: to_string(reason)}}, socket}
+    end
+  end
+
+  # Continue an interrupted turn from the checkpointed history — no new
+  # message, the model just picks up where the last completed iteration ended.
+  def handle_in("resume", _payload, socket) do
+    case Session.resume(socket.assigns.session) do
       :ok -> {:reply, :ok, socket}
       {:error, reason} -> {:reply, {:error, %{reason: to_string(reason)}}, socket}
     end
@@ -262,6 +288,8 @@ defmodule LongpiWeb.ConversationChannel do
       live_seq: live.seq,
       status: Session.status(session),
       pending_approvals: Session.pending_approvals(session),
+      retrying: Session.retrying(session),
+      interrupted: Session.interrupted_turn?(session),
       context_usage: Session.context_usage(session),
       reasoning_effort: Session.reasoning_effort(session),
       commands: Session.ext_info(session).commands,
@@ -326,15 +354,26 @@ defmodule LongpiWeb.ConversationChannel do
 
   defp serialize_event({:commands, commands}), do: {"commands", %{commands: commands}}
 
-  defp serialize_event({:history, messages}),
-    do: {"history", %{messages: Enum.map(messages, &serialize_message/1)}}
+  defp serialize_event({:history, messages, status, pending}),
+    do:
+      {"history",
+       %{
+         messages: Enum.map(messages, &serialize_message/1),
+         status: status,
+         pending_approvals: pending
+       }}
 
   defp serialize_event({:turn_ended, reason}), do: {"turn_ended", %{reason: to_string(reason)}}
+
+  defp serialize_event({:turn_retrying, retrying}), do: {"turn_retrying", retrying}
 
   defp serialize_event({:turn_failed, reason}),
     do: {"turn_failed", %{reason: inspect(reason)}}
 
   defp serialize_event({:loop_ended, reason}), do: {"loop_ended", %{reason: to_string(reason)}}
+
+  defp serialize_event({:approval_resolved, call_id}),
+    do: {"approval_resolved", %{id: call_id}}
 
   defp serialize_event(_event), do: nil
 
@@ -449,7 +488,7 @@ defmodule LongpiWeb.ConversationChannel do
          match?({:ok, _}, Base.decode64(data)) do
       %{
         "type" => "image",
-        "name" => to_string(a["name"] || "image"),
+        "name" => attachment_name(a["name"], "image"),
         "media_type" => media_type,
         "data" => data
       }
@@ -459,9 +498,15 @@ defmodule LongpiWeb.ConversationChannel do
   defp normalize_attachment(%{"type" => "file", "text" => text} = attachment)
        when is_binary(text) do
     if byte_size(text) <= @max_text_bytes do
-      %{"type" => "file", "name" => to_string(attachment["name"] || "file"), "text" => text}
+      %{"type" => "file", "name" => attachment_name(attachment["name"], "file"), "text" => text}
     end
   end
 
   defp normalize_attachment(_), do: nil
+
+  # to_string/1 raises on a map/list from a hostile payload.
+  defp attachment_name(name, _fallback) when is_binary(name) and name != "",
+    do: String.slice(name, 0, 255)
+
+  defp attachment_name(_name, fallback), do: fallback
 end

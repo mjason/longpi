@@ -48,4 +48,18 @@ defmodule Longpi.Updater.Release do
   end
 
   def asset_url(_release, _platform), do: {:error, "malformed release payload"}
+
+  @doc "Download URL of the tarball's `.sha256` companion asset."
+  def checksum_url(release, platform \\ platform())
+
+  def checksum_url(%{"assets" => assets, "tag_name" => tag}, platform) when is_list(assets) do
+    suffix = asset_suffix(platform) <> ".sha256"
+
+    case Enum.find(assets, &String.ends_with?(&1["name"] || "", suffix)) do
+      %{"browser_download_url" => url} -> {:ok, url}
+      _ -> {:error, "release #{tag} has no #{suffix} asset"}
+    end
+  end
+
+  def checksum_url(_release, _platform), do: {:error, "malformed release payload"}
 end

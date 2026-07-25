@@ -14,7 +14,11 @@ defmodule Longpi.Agent.ContextWindowTest do
   end
 
   test "falls back to the default for unknown gateway models" do
-    assert ContextWindow.for_model("openai:some-gateway-only-model") == 128_000
+    # A unique spec per run: the resolution is memoized in persistent_term and
+    # req_llm's model registry is global, so a fixed name could be polluted by
+    # whatever an earlier test resolved under it.
+    spec = "openai:gateway-only-#{System.unique_integer([:positive])}"
+    assert ContextWindow.for_model(spec) == 128_000
   end
 
   test "threshold is the window times the ratio" do
