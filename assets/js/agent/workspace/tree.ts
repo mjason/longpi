@@ -58,6 +58,15 @@ export function buildTreeRows(
     }
   };
 
-  walk(rootPath, 0);
+  // The server normalizes paths (Path.expand strips trailing slashes), so
+  // listings are keyed as "/a/b" even when the conversation cwd is "/a/b/".
+  // Normalize the root so the lookup matches — otherwise the tree renders
+  // empty for any cwd with a trailing slash.
+  walk(normalizeDir(rootPath), 0);
   return rows;
+}
+
+/** Strip trailing slashes to match the server's Path.expand normalization. */
+export function normalizeDir(path: string): string {
+  return path.replace(/\/+$/, "") || "/";
 }

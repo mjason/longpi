@@ -53,6 +53,12 @@ describe("buildTreeRows", () => {
     expect(joinPath("/a/", "b")).toBe("/a/b");
     expect(joinPath("/a", "b")).toBe("/a/b");
   });
+
+  it("a trailing-slash root still finds its listing (server normalizes paths)", () => {
+    // cwd "/w/" but the server keyed the listing as "/w".
+    const rows = buildTreeRows("/w/", listings, new Set(), false);
+    expect(rows.some((r) => r.kind === "file" && r.path === "/w/a.txt")).toBe(true);
+  });
 });
 
 describe("buildGitDecorations", () => {
