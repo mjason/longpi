@@ -3,6 +3,8 @@ import {
   ChevronRight,
   Folder,
   FolderOpen,
+  FolderTree,
+  GitBranch,
   Layers,
   Loader2,
   Menu,
@@ -68,6 +70,12 @@ import {
 import { Sheet, SheetContent, SheetTitle } from "../components/ui/sheet";
 import { CONVERSATION_FIELDS, type ConversationSummary } from "./types";
 import { UpdateCheck } from "./UpdateCheck";
+import {
+  loadWorkspaceTab,
+  storeWorkspaceTab,
+  WorkspacePanel,
+  type WorkspaceTab,
+} from "./workspace/WorkspacePanel";
 
 export const DEFAULT_MODEL = "openai:gpt-5.4";
 
@@ -340,6 +348,7 @@ export default function ChatApp() {
           <ConversationPane
             key={selected.id}
             conversation={selected}
+            workspacePanel
             onModelChanged={(id, model) =>
               setConversations((prev) =>
                 prev.map((c) => (c.id === id ? { ...c, model } : c)),
@@ -782,6 +791,7 @@ export function ConversationPane({
   bare,
   onForked,
   onOpenConversation,
+  workspacePanel,
 }: {
   conversation: ConversationSummary;
   onModelChanged: (id: string, model: string) => void;
@@ -797,12 +807,26 @@ export function ConversationPane({
   onForked?: (fork: { id: string; cwd: string; model: string; title: string | null }) => void;
   /** Open another conversation (subagent chips); default opens a new tab. */
   onOpenConversation?: (id: string) => void;
+  /** Show the workspace sidebar toggles (file tree + git panel). */
+  workspacePanel?: boolean;
 }) {
   // One zustand store is the single source of truth for this conversation's
   // live state (see agent/store.ts). It replaces the former reducer + eight
   // Provider pyramid; components read slices via useConversationStore.
   const store = useConversationChannel(conversation.id);
   const { runtime } = useChannelRuntime(store, conversation.model, threadList);
+
+  // Workspace sidebar (file tree / git panel) — mutually exclusive tabs,
+  // choice persisted per browser like dala's drawer state.
+  const [wsTab, setWsTab] = useState<WorkspaceTab | null>(() =>
+    workspacePanel ? loadWorkspaceTab() : null,
+  );
+
+  const toggleWsTab = (tab: WorkspaceTab) => {
+    const next = wsTab === tab ? null : tab;
+    setWsTab(next);
+    storeWorkspaceTab(next);
+  };
 
   const compactionCount = useStore(store, selectCompactionCount);
   // The toast only needs the LAST notice. Subscribing to the whole notices
@@ -906,6 +930,30 @@ export function ConversationPane({
             </Badge>
           )}
           {headerExtra}
+          {workspacePanel && (
+            <div className="flex items-center gap-0.5">
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("size-8", wsTab === "files" && "bg-accent")}
+                aria-label={t("ws.files")}
+                title={t("ws.files")}
+                onClick={() => toggleWsTab("files")}
+              >
+                <FolderTree className="size-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("size-8", wsTab === "git" && "bg-accent")}
+                aria-label={t("ws.git")}
+                title={t("ws.git")}
+                onClick={() => toggleWsTab("git")}
+              >
+                <GitBranch className="size-4" />
+              </Button>
+            </div>
+          )}
         </header>
         )}
 
@@ -943,9 +991,14 @@ export function ConversationPane({
           }
         />
 
-        <div className="min-h-0 flex-1">
-          <ForkPrefill conversationId={conversation.id} />
-          <Thread />
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <div className="min-h-0 min-w-0 flex-1">
+            <ForkPrefill conversationId={conversation.id} />
+            <Thread />
+          </div>
+          {workspacePanel && wsTab && (
+            <WorkspacePanel cwd={conversation.cwd} tab={wsTab} onClose={() => toggleWsTab(wsTab)} />
+          )}
         </div>
 
         {toast && (

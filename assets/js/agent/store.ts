@@ -57,6 +57,8 @@ export type ConversationState = ConversationChannelState & {
   regenerate: () => void;
   // Continue an interrupted (crashed/restarted) turn from the saved history.
   resume: () => void;
+  // Cancel a running explicit /loop (the banner's Cancel button).
+  stopLoop: () => void;
   editLast: (text: string, attachments?: MessageAttachment[]) => void;
   respondApproval: (id: string, approved: boolean) => void;
   runCommand: (name: string, arg?: string) => void;
@@ -77,6 +79,7 @@ const INITIAL: ConversationChannelState = {
   subagentApprovals: {},
   retrying: null,
   interrupted: false,
+  loop: null,
 };
 
 export type ConversationStore = ReturnType<typeof createConversationStore>;
@@ -142,6 +145,8 @@ export function createConversationStore() {
       regenerate: () => push("regenerate", {}),
 
       resume: () => push("resume", {}),
+
+      stopLoop: () => channel?.push("command", { name: "loop", arg: "stop" }),
 
       editLast: (text, attachments = []) => push("edit_last", { text, attachments }),
 

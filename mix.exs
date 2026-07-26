@@ -4,7 +4,7 @@ defmodule Longpi.MixProject do
   def project do
     [
       app: :longpi,
-      version: "0.1.74",
+      version: "0.1.75",
       elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -100,6 +100,9 @@ defmodule Longpi.MixProject do
       {:swoosh, "~> 1.16"},
       {:req, "~> 0.5"},
       {:rustler, "~> 0.36", runtime: false},
+      # Precompiled libgit2 NIF (our own, extracted from the workspace git
+      # panel) — ships prebuilt .so from GitHub releases, no cargo build.
+      {:git2ex, github: "mjason/git2ex"},
       {:req_llm, "~> 1.17"},
       # req_llm's websocket streaming needs this at compile time
       {:websockex, "~> 0.5"},

@@ -256,6 +256,11 @@ defmodule LongpiWeb.ConversationChannel do
   #   * `retrying`: the countdown survives a refresh — it lives in the
   #     session, not just the event stream.
   #   * `interrupted`: the previous incarnation died mid-turn → offer resume.
+  defp loop_reply(nil), do: %{running: false}
+
+  defp loop_reply(%{done: done, total: total, every_ms: every_ms}),
+    do: %{running: true, done: done, total: total, every_ms: every_ms}
+
   defp state_reply(snap) do
     %{
       messages:
@@ -265,6 +270,9 @@ defmodule LongpiWeb.ConversationChannel do
       live: snap.live.events,
       live_seq: snap.live.seq,
       status: snap.status,
+      # Same shape as the loop_status push event, so the client reads `running`
+      # identically whether it arrives live or on the join reply.
+      loop: loop_reply(snap.loop),
       pending_approvals: snap.pending_approvals,
       retrying: snap.retrying,
       interrupted: snap.interrupted,
@@ -347,6 +355,10 @@ defmodule LongpiWeb.ConversationChannel do
     do: {"turn_failed", %{reason: inspect(reason)}}
 
   defp serialize_event({:loop_ended, reason}), do: {"loop_ended", %{reason: to_string(reason)}}
+
+  # Same wire shape as the join reply's `loop` field (loop_reply/1), so a live
+  # push and a refresh reconstruct identically — one transform, not two.
+  defp serialize_event({:loop_status, loop}), do: {"loop_status", loop_reply(loop)}
 
   defp serialize_event({:approval_resolved, call_id}),
     do: {"approval_resolved", %{id: call_id}}

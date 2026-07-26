@@ -91,6 +91,18 @@ defmodule Longpi.Agent.RetryTest do
       assert Retry.transient?(%{reason: :econnrefused})
     end
 
+    test "true for a mid-stream Finch/Mint transport close (the real req_llm shape)" do
+      assert Retry.transient?(%Finch.TransportError{reason: :closed})
+
+      assert Retry.transient?(%Finch.TransportError{
+               reason: :closed,
+               source: %Mint.TransportError{reason: :closed}
+             })
+
+      # Even if it arrives pre-stringified.
+      assert Retry.transient?(%{message: "Stream failed: transport error: connection closed"})
+    end
+
     test "false for unknown errors" do
       refute Retry.transient?(:something_else)
       refute Retry.transient?(%{reason: :bad_request})

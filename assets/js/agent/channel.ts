@@ -139,6 +139,16 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
   channel.on("turn_retrying", (p: TurnRetrying & { seq?: number }) =>
     once(e, p.seq, () => e.dispatch({ type: "turn_retrying", retrying: p })),
   );
+  channel.on(
+    "loop_status",
+    (p: { running: boolean; done?: number; total?: number; every_ms?: number; seq?: number }) =>
+      once(e, p.seq, () =>
+        e.dispatch({
+          type: "loop_status",
+          loop: loopFromWire(p),
+        }),
+      ),
+  );
 
   // Replay mid-turn events from the join reply through the SAME reducer paths
   // as live pushes — a refresh mid-turn reconstructs text, thinking, and
@@ -169,7 +179,7 @@ function acquireChannel(topic: string, dispatch: Dispatch): ChannelEntry {
     channel
       .join()
       .receive("ok", (reply: JoinReply) => {
-        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands, subagents: reply.subagents, subagentApprovals: reply.subagent_approvals, retrying: reply.retrying, interrupted: reply.interrupted });
+        e.dispatch({ type: "joined", messages: reply.messages, status: reply.status, pending: reply.pending_approvals, usage: reply.context_usage, reasoningEffort: reply.reasoning_effort, commands: reply.commands, subagents: reply.subagents, subagentApprovals: reply.subagent_approvals, retrying: reply.retrying, interrupted: reply.interrupted, loop: loopFromWire(reply.loop) });
         // Watermark BEFORE replay: pushes emitted while the join reply was
         // being assembled are inside `live` — dropping seq <= live_seq stops
         // them from appending twice. ASSIGN, don't max: the session process
@@ -195,6 +205,16 @@ export type ContextUsage = { used: number | null; window: number };
 // A pending clean retry: the session re-runs the turn from the checkpointed
 // history after the countdown — surfaced so the UI can show it (and a page
 // refresh re-reads it from the join reply, not just the event stream).
+export type LoopStatus = { done: number; total: number; everyMs: number };
+
+// Wire loop shape ({running, done, total, every_ms}) → client LoopStatus (null
+// when not running). Shared by the live push and both join/get_state replies so
+// the mapping and the every_ms→everyMs rename live in one place.
+type WireLoop = { running: boolean; done?: number; total?: number; every_ms?: number };
+export function loopFromWire(l?: WireLoop | null): LoopStatus | null {
+  return l && l.running ? { done: l.done ?? 0, total: l.total ?? 0, everyMs: l.every_ms ?? 0 } : null;
+}
+
 export type TurnRetrying = {
   attempt: number;
   max: number;
@@ -239,6 +259,8 @@ type JoinReply = {
   retrying?: TurnRetrying | null;
   // The previous server incarnation died mid-turn; resume is available.
   interrupted?: boolean;
+  // An explicit /loop currently running (null when none) — survives refresh.
+  loop?: { running: boolean; done: number; total: number; every_ms: number } | null;
 };
 
 export type ConversationChannelState = {
@@ -261,10 +283,12 @@ export type ConversationChannelState = {
   retrying: TurnRetrying | null;
   // A leftover mid-turn crash marker: offer "resume" until any turn runs.
   interrupted: boolean;
+  // A running explicit /loop (progress for the banner), or null.
+  loop: LoopStatus | null;
 };
 
 export type ConversationAction =
-  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage; commands?: ExtCommand[]; reasoningEffort?: string | null; subagents?: Record<string, SubagentInfo>; subagentApprovals?: SubagentApproval[]; retrying?: TurnRetrying | null; interrupted?: boolean }
+  | { type: "joined"; messages: HistoryMessage[]; status: string; pending?: string[]; usage?: ContextUsage; commands?: ExtCommand[]; reasoningEffort?: string | null; subagents?: Record<string, SubagentInfo>; subagentApprovals?: SubagentApproval[]; retrying?: TurnRetrying | null; interrupted?: boolean; loop?: LoopStatus | null }
   | { type: "subagent_approval"; approval: SubagentApproval }
   | { type: "subagent_approval_resolved"; id: string }
   | { type: "model_changed"; model: string }
@@ -285,6 +309,7 @@ export type ConversationAction =
   | { type: "turn_ended"; reason: string }
   | { type: "turn_failed"; reason: string }
   | { type: "turn_retrying"; retrying: TurnRetrying }
+  | { type: "loop_status"; loop: LoopStatus | null }
   | { type: "notice"; tone: "error" | "info"; text: string }
   | { type: "reset" };
 
@@ -413,7 +438,7 @@ function settle(items: ThreadItem[]): ThreadItem[] {
 export function reduce(state: ConversationChannelState, action: ConversationAction): ConversationChannelState {
   switch (action.type) {
     case "reset":
-      return { items: [], status: "connecting", usage: null, model: null, reasoningEffort: null, title: null, commands: [], subagents: {}, subagentApprovals: {}, retrying: null, interrupted: false };
+      return { items: [], status: "connecting", usage: null, model: null, reasoningEffort: null, title: null, commands: [], subagents: {}, subagentApprovals: {}, retrying: null, interrupted: false, loop: null };
 
     case "model_changed":
       return { ...state, model: action.model };
@@ -445,6 +470,7 @@ export function reduce(state: ConversationChannelState, action: ConversationActi
         // every refresh (the get_state pull replaces the join reply).
         retrying: action.retrying !== undefined ? action.retrying : state.retrying,
         interrupted: action.interrupted !== undefined ? action.interrupted : state.interrupted,
+        loop: action.loop !== undefined ? action.loop : state.loop,
       };
 
     case "subagents_updated":
@@ -590,6 +616,9 @@ export function reduce(state: ConversationChannelState, action: ConversationActi
     case "turn_retrying":
       return { ...state, status: "running", retrying: action.retrying, interrupted: false };
 
+    case "loop_status":
+      return { ...state, loop: action.loop };
+
     case "notice":
       return { ...state, items: [...state.items, { kind: "notice", tone: action.tone, text: action.text }] };
   }
@@ -633,6 +662,7 @@ export function useConversationChannel(conversationId: string | null): Conversat
           subagents: reply.subagents,
           retrying: reply.retrying,
           interrupted: reply.interrupted,
+          loop: loopFromWire(reply.loop),
         });
         // This REPLACED items — replay the mid-turn buffer again (watermark
         // first, ASSIGNED not maxed — see the join handler) or a pull right

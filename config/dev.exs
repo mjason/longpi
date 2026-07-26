@@ -23,7 +23,12 @@ config :longpi, LongpiWeb.Endpoint,
   debug_errors: true,
   secret_key_base: "z+mX5Dv1XqwWrBaATg/cfezwXq87TOrP+DlagzZLFKqtBYeFWMxn0cQUfjooKLxf",
   watchers: [
-    esbuild: {Esbuild, :install_and_run, [:longpi, ~w(--sourcemap=inline --watch)]},
+    # `--minify` + `--sourcemap=linked`: dev gets a prod-sized bundle (1.4 MB
+    # vs 3.5 MB unminified vs 13 MB with inline maps) so parse time on a phone
+    # is bearable, while the separate .js.map keeps full source-level
+    # debugging in devtools. Minify adds ~0ms to incremental rebuilds. The
+    # DevGzip plug then serves it at ~433 KB over the wire.
+    esbuild: {Esbuild, :install_and_run, [:longpi, ~w(--minify --sourcemap=linked --watch)]},
     tailwind: {Tailwind, :install_and_run, [:longpi, ~w(--watch)]}
   ]
 

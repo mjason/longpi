@@ -32,7 +32,12 @@ defmodule Longpi.Agent.Session do
   # real user message, which resets the count.
   @auto_turns_max 30
   # Ceiling for an explicit /loop's requested iteration count.
-  @loop_max 50
+  # A generous backstop, not a real limit: an explicit /loop is observable and
+  # cancelable at any time (the UI shows progress + a Cancel button), and a
+  # resident loop costs almost nothing on the BEAM — so the user's own count,
+  # LOOP_DONE, or Cancel is the real bound, not an arbitrary ceiling. This
+  # only stops a genuinely forgotten runaway.
+  @loop_max 1000
   # Hard ceiling on TOTAL automatic retries between user interactions. The
   # per-streak counter resets on any progress by design, so a gateway that
   # reliably fails one iteration in would otherwise retry forever (streak
@@ -476,6 +481,7 @@ defmodule Longpi.Agent.Session do
       # The first turn starts immediately even for a timed loop — the interval
       # applies BETWEEN turns.
       if state.status == :idle, do: send(self(), :continue_now)
+      state = notify_loop(state)
       {:reply, {:ok, n}, state}
     end
   end
@@ -491,7 +497,9 @@ defmodule Longpi.Agent.Session do
     state =
       if stopped? and state.status != :running, do: clear_turn_inflight(state), else: state
 
-    {:reply, {:ok, stopped?}, touch(%{state | loop: nil, auto_continue: nil})}
+    state = touch(%{state | loop: nil, auto_continue: nil})
+    state = if stopped?, do: notify_loop(state), else: state
+    {:reply, {:ok, stopped?}, state}
   end
 
   def handle_call(:loop_status, _from, state), do: {:reply, state.loop, state}
@@ -735,6 +743,7 @@ defmodule Longpi.Agent.Session do
        messages: state.messages,
        live: %{seq: state.seq, events: serialize_live(state.live)},
        status: state.status,
+       loop: loop_payload(state),
        pending_approvals: Map.keys(state.pending_approvals),
        retrying: state.retrying,
        interrupted: state.interrupted_turn?,
@@ -1136,9 +1145,12 @@ defmodule Longpi.Agent.Session do
     state = %{state | continue_timer: nil}
 
     cond do
-      state.auto_turns >= @auto_turns_max ->
+      # A pending IMPLICIT continuation (continue_later note, or a
+      # max_iterations "finish this step" self-continue) that would exceed the
+      # runaway fuse. The fuse only bounds continuation the user did NOT ask
+      # for — never an explicit /loop.
+      state.auto_continue != nil and state.auto_turns >= @auto_turns_max ->
         state = notify(state, {:loop_ended, :limit})
-        # The continuation chain is over — nothing in flight to resume.
         state = clear_turn_inflight(state)
         {:noreply, touch(%{state | loop: nil, auto_continue: nil})}
 
@@ -1146,22 +1158,30 @@ defmodule Longpi.Agent.Session do
         {{note, _delay}, state} = {state.auto_continue, %{state | auto_continue: nil}}
         inject(state, "[auto-continue #{state.auto_turns + 1}] #{note}")
 
+      # An explicit /loop: bounded by its OWN remaining count (≤ @loop_max),
+      # NOT the implicit-continuation fuse. /loop N runs all N — it's visible
+      # and cancelable, so the user's count / LOOP_DONE / Cancel is the bound.
       match?(%{remaining: r} when r > 0, state.loop) ->
         %{task: task, remaining: remaining, total: total} = state.loop
         k = total - remaining + 1
 
         state = %{state | loop: %{state.loop | remaining: remaining - 1}}
+        state = notify_loop(state)
 
-        inject(
+        inject_loop(
           state,
           "[loop #{k}/#{total}] Continue working on this task. When it is fully " <>
             "complete, put #{@loop_done_marker} on its own line in your reply:\n\n#{task}"
         )
 
-      true ->
+      state.loop != nil ->
         # Iterations ran out without LOOP_DONE — tell the UI it's over.
         state = notify(state, {:loop_ended, :exhausted})
+        state = notify_loop(%{state | loop: nil})
         {:noreply, touch(%{state | loop: nil})}
+
+      true ->
+        {:noreply, state}
     end
   end
 
@@ -1890,7 +1910,7 @@ defmodule Longpi.Agent.Session do
 
     if done? do
       state = notify(state, {:loop_ended, :done})
-      %{state | loop: nil}
+      notify_loop(%{state | loop: nil})
     else
       state
     end
@@ -1899,14 +1919,31 @@ defmodule Longpi.Agent.Session do
   # Persists and broadcasts a self-driven user message, then starts the turn.
   # Unlike send_message (where the client renders its own message optimistically)
   # nobody typed this, so the history push is the client's only source of truth.
-  defp inject(state, text) do
-    state = %{state | auto_turns: state.auto_turns + 1}
+  #
+  # `inject/2` counts toward the runaway fuse — it's for IMPLICIT continuation
+  # (continue_later, max_iterations self-continue). `inject_loop/2` does NOT:
+  # an explicit /loop is bounded by its own `remaining` count and is
+  # user-cancelable, so it must not be cut short by the fuse.
+  defp inject(state, text), do: do_inject(%{state | auto_turns: state.auto_turns + 1}, text)
+  defp inject_loop(state, text), do: do_inject(state, text)
+
+  defp do_inject(state, text) do
     user_message = Message.user(text, [])
     state = persist(state, [user_message])
     state = %{state | messages: state.messages ++ [user_message]}
     state = notify(state, history_event(state))
     {:noreply, run_turn(state, state.messages)}
   end
+
+  # Live loop progress for the UI banner (nil = no loop running). Survives a
+  # refresh via the join snapshot; pushed on every state change so the
+  # progress + Cancel affordance is always current.
+  defp loop_payload(%{loop: nil}), do: nil
+
+  defp loop_payload(%{loop: %{remaining: r, total: t, every_ms: ms}}),
+    do: %{done: t - r, total: t, every_ms: ms}
+
+  defp notify_loop(state), do: notify(state, {:loop_status, loop_payload(state)})
 
   defp run_turn(state, _messages) do
     session = self()

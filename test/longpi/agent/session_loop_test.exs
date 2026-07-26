@@ -240,18 +240,19 @@ defmodule Longpi.Agent.SessionLoopTest do
     assert_receive {:agent_event, {:loop_ended, :exhausted}}, 2_000
   end
 
-  test "the auto-turn fuse halts a loop that never declares done", %{session: session} do
+  test "an explicit loop runs ALL its iterations — the implicit fuse never cuts it short",
+       %{session: session} do
     stub(LLMMock, :stream, fn _, _, _, _, _sink ->
       {:ok, %{text: "still going, never done", tool_calls: []}}
     end)
 
-    # 50 requested iterations > the 30-turn fuse: the fuse must win.
+    # 50 > the 30-turn implicit-continuation fuse. The fuse guards continuation
+    # the user did NOT ask for; an explicit /loop is bounded by its own count
+    # (and is cancelable), so it must run all 50.
     assert {:ok, 50} = Session.start_loop(session, "endless", 50)
 
-    # Drain turn_ended events until the fuse trips and the loop dies.
     wait_for(
       fn ->
-        # Drain the mailbox so it doesn't overflow assert_receive patterns.
         receive do
           {:agent_event, _} -> nil
         after
@@ -260,7 +261,7 @@ defmodule Longpi.Agent.SessionLoopTest do
 
         Session.loop_status(session) == nil and Session.status(session) == :idle
       end,
-      400
+      600
     )
 
     loop_marks =
@@ -271,8 +272,42 @@ defmodule Longpi.Agent.SessionLoopTest do
         _ -> false
       end)
 
-    # The fuse (30 consecutive self-driven turns) capped it below the asked-for 50.
-    assert loop_marks == 30
+    assert loop_marks == 50
+  end
+
+  test "loop status is broadcast on start, each iteration, and end (UI banner + Cancel)",
+       %{session: session} do
+    {:ok, calls} = Agent.start_link(fn -> 0 end)
+
+    stub(LLMMock, :stream, fn _, _, _, _, _ ->
+      # Declare done on the 3rd turn so the loop ends cleanly.
+      if Agent.get_and_update(calls, &{&1 + 1, &1 + 1}) >= 3,
+        do: {:ok, %{text: "All finished.\nLOOP_DONE", tool_calls: []}},
+        else: {:ok, %{text: "working", tool_calls: []}}
+    end)
+
+    assert {:ok, 10} = Session.start_loop(session, "do it", 10)
+
+    # Start broadcasts a running status...
+    assert_receive {:agent_event, {:loop_status, %{done: 0, total: 10}}}, 2_000
+    # ...each iteration advances it...
+    assert_receive {:agent_event, {:loop_status, %{done: 1, total: 10}}}, 2_000
+    # ...and completion clears it (nil).
+    assert_receive {:agent_event, {:loop_status, nil}}, 3_000
+    assert_receive {:agent_event, {:loop_ended, :done}}, 500
+
+    assert Session.loop_status(session) == nil
+  end
+
+  test "cancelling a loop broadcasts a cleared status", %{session: session} do
+    stub(LLMMock, :stream, fn _, _, _, _, _ -> {:ok, %{text: "going", tool_calls: []}} end)
+
+    assert {:ok, 50} = Session.start_loop(session, "endless", 50)
+    assert_receive {:agent_event, {:loop_status, %{done: 0}}}, 2_000
+
+    assert {:ok, true} = Session.stop_loop(session)
+    assert_receive {:agent_event, {:loop_status, nil}}, 2_000
+    assert Session.loop_status(session) == nil
   end
 
   defp wait_for(fun, tries \\ 60) do

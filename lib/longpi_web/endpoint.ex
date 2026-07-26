@@ -19,6 +19,12 @@ defmodule LongpiWeb.Endpoint do
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
 
+  # Dev only: gzip the asset bundle on the fly (prod pre-compresses via
+  # phx.digest). Must sit BEFORE Plug.Static so it can answer first.
+  if code_reloading? do
+    plug LongpiWeb.Plugs.DevGzip
+  end
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),

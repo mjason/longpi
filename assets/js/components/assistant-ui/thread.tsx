@@ -178,6 +178,7 @@ const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
           >
             <ThreadScrollToBottom />
             <ThreadFollowupSuggestions />
+            <LoopBanner />
             <RetryCountdown />
             <ResumeInterrupted />
             <Composer />
@@ -543,6 +544,36 @@ const ComposerAction: FC = () => {
           </ComposerPrimitive.Cancel>
         </AuiIf>
       </div>
+    </div>
+  );
+};
+
+// A running explicit /loop: shows progress and a Cancel button. The loop is a
+// resident, observable, cancelable GenServer (cheap on the BEAM), so the user
+// — not an arbitrary cap — controls how long it runs. State lives in the
+// session, so it survives a refresh (comes back on the join reply).
+const LoopBanner: FC = () => {
+  const { t } = useI18n();
+  const loop = useConversationStore((s) => s.loop);
+  const stopLoop = useConversationStore((s) => s.stopLoop);
+
+  if (!loop) return null;
+
+  return (
+    <div className="mx-auto flex w-full max-w-(--thread-max-width) items-center gap-2 rounded-lg px-3 py-2 text-sm ring-1 ring-black/[0.06] dark:ring-white/[0.08]">
+      <RefreshCwIcon className="size-3.5 shrink-0 animate-spin [animation-duration:2s] text-muted-foreground" />
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+        {t("loop.running", { done: loop.done, total: loop.total })}
+      </span>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 shrink-0 gap-1.5 active:scale-[0.98]"
+        onClick={() => stopLoop()}
+      >
+        <SquareIcon className="size-3" />
+        {t("loop.cancel")}
+      </Button>
     </div>
   );
 };

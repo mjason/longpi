@@ -309,6 +309,32 @@ defmodule LongpiWeb.ConversationChannelTest do
     assert_push "turn_ended", %{reason: "complete"}, 3_000
   end
 
+  test "an explicit loop pushes loop_status; join carries it; Cancel clears it (wire contract)",
+       %{socket: socket, conversation: conversation} do
+    stub(LLMMock, :stream, fn _, _, _, _, _ -> {:ok, %{text: "going", tool_calls: []}} end)
+
+    {:ok, session} = Sessions.ensure_started(conversation.id)
+    {:ok, 20} = Longpi.Agent.Session.start_loop(session, "keep going", 20)
+
+    assert_push "loop_status", %{running: true, done: done, total: 20} = payload, 2_000
+    assert is_integer(done)
+    assert {:ok, _} = Jason.encode(payload)
+
+    # A fresh join mid-loop sees the running loop (survives refresh).
+    {:ok, reply, _socket2} =
+      LongpiWeb.UserSocket
+      |> socket("user2", %{})
+      |> subscribe_and_join(LongpiWeb.ConversationChannel, "conversation:#{conversation.id}")
+
+    assert %{running: true, total: 20} = reply.loop
+    assert {:ok, _} = Jason.encode(reply)
+
+    # Cancel via the exact command the UI's Cancel button sends; status clears.
+    ref = push(socket, "command", %{"name" => "loop", "arg" => "stop"})
+    assert_reply ref, :ok
+    assert_push "loop_status", %{running: false}, 2_000
+  end
+
   defp await_history_containing(text) do
     assert_push "history", %{messages: messages} = payload
 

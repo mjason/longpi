@@ -49,7 +49,7 @@ defmodule Longpi.Agent.Retry do
   # ("stream ended before message_stop"), proxy wording ("upstream connect",
   # "Provider returned error"), transport text ("socket hang up"), and the
   # generic 5xx/overload family.
-  @retryable_text ~r/overloaded|rate.?limit|too many requests|\b(429|500|502|503|504|524)\b|service.?unavailable|server.?error|internal.?error|provider.?returned.?error|network.?error|connection.?(error|refused|lost|reset)|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|socket connection was closed|timed?.?out|timeout|terminated|websocket.?(closed|error)|ended without|stream ended before|http2 request did not get a response|you can retry your request|try your request again|please retry your request|ResourceExhausted/i
+  @retryable_text ~r/overloaded|rate.?limit|too many requests|\b(429|500|502|503|504|524)\b|service.?unavailable|server.?error|internal.?error|provider.?returned.?error|network.?error|connection.?(error|refused|lost|reset)|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|socket connection was closed|connection closed|transport.?error|disconnected|:closed|timed?.?out|timeout|terminated|websocket.?(closed|error)|ended without|stream ended before|http2 request did not get a response|you can retry your request|try your request again|please retry your request|ResourceExhausted/i
 
   # Account/quota exhaustion looks 429-ish but a retry can never fix it —
   # these override the retryable patterns (also from pi).
@@ -93,7 +93,7 @@ defmodule Longpi.Agent.Retry do
   defp transport?(reason) when is_atom(reason), do: reason in @transport_reasons
 
   defp transport?(%{__struct__: mod})
-       when mod in [Req.TransportError, Mint.TransportError, Finch.Error],
+       when mod in [Req.TransportError, Mint.TransportError, Finch.Error, Finch.TransportError],
        do: true
 
   # req_llm wraps the underlying cause under :reason; unwrap one level.

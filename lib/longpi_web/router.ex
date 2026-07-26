@@ -159,6 +159,17 @@ defmodule LongpiWeb.Router do
     get "/rpc/files", ConfigController, :list_files
     get "/rpc/file", ConfigController, :file_preview
     get "/rpc/file/raw", ConfigController, :file_raw
+    # Workspace sidebar: file tree + git panel (dala's feature set).
+    get "/rpc/workspace/dir", WorkspaceController, :list_dir
+    get "/rpc/git/status", WorkspaceController, :git_status
+    get "/rpc/git/diff", WorkspaceController, :git_diff
+    get "/rpc/git/file", WorkspaceController, :git_file_at
+    get "/rpc/git/log", WorkspaceController, :git_log
+    get "/rpc/git/show", WorkspaceController, :git_show
+    post "/rpc/git/stage", WorkspaceController, :git_stage
+    post "/rpc/git/unstage", WorkspaceController, :git_unstage
+    post "/rpc/git/discard", WorkspaceController, :git_discard
+    post "/rpc/git/commit", WorkspaceController, :git_commit
     get "/rpc/auth", ConfigController, :auth_status
     post "/rpc/auth", ConfigController, :set_auth
     get "/rpc/csrf", ConfigController, :csrf
