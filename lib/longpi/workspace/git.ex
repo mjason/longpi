@@ -75,10 +75,12 @@ defmodule Longpi.Workspace.Git do
 
   # ── Internals ─────────────────────────────────────────────────────────
 
+  # Cheap root lookup (walks up for the repo) — NOT a full status walk, which
+  # is all reading a worktree file by path needs.
   defp worktree_root(cwd) do
-    case GitNif.status(cwd) do
-      {:ok, %{repo: true, root: root}} -> {:ok, %{root: root}}
-      {:ok, %{repo: false}} -> {:error, "not a git repository"}
+    case GitNif.discover(cwd) do
+      {:ok, %{repo: true, root: root}} when is_binary(root) -> {:ok, %{root: root}}
+      {:ok, _} -> {:error, "not a git repository"}
       {:error, _} = error -> error
     end
   end
