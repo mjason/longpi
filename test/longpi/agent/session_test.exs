@@ -201,6 +201,24 @@ defmodule Longpi.Agent.SessionTest do
     assert note == "⚠ Turn failed: upstream 401: invalid api key"
   end
 
+  test "a transport-close failure humanizes to a plain message (not a struct dump)", %{
+    session: session
+  } do
+    # A mid-stream gateway drop, as req_llm surfaces it — retries silently,
+    # then on give-up the persisted note must read cleanly, never the raw
+    # %Finch.TransportError{...} inspect.
+    stub(LLMMock, :stream, fn _, _, _, _, _ ->
+      {:error, %Finch.TransportError{reason: :closed, source: %Mint.TransportError{reason: :closed}}}
+    end)
+
+    assert :ok = Session.send_message(session, "hi")
+    assert_receive {:agent_event, {:turn_failed, _}}, 5_000
+
+    %{content: note} = session |> Session.messages() |> List.last()
+    assert note == "⚠ Turn failed: the model gateway dropped the connection"
+    refute note =~ "TransportError"
+  end
+
   test "a transient failure emits turn_retrying (countdown), not turn_failed", %{
     session: session
   } do

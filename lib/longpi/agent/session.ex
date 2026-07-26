@@ -308,7 +308,13 @@ defmodule Longpi.Agent.Session do
        # TOTAL retries since the last user interaction / clean completion —
        # the @turn_retry_budget ceiling (the streak counter alone can't bound
        # a fail-with-progress loop).
-       retry_total: 0
+       retry_total: 0,
+       # True while the current turn originated from the scheduler. A scheduled
+       # task fires at a fixed minute; if the gateway is down right then, the
+       # short interactive retry window would just drop it. Scheduled turns get
+       # a far more patient retry schedule so they catch up when the gateway
+       # recovers.
+       scheduled_turn?: false
      }, {:continue, :load_extensions}}
   end
 
@@ -441,7 +447,17 @@ defmodule Longpi.Agent.Session do
       state
       |> cancel_continue_timer()
       |> cancel_retry()
-      |> Map.merge(%{auto_turns: 0, turn_retries: 0, retry_total: 0, auto_continue: nil})
+      |> Map.merge(%{
+        auto_turns: 0,
+        turn_retries: 0,
+        retry_total: 0,
+        auto_continue: nil,
+        # The scheduler sends its task through this same path, prefixed
+        # "[scheduled <cron>] " — that marks the turn for the patient retry
+        # schedule; a real user message clears it.
+        scheduled_turn?: String.starts_with?(text, "[scheduled ")
+      })
+
     user_message = Message.user(text, attachments)
     state = persist(state, [user_message])
     messages = state.messages ++ [user_message]
@@ -1032,7 +1048,7 @@ defmodule Longpi.Agent.Session do
         notify_parent_done(state, :done)
         state = maybe_start_titling(state)
         state = settle_loop(state, all_messages)
-        state = schedule_continue(%{state | turn_retries: 0, retry_total: 0})
+        state = schedule_continue(%{state | turn_retries: 0, retry_total: 0, scheduled_turn?: false})
 
         # "Done" only when the CHAIN is done: a /loop or continuation still
         # has work queued — badging "finished while you were away" after
@@ -1090,10 +1106,10 @@ defmodule Longpi.Agent.Session do
         progressed? = already_persisted > 0 or new_messages != []
         streak = if progressed?, do: 0, else: state.turn_retries
         attempt = streak + 1
-        delays = retry_delays()
+        delays = retry_delays(state.scheduled_turn?)
 
         if retryable_turn?(reason) and attempt <= length(delays) and
-             state.retry_total < @turn_retry_budget do
+             state.retry_total < retry_budget(state.scheduled_turn?) do
           report_gateway(state, :error)
           delay = retry_delay_for(state, Enum.at(delays, attempt - 1))
           timer = Process.send_after(self(), :retry_turn, delay)
@@ -1791,8 +1807,22 @@ defmodule Longpi.Agent.Session do
 
   # Backoff schedule for clean turn retries: fast first probes (blips), long
   # tail (real gateway outages). ~7 minutes of total patience by default.
-  defp retry_delays,
+  # Interactive turns: fast probes, ~7 min total. Scheduled turns: the same
+  # quick probes plus a patient ~15-min-spaced tail, so a task whose fixed
+  # fire-minute lands during a gateway outage catches up once it recovers
+  # (~1 hour of total patience) instead of silently dropping.
+  defp retry_delays(false),
     do: Application.get_env(:longpi, :turn_retry_delays, [2_000, 8_000, 30_000, 90_000, 300_000])
+
+  defp retry_delays(true) do
+    Application.get_env(
+      :longpi,
+      :scheduled_retry_delays,
+      retry_delays(false) ++ [900_000, 900_000, 900_000, 900_000]
+    )
+  end
+
+  defp retry_budget(scheduled?), do: max(@turn_retry_budget, length(retry_delays(scheduled?)))
 
   # The circuit breaker knows how long the gateway has been down ACROSS all
   # sessions — never probe earlier than it advises.
@@ -1846,14 +1876,28 @@ defmodule Longpi.Agent.Session do
     do: humanize_reason(nested)
 
   defp humanize_reason(reason) when is_binary(reason) do
-    # Stream errors stringify their cause; dig the status/message back out.
-    with [_, status] <- Regex.run(~r/status: (\d+)/, reason),
-         [_, message] <- Regex.run(~r/reason: \\?"([^"\\]+)/, reason) do
-      "upstream #{status}: #{message}"
-    else
-      _ -> String.slice(reason, 0, 300)
+    cond do
+      # Transport drops stringify to a raw struct dump (Finch/Mint
+      # TransportError, connection closed/reset/timeout) — the status/message
+      # regex below can't parse them, so surface a plain message instead of an
+      # inspected struct.
+      reason =~ ~r/TransportError|connection.?(closed|reset|refused)|:closed|timed?.?out|timeout/i ->
+        "the model gateway dropped the connection"
+
+      true ->
+        # Other stream errors stringify their cause; dig the status/message out.
+        with [_, status] <- Regex.run(~r/status: (\d+)/, reason),
+             [_, message] <- Regex.run(~r/reason: \\?"([^"\\]+)/, reason) do
+          "upstream #{status}: #{message}"
+        else
+          _ -> String.slice(reason, 0, 300)
+        end
     end
   end
+
+  defp humanize_reason(%{__struct__: mod, reason: :closed})
+       when mod in [Finch.TransportError, Mint.TransportError],
+       do: "the model gateway dropped the connection"
 
   defp humanize_reason(reason) when is_exception(reason),
     do: Exception.message(reason) |> String.slice(0, 300)

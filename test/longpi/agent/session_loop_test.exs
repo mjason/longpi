@@ -433,6 +433,27 @@ defmodule Longpi.Agent.SessionLoopTest do
     assert Session.status(session) == :idle
   end
 
+  test "a scheduled task retries on the patient schedule — more attempts than interactive", %{
+    session: session
+  } do
+    {:ok, calls} = Agent.start_link(fn -> 0 end)
+
+    stub(LLMMock, :stream, fn _, _, _, _, _sink ->
+      Agent.update(calls, &(&1 + 1))
+      {:error, %{status: 503, reason: "gateway down at the scheduled minute"}}
+    end)
+
+    # The scheduler's message prefix marks the turn for the patient schedule
+    # (5 slots in test config vs 3 for interactive).
+    assert :ok = Session.send_message(session, "[scheduled 0 19 * * *] check OA")
+
+    assert_receive {:agent_event, {:turn_failed, _}}, 5_000
+    wait_for(fn -> Session.status(session) == :idle and Session.retrying(session) == nil end)
+
+    # initial attempt + 5 patient retries = 6 (interactive would be 4).
+    assert Agent.get(calls, & &1) == 6
+  end
+
   test "fail-with-progress cannot retry forever: the total budget caps it", %{
     session: session,
     tmp_dir: dir

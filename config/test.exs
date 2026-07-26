@@ -66,4 +66,8 @@ config :longpi,
        Path.join(System.tmp_dir!(), "longpi_test_global_skills_#{System.pid()}")
 config :longpi, scheduler_enabled: false
 config :longpi, turn_retry_delays: [10, 10, 10]
+# Scheduled turns get a longer schedule in prod (~15-min tail); keep it short
+# and distinguishable (5 slots) so tests can assert they retry MORE than the
+# interactive 3.
+config :longpi, scheduled_retry_delays: [10, 10, 10, 10, 10]
 config :longpi, gateway_breaker_base_ms: 5, gateway_breaker_max_ms: 20
