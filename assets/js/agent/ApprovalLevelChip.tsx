@@ -42,13 +42,15 @@ export function ApprovalLevelChip() {
         <button
           type="button"
           className={cn(
-            "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors hover:bg-accent",
+            "flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs whitespace-nowrap transition-colors hover:bg-accent",
             isFull ? "text-destructive" : "text-muted-foreground",
           )}
         >
-          <Icon className="size-4" />
-          <span>{current.label}</span>
-          <ChevronDown className="size-3.5 opacity-60" />
+          <Icon className="size-4 shrink-0" />
+          {/* Icon color already signals the level on mobile; label shows on
+              wider screens and in the dropdown. */}
+          <span className="hidden sm:inline">{current.label}</span>
+          <ChevronDown className="size-3.5 shrink-0 opacity-60" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-72">

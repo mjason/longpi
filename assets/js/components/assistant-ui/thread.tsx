@@ -474,14 +474,14 @@ const Composer: FC = () => {
 const ComposerAction: FC = () => {
   const { t } = useI18n();
   return (
-    <div className="aui-composer-action-wrapper relative flex items-center justify-between">
-      <div className="flex items-center gap-1.5">
+    <div className="aui-composer-action-wrapper relative flex items-center justify-between gap-1.5">
+      <div className="flex min-w-0 items-center gap-1.5">
         <ComposerAddAttachment />
         <ComposerModelPicker />
         <ComposerReasoningPicker />
         <ApprovalLevelChip />
       </div>
-      <div className="flex items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1.5">
         <ComposerContextMeter />
         <AuiIf condition={(s) => s.thread.capabilities.dictation}>
           <AuiIf condition={(s) => s.composer.dictation == null}>

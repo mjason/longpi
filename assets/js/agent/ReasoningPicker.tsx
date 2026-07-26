@@ -36,12 +36,14 @@ export function ComposerReasoningPicker() {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent"
+          className="flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs whitespace-nowrap text-muted-foreground transition-colors hover:bg-accent"
           title={t("composer.reasoning")}
         >
-          <Brain className="size-4" />
-          <span>{t(current.label)}</span>
-          <ChevronDown className="size-3.5 opacity-60" />
+          <Brain className="size-4 shrink-0" />
+          {/* Label hidden on the cramped mobile toolbar — icon + selection
+              color carry it; the dropdown still shows full labels on tap. */}
+          <span className="hidden sm:inline">{t(current.label)}</span>
+          <ChevronDown className="size-3.5 shrink-0 opacity-60" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-64">

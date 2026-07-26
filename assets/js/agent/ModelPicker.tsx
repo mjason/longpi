@@ -61,7 +61,9 @@ export function ModelPicker({
       variant="ghost"
       size="sm"
       // Match the 28px composer controls (attach, approval, context ring, send).
-      className="h-7"
+      // min-w-0 lets the trigger's model name truncate on a narrow mobile
+      // toolbar instead of pushing the send button off the edge.
+      className="h-7 min-w-0"
     />
   );
 }
