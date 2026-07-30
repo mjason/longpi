@@ -92,6 +92,25 @@ defmodule Longpi.Agent.ConversationTest do
     assert Ash.count!(Longpi.Agent.Compaction) == 0
   end
 
+  test "destroying a conversation removes its scheduled tasks (no orphan to self-disable)" do
+    conversation = create_conversation!()
+
+    Longpi.Agent.create_scheduled_task!(%{
+      conversation_id: conversation.id,
+      cron: "0 19 * * *",
+      task: "check OA",
+      enabled: true
+    })
+
+    assert Ash.count!(Longpi.Agent.ScheduledTask) == 1
+
+    Longpi.Agent.destroy_conversation!(conversation)
+
+    # The schedule goes with the conversation — it can no longer orphan and
+    # get error-disabled by the scheduler.
+    assert Ash.count!(Longpi.Agent.ScheduledTask) == 0
+  end
+
   test "message maps roundtrip through persistence, including tool fields" do
     conversation = create_conversation!()
     call = %{id: "tc_9", name: "read", args: %{"path" => "f.txt"}}

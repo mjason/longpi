@@ -106,23 +106,37 @@ defmodule Longpi.Agent.SchedulerTest do
       assert reloaded.last_run_at == nil
     end
 
-    test "a schedule whose conversation was deleted disables itself instead of warning forever" do
-      conversation =
-        Longpi.Agent.create_conversation!(%{cwd: System.tmp_dir!(), model: "test:model"})
+    test "an orphaned schedule (conversation gone) deletes itself, leaving no zombie row" do
+      # A schedule pointing at a conversation that doesn't exist — the state a
+      # pre-cascade delete (or any edge) could leave behind. The scheduler's
+      # safety net must remove it, not disable-and-keep it.
+      orphan_conversation_id = Ecto.UUID.generate()
 
       task =
         Longpi.Agent.create_scheduled_task!(%{
-          conversation_id: conversation.id,
+          conversation_id: orphan_conversation_id,
           cron: "* * * * *",
           task: "orphaned work"
         })
 
-      Longpi.Agent.destroy_conversation!(conversation)
-
       Scheduler.run_due_tasks(~N[2026-07-23 12:00:00])
 
-      [reloaded] = Longpi.Agent.scheduled_tasks_for!(task.conversation_id)
-      assert reloaded.enabled == false
+      assert Longpi.Agent.scheduled_tasks_for!(task.conversation_id) == []
+    end
+
+    test "deleting a conversation removes its schedule (cascade — never orphans)" do
+      conversation =
+        Longpi.Agent.create_conversation!(%{cwd: System.tmp_dir!(), model: "test:model"})
+
+      Longpi.Agent.create_scheduled_task!(%{
+        conversation_id: conversation.id,
+        cron: "* * * * *",
+        task: "work"
+      })
+
+      Longpi.Agent.destroy_conversation!(conversation)
+
+      assert Longpi.Agent.scheduled_tasks_for!(conversation.id) == []
     end
 
     test "a busy session skips this occurrence (no queueing, no crash)" do

@@ -142,12 +142,12 @@ defmodule Longpi.Agent.Scheduler do
         end
 
       {:error, reason} ->
-        disable_if_orphaned(task)
+        delete_if_orphaned(task)
         Logger.warning("scheduler: cannot start session #{task.conversation_id}: #{inspect(reason)}")
     end
   rescue
     error ->
-      disable_if_orphaned(task)
+      delete_if_orphaned(task)
       Logger.warning("scheduler: task #{task.id} failed: #{Exception.message(error)}")
   catch
     # A GenServer.call timeout or a session dying mid-call exits rather than
@@ -156,16 +156,18 @@ defmodule Longpi.Agent.Scheduler do
       Logger.warning("scheduler: task #{task.id} exited: #{inspect(reason)}")
   end
 
-  # A schedule whose conversation was deleted would otherwise warn on every
-  # matching minute forever; disable it once so the noise stops.
-  defp disable_if_orphaned(task) do
+  # Safety net: a conversation delete now cascade-deletes its schedules, but an
+  # orphan created before that (or by any edge) would otherwise error every
+  # matching minute forever — delete it, don't leave a disabled zombie row the
+  # user has to notice and clean up.
+  defp delete_if_orphaned(task) do
     case Longpi.Agent.get_conversation(task.conversation_id) do
       {:ok, _} ->
         :ok
 
       {:error, _} ->
-        Logger.warning("scheduler: disabling orphaned schedule #{task.id} (conversation gone)")
-        Longpi.Agent.update_scheduled_task!(task, %{enabled: false})
+        Logger.warning("scheduler: deleting orphaned schedule #{task.id} (conversation gone)")
+        Longpi.Agent.destroy_scheduled_task!(task)
     end
   rescue
     _ -> :ok

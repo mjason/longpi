@@ -35,6 +35,9 @@ defmodule Longpi.Agent.Conversation do
       change cascade_destroy(:children, return_notifications?: false, after_action?: false)
       change cascade_destroy(:messages, return_notifications?: false, after_action?: false)
       change cascade_destroy(:compactions, return_notifications?: false, after_action?: false)
+      # Delete the conversation's cron schedules with it — otherwise they orphan
+      # and the scheduler errors + disables them on the next matching minute.
+      change cascade_destroy(:scheduled_tasks, return_notifications?: false, after_action?: false)
 
       # Stop any live Session once the row is gone, so it can't keep running and
       # later crash trying to persist to a deleted conversation. No-op if none.
@@ -132,6 +135,9 @@ defmodule Longpi.Agent.Conversation do
   relationships do
     has_many :messages, Longpi.Agent.ConversationMessage
     has_many :compactions, Longpi.Agent.Compaction
+    # conversation_id is a plain uuid column on ScheduledTask (no FK), so this
+    # relationship exists solely to drive cascade_destroy on delete.
+    has_many :scheduled_tasks, Longpi.Agent.ScheduledTask, destination_attribute: :conversation_id
 
     # Subagent tree: children are conversations spawned by this one's agent.
     belongs_to :parent, __MODULE__ do
